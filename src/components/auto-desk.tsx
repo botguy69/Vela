@@ -22,9 +22,11 @@ import { cn } from "@/lib/utils";
 
 export function AutoDesk() {
   const qc = useQueryClient();
-  const desk = useQuery({ queryKey: ["auto"], queryFn: () => getAutoDesk() });
+  const desk = useQuery({ queryKey: ["auto"], queryFn: () => getAutoDesk(), refetchInterval: 12_000 });
   const s = desk.data?.settings;
   const refresh = () => void qc.invalidateQueries({ queryKey: ["auto"] });
+  const hosted =
+    typeof window !== "undefined" && window.location.hostname.endsWith("onrender.com");
 
   const tick = useMutation({
     mutationFn: () => runAutoTick(),
@@ -49,6 +51,7 @@ export function AutoDesk() {
       </header>
 
       <main className="mx-auto max-w-6xl px-5 py-6 sm:px-8">
+        {!hosted && (
         <div className="mb-4 rounded-lg bg-raised px-3 py-3">
           <p className="text-sm font-medium">Home Screen — Safari only</p>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted">
@@ -71,15 +74,13 @@ export function AutoDesk() {
             Copy Safari URL
           </Button>
         </div>
+        )}
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-subtle">Goal · $1,000,000 · live WEEX · no paper</p>
             <h1 className="mt-2 font-display text-4xl font-medium tracking-tight">Auto</h1>
             <p className="mt-2 max-w-xl text-sm text-muted">
-              Equity is read from WEEX. You do not type a balance. Size compounds on whatever the
-              exchange shows. First method is 1–2% margin at coin-max leverage. If that is not
-              paying, it rotates the playbook — still inside that box, still aiming at $1M. One-beta,
-              4h veto, post-only limits, time stops, trail, funding, and a 20s server loop sit on top.
+              Live WEEX equity. 1–2% margin, coin-max leverage. One BTC-direction at a time.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -125,20 +126,31 @@ export function AutoDesk() {
 
         {s?.lastTickNote && <p className="mt-4 text-sm text-muted">{s.lastTickNote}</p>}
 
+        <div className="mt-8">
+          <TicketsTable signals={desk.data?.signals ?? []} refresh={refresh} />
+        </div>
+
         <div className="mt-8 grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
           <SettingsCard />
           <KeysCard onSaved={refresh} />
         </div>
 
+        {!hosted && (
+          <div className="mt-4">
+            <PermanentDeskCard />
+          </div>
+        )}
         <div className="mt-4">
-          <PermanentDeskCard />
-        </div>
-        <div className="mt-4">
-          <KeepAliveCard />
+          <KeepAliveCard compact={hosted} />
         </div>
 
         <div className="mt-8 grid gap-4 lg:grid-cols-2">
-          <BotBreakdown />
+          <details className="rounded-xl bg-surface p-5 shadow-border">
+            <summary className="cursor-pointer text-sm font-medium">Bot breakdown</summary>
+            <div className="mt-3">
+              <BotBreakdown />
+            </div>
+          </details>
           <LegalDisclaimer />
         </div>
 
@@ -158,96 +170,119 @@ export function AutoDesk() {
         </section>
 
         <ReviewBlock />
-
-        <section className="mt-8">
-          <h2 className="font-display text-2xl font-medium tracking-tight">Tickets</h2>
-          <div className="mt-3 overflow-hidden rounded-xl bg-surface shadow-border">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-sm">
-                <thead className="text-[11px] uppercase tracking-[0.14em] text-subtle">
-                  <tr className="border-b border-line">
-                    <th className="px-4 py-3 font-medium">Pair</th>
-                    <th className="px-4 py-3 font-medium">Side</th>
-                    <th className="px-4 py-3 font-medium">Entry</th>
-                    <th className="px-4 py-3 font-medium">Takes</th>
-                    <th className="px-4 py-3 font-medium">Lev</th>
-                    <th className="px-4 py-3 font-medium">PnL</th>
-                    <th className="px-4 py-3 font-medium">Status</th>
-                    <th className="px-4 py-3 font-medium" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {(desk.data?.signals ?? []).length === 0 && (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-muted">
-                        No tickets. Store keys, then arm.
-                      </td>
-                    </tr>
-                  )}
-                  {desk.data?.signals.map((t) => (
-                    <tr key={t.id} className="border-b border-line/70 last:border-0">
-                      <td className="px-4 py-2.5 font-medium">
-                        {t.weexSymbol}
-                        <div className="text-[11px] text-subtle">cross</div>
-                      </td>
-                      <td className={cn("px-4 py-2.5 uppercase", t.side === "long" ? "text-up" : "text-down")}>
-                        {t.side}
-                      </td>
-                      <td className="px-4 py-2.5 font-mono tabular-nums">
-                        {t.entryType} {formatPx(t.fillPx ?? t.entry)}
-                      </td>
-                      <td className="px-4 py-2.5 font-mono text-xs tabular-nums">
-                        SL {formatPx(t.stop)}
-                        <div className="text-subtle">
-                          {(t.targets.length ? t.targets : [t.target]).map((px, i) => (
-                            <span key={`${px}-${i}`}>
-                              {i ? " · " : ""}TP{i + 1} {formatPx(px)}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-4 py-2.5 font-mono tabular-nums">{t.leverage}x</td>
-                      <td className={cn("px-4 py-2.5 font-mono tabular-nums", signedClass(t.pnl ?? 0))}>
-                        {t.pnl == null ? "—" : formatUsd(t.pnl)}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <Badge variant={t.status === "filled" || t.status === "working" ? "live" : "default"}>
-                          {t.beMoved ? "BE locked" : t.status}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        {(t.status === "filled" || t.status === "working") && (
-                          <button
-                            type="button"
-                            className="text-xs text-muted underline-offset-4 hover:text-fg hover:underline"
-                            onClick={() =>
-                              void flattenSignal({ data: { id: t.id } })
-                                .then((r) => {
-                                  toast.message(`Flattened · ${formatUsd(r.pnl)}`);
-                                  refresh();
-                                })
-                                .catch((err: unknown) =>
-                                  toast.error(err instanceof Error ? err.message : "Flatten failed"),
-                                )
-                            }
-                          >
-                            Flatten
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          {desk.data?.signals[0]?.thesis && (
-            <p className="mt-3 text-sm text-muted">{desk.data.signals[0].thesis}</p>
-          )}
-        </section>
       </main>
       <SiteFooter />
     </div>
+  );
+}
+
+function TicketsTable({
+  signals,
+  refresh,
+}: {
+  signals: Array<{
+    id: string;
+    weexSymbol: string;
+    side: "long" | "short";
+    entryType: string;
+    fillPx: number | null;
+    entry: number;
+    stop: number;
+    target: number;
+    targets: number[];
+    leverage: number;
+    pnl: number | null;
+    status: string;
+    beMoved: boolean;
+    thesis: string | null;
+  }>;
+  refresh: () => void;
+}) {
+  return (
+    <section>
+      <h2 className="font-display text-2xl font-medium tracking-tight">Tickets</h2>
+      <div className="mt-3 overflow-hidden rounded-xl bg-surface shadow-border">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <thead className="text-[11px] uppercase tracking-[0.14em] text-subtle">
+              <tr className="border-b border-line">
+                <th className="px-4 py-3 font-medium">Pair</th>
+                <th className="px-4 py-3 font-medium">Side</th>
+                <th className="px-4 py-3 font-medium">Entry</th>
+                <th className="px-4 py-3 font-medium">Takes</th>
+                <th className="px-4 py-3 font-medium">Lev</th>
+                <th className="px-4 py-3 font-medium">PnL</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium" />
+              </tr>
+            </thead>
+            <tbody>
+              {signals.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-4 py-10 text-center text-muted">
+                    No tickets. Store keys, then arm.
+                  </td>
+                </tr>
+              )}
+              {signals.map((t) => (
+                <tr key={t.id} className="border-b border-line/70 last:border-0">
+                  <td className="px-4 py-2.5 font-medium">
+                    {t.weexSymbol}
+                    <div className="text-[11px] text-subtle">cross</div>
+                  </td>
+                  <td className={cn("px-4 py-2.5 uppercase", t.side === "long" ? "text-up" : "text-down")}>
+                    {t.side}
+                  </td>
+                  <td className="px-4 py-2.5 font-mono tabular-nums">
+                    {t.entryType} {formatPx(t.fillPx ?? t.entry)}
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-xs tabular-nums">
+                    SL {formatPx(t.stop)}
+                    <div className="text-subtle">
+                      {(t.targets.length ? t.targets : [t.target]).map((px, i) => (
+                        <span key={`${px}-${i}`}>
+                          {i ? " · " : ""}TP{i + 1} {formatPx(px)}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 font-mono tabular-nums">{t.leverage}x</td>
+                  <td className={cn("px-4 py-2.5 font-mono tabular-nums", signedClass(t.pnl ?? 0))}>
+                    {t.pnl == null ? "—" : formatUsd(t.pnl)}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <Badge variant={t.status === "filled" || t.status === "working" ? "live" : "default"}>
+                      {t.beMoved ? "BE locked" : t.status}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {(t.status === "filled" || t.status === "working") && (
+                      <button
+                        type="button"
+                        className="text-xs text-muted underline-offset-4 hover:text-fg hover:underline"
+                        onClick={() =>
+                          void flattenSignal({ data: { id: t.id } })
+                            .then((r) => {
+                              toast.message(`Flattened · ${formatUsd(r.pnl)}`);
+                              refresh();
+                            })
+                            .catch((err: unknown) =>
+                              toast.error(err instanceof Error ? err.message : "Flatten failed"),
+                            )
+                        }
+                      >
+                        Flatten
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {signals[0]?.thesis && <p className="mt-3 text-sm text-muted">{signals[0].thesis}</p>}
+    </section>
   );
 }
 

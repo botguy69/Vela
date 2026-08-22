@@ -267,9 +267,27 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       select * from auto_signals where user_id = ${context.userId}
       order by created_at desc limit 40
     `;
+    const mapped = signals.map(mapSignal);
+    const { getWeexLast } = await import("@/lib/weex-market.server");
+    const lastBy = new Map<string, number>();
+    for (const t of mapped) {
+      if (t.status !== "filled" && t.status !== "working") continue;
+      if (!lastBy.has(t.weexSymbol)) {
+        try {
+          lastBy.set(t.weexSymbol, await getWeexLast(t.weexSymbol));
+        } catch {
+          lastBy.set(t.weexSymbol, 0);
+        }
+      }
+      const last = lastBy.get(t.weexSymbol) ?? 0;
+      const entry = t.fillPx ?? t.entry;
+      if (last > 0 && entry > 0) {
+        t.pnl = t.side === "short" ? (entry - last) * t.qty : (last - entry) * t.qty;
+      }
+    }
     return {
       settings: publicSettings(settings!, stats, live, pulled.error),
-      signals: signals.map(mapSignal),
+      signals: mapped,
       universe: await (await import("@/lib/weex-market.server")).universeCard(),
     };
   });
