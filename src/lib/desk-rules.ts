@@ -18,9 +18,10 @@ export function blocksBeta(
 ): boolean {
   const net = open.reduce((s, p) => s + signedBeta(p.weex, p.side), 0);
   const add = signedBeta(next.weex, next.side);
-  if (net > 0.2 && add < 0) return true;
-  if (net < -0.2 && add > 0) return true;
+  // Hedge is allowed: long one name, short another.
   if (Math.abs(add) <= 0.3) return false;
+  const sameWay = (net > 0 && add > 0) || (net < 0 && add < 0);
+  if (!sameWay) return false;
   return Math.abs(net + add) > 1.15 && Math.abs(net + add) > Math.abs(net);
 }
 

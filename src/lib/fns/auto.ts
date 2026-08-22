@@ -875,7 +875,9 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             scanUniverse(books, corrected.style, corrected.minRr, corrected.method),
             ledger,
           );
-          const raw = equity < STAGE2_USD ? rawAll.filter((s) => CORE_SET.has(s.weexSymbol)) : rawAll;
+          const raw = corrected.id === "grow"
+            ? rawAll.filter((s) => CORE_SET.has(s.weexSymbol))
+            : rawAll;
           const busy = new Set(stillOpen.map((s) => s.weex_symbol));
           const betaBook = stillOpen.map((s) => ({
             weex: s.weex_symbol,
@@ -906,8 +908,8 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side })) {
               const held = stillOpen[0];
               veto = held
-                ? `Already ${held.side} ${held.weex_symbol}. Not stacking another ${pick.side}.`
-                : "Book already has that side.";
+                ? `Already ${held.side} ${held.weex_symbol}. Not adding another ${pick.side} on the same beta.`
+                : "Same-way beta is full.";
               continue;
             }
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);

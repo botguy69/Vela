@@ -56,11 +56,11 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       name: "Stage 1",
       marginPct: 2,
       style: "scalp",
-      maxOpen: 1,
+      maxOpen: 2,
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: high-prob scalps (70%+ conf, 1.9R+) to $1,000.",
+      note: "Stage 1: full list. High-prob scalps to $1,000. Long + short ok. Not two same-way BTC bets.",
     };
   }
   if (equity < 1000) {
@@ -69,11 +69,11 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       name: "Stage 1",
       marginPct: 2,
       style: "scalp",
-      maxOpen: 1,
+      maxOpen: 2,
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: high-prob scalps to $1,000. One ticket, BTC ETH SOL XRP BNB only.",
+      note: "Stage 1: full list to $1,000. Can be long one name and short another.",
     };
   }
   return {
