@@ -339,3 +339,30 @@ export function shouldLockBreakeven(opts: {
     firstTake != null && (opts.side === "long" ? opts.last >= firstTake : opts.last <= firstTake);
   return hitFirst || r >= 1;
 }
+
+/** Realized takes + mark on leftover. After TP1 the last print sits near entry — that is not the whole ticket. */
+export function ticketPnl(opts: {
+  side: Side;
+  entry: number;
+  last: number;
+  qty: number;
+  leftover?: number | null;
+  targets: number[];
+  beMoved: boolean;
+}): number {
+  const orig = opts.qty;
+  if (!(orig > 0) || !(opts.entry > 0)) return 0;
+  const favor = (px: number, q: number) =>
+    opts.side === "short" ? (opts.entry - px) * q : (px - opts.entry) * q;
+  const assumedLeft = opts.beMoved ? orig * 0.5 : orig;
+  const left =
+    opts.leftover != null && Number.isFinite(opts.leftover) && opts.leftover >= 0
+      ? opts.leftover
+      : assumedLeft;
+  const tp1 = opts.targets[0];
+  const closed = Math.max(0, orig - left);
+  let realized = 0;
+  if (closed > 0 && tp1 != null) realized += favor(tp1, closed);
+  else if (opts.beMoved && tp1 != null) realized += favor(tp1, orig * 0.5);
+  return realized + favor(opts.last, left);
+}

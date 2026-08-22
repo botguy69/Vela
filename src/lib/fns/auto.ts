@@ -274,7 +274,17 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     `;
     const mapped = signals.map(mapSignal);
     const { getWeexLast } = await import("@/lib/weex-market.server");
+    const { ticketPnl } = await import("@/lib/ta");
     const lastBy = new Map<string, number>();
+    const leftBy = new Map<string, number>();
+    if (settings) {
+      const creds = await credsFrom(settings);
+      if (creds) {
+        const { listWeexPositions } = await import("@/lib/weex.server");
+        const livePos = await listWeexPositions(creds).catch(() => []);
+        for (const p of livePos) leftBy.set(p.symbol, p.qty);
+      }
+    }
     for (const t of mapped) {
       if (t.status !== "filled" && t.status !== "working") continue;
       if (!lastBy.has(t.weexSymbol)) {
@@ -287,7 +297,15 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       const last = lastBy.get(t.weexSymbol) ?? 0;
       const entry = t.fillPx ?? t.entry;
       if (last > 0 && entry > 0) {
-        t.pnl = t.side === "short" ? (entry - last) * t.qty : (last - entry) * t.qty;
+        t.pnl = ticketPnl({
+          side: t.side,
+          entry,
+          last,
+          qty: t.qty,
+          leftover: leftBy.get(t.weexSymbol) ?? null,
+          targets: t.targets,
+          beMoved: t.beMoved,
+        });
       }
     }
     return {
