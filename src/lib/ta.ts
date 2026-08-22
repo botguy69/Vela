@@ -133,8 +133,8 @@ export function analyzeMarket(
     });
   }
 
-  // Continuation scalp: with the 21h mean, not a vertical chase.
-  if (up && r >= 42 && r <= 66 && last <= mid + 1.2 * a && last >= mid * 0.998) {
+  // Continuation: with the mean, not already 1 ATR into the spike.
+  if (up && r >= 42 && r <= 62 && last <= mid + 0.85 * a && last >= mid * 0.998) {
     const entry = Math.min(last, fast + 0.1 * a);
     const stop = Math.min(lo, mid) - stopPad * a * 0.4;
     ideas.push({
@@ -149,7 +149,7 @@ export function analyzeMarket(
     });
   }
 
-  if (down && r >= 34 && r <= 58 && last >= mid - 1.2 * a && last <= mid * 1.002) {
+  if (down && r >= 38 && r <= 58 && last >= mid - 0.85 * a && last <= mid * 1.002) {
     const entry = Math.max(last, fast - 0.1 * a);
     const stop = Math.max(hi, mid) + stopPad * a * 0.4;
     ideas.push({
@@ -194,7 +194,14 @@ export function analyzeMarket(
     });
   }
 
-  const brokeHigh = last > hi && fast > mid && r > 50 && r < 76;
+  const lastBar = hourly[hourly.length - 1]!;
+  const lastRange = lastBar.high - lastBar.low;
+  const exhausted = lastRange > 2.15 * a;
+  const vols = hourly.slice(-20).map((c) => c.volume).filter((v) => v > 0).sort((x, y) => x - y);
+  const medVol = vols.length ? vols[Math.floor(vols.length / 2)]! : 0;
+  const thinBreak = medVol > 0 && lastBar.volume < 0.75 * medVol;
+
+  const brokeHigh = !exhausted && !thinBreak && last > hi && fast > mid && r > 50 && r < 72;
   if (brokeHigh) {
     const entry = last;
     const stop = mid - 0.4 * a;
@@ -210,7 +217,7 @@ export function analyzeMarket(
     });
   }
 
-  const brokeLow = last < lo && fast < mid && r < 50 && r > 24;
+  const brokeLow = !exhausted && !thinBreak && last < lo && fast < mid && r < 50 && r > 28;
   if (brokeLow) {
     const entry = last;
     const stop = mid + 0.4 * a;
@@ -318,8 +325,10 @@ export function shouldLockBreakeven(opts: {
   last: number;
   targets: number[];
   already: boolean;
+  reduced?: boolean;
 }): boolean {
   if (opts.already || opts.entry <= 0) return false;
+  if (opts.reduced) return true;
   if (Math.abs(opts.stop - opts.entry) / opts.entry < 0.001) return false;
   const risk = Math.abs(opts.entry - opts.stop);
   if (risk <= 0) return false;

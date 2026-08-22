@@ -53,6 +53,17 @@ export function htfAllows(side: Side, fourHour: Candle[]): boolean {
   return last <= mid * 1.003;
 }
 
+/** 15m mean must not be selling a 1h long (and reverse). */
+export function ltfAllows(side: Side, fifteen: Candle[]): boolean {
+  if (fifteen.length < 24) return true;
+  const closes = fifteen.map((c) => c.close);
+  const mid = sma(closes, 21);
+  const last = closes[closes.length - 1];
+  if (mid == null || last == null) return true;
+  if (side === "long") return last >= mid * 0.996;
+  return last <= mid * 1.004;
+}
+
 export function spreadBps(bid: number, ask: number): number {
   const mid = (bid + ask) / 2;
   if (!(mid > 0)) return 999;

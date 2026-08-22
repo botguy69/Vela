@@ -551,6 +551,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
 
       const tps = parseNums(pos.targets);
       let mark = px;
+      let reduced = false;
       if (pos.status === "filled" && !pos.be_moved) {
         const sinceMs = new Date(pos.filled_at ?? pos.created_at).getTime();
         const minutes = await getWeexKlines(pos.weex_symbol, "1m", 120).catch(() => []);
@@ -563,6 +564,12 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             ? Math.max(px, ...after.map((c) => c.high))
             : Math.min(px, ...after.map((c) => c.low));
         }
+        const credsForPos = await credsFrom(settings);
+        if (credsForPos) {
+          const { getWeexPositionQty } = await import("@/lib/weex.server");
+          const left = await getWeexPositionQty(credsForPos, pos.weex_symbol);
+          if (left != null && n(pos.qty) > 0 && left < n(pos.qty) * 0.72) reduced = true;
+        }
       }
       if (
         shouldLockBreakeven({
@@ -572,6 +579,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           last: mark,
           targets: tps,
           already: Boolean(pos.be_moved),
+          reduced,
         })
       ) {
         const be = breakevenPrice(side, entry);
@@ -732,12 +740,20 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           for (const pick of raw) {
             if (busy.has(pick.weexSymbol)) continue;
             if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side })) {
-              veto = "One-beta: book already has that side.";
+              const held = stillOpen[0];
+              veto = held
+                ? `Already ${held.side} ${held.weex_symbol}. Not stacking another ${pick.side}.`
+                : "Book already has that side.";
               continue;
             }
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
             if (!rules.htfAllows(pick.side, h4)) {
               veto = `HTF veto ${pick.weexSymbol}`;
+              continue;
+            }
+            const m15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
+            if (!rules.ltfAllows(pick.side, m15)) {
+              veto = `15m against ${pick.weexSymbol}`;
               continue;
             }
             const book = await getBookTicker(pick.weexSymbol);

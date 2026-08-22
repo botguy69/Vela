@@ -185,6 +185,44 @@ export async function getWeexEquity(creds: WeexCreds): Promise<
   return { ok: false, error: "WEEX answered but no USDT futures row. Deposit USDT to futures, not spot.", status: 200 };
 }
 
+function positionQtyFrom(raw: unknown, symbol: string): number | null {
+  const rows = rowsFrom(raw);
+  const hit = rows.find((row) => {
+    const r = row as { symbol?: string; contract?: string };
+    const s = r.symbol ?? r.contract ?? "";
+    return s === symbol || s.replace("_", "") === symbol;
+  }) ?? rows[0];
+  if (!hit || typeof hit !== "object") return null;
+  const r = hit as {
+    positionAmt?: string;
+    holdVol?: string;
+    total?: string;
+    size?: string;
+    available?: string;
+    positionSize?: string;
+  };
+  const q = Number(r.positionAmt ?? r.holdVol ?? r.positionSize ?? r.size ?? r.total ?? r.available);
+  return Number.isFinite(q) ? Math.abs(q) : null;
+}
+
+export async function getWeexPositionQty(
+  creds: WeexCreds,
+  symbol: string,
+): Promise<number | null> {
+  const paths = [
+    { path: "/capi/v3/account/positions", query: { symbol } },
+    { path: "/capi/v3/positionRisk", query: { symbol } },
+    { path: "/capi/v2/position", query: { symbol } },
+  ];
+  for (const p of paths) {
+    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
+    if (!res.ok) continue;
+    const q = positionQtyFrom(res.data, symbol);
+    if (q != null) return q;
+  }
+  return null;
+}
+
 export async function setCrossMaxLeverage(creds: WeexCreds, symbol: string, leverage: number) {
   const margin = await weexRequest({
     creds,
