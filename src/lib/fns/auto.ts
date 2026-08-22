@@ -634,22 +634,32 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
 
       const since = pos.filled_at ?? pos.created_at;
+      const credsNow = await credsFrom(settings);
+      let left: number | null = null;
+      if (credsNow) {
+        const { getWeexPositionQty } = await import("@/lib/weex.server");
+        left = await getWeexPositionQty(credsNow, pos.weex_symbol);
+      }
       if (
         !hitStop &&
         !hitTp &&
         rules.shouldTimeStopFill({ since, style, side, entry, last: px, stop })
       ) {
-        const creds = await credsFrom(settings);
-        if (creds) {
+        if (credsNow && (left == null || left > 0)) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));
           const { flattenWeex } = await import("@/lib/weex.server");
-          await flattenWeex(creds, {
+          const qty = left != null && left > 0 ? left : n(pos.qty);
+          const sent = await flattenWeex(credsNow, {
             symbol: pos.weex_symbol,
             side: side === "short" ? "BUY" : "SELL",
             positionSide: side === "short" ? "SHORT" : "LONG",
-            quantity: formatWeexQty(n(pos.qty), spec.quantityPrecision),
+            quantity: formatWeexQty(qty, spec.quantityPrecision),
             clientOid: `velatm${pos.id}${Date.now().toString(36)}`.slice(0, 36),
           });
+          if (!sent.ok) {
+            notes.push(`${pos.weex_symbol} time-stop flatten failed: ${sent.error.slice(0, 80)}`);
+            continue;
+          }
         }
         const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
         await sql`
@@ -664,6 +674,12 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
 
       if (hitStop || hitTp) {
+        if (left != null && left > 0) {
+          notes.push(
+            `${pos.weex_symbol} last tagged ${hitStop ? "SL" : "TP"} but WEEX still holds ${left}`,
+          );
+          continue;
+        }
         const exit = hitStop ? stop : target;
         const pnl = side === "long" ? (exit - entry) * n(pos.qty) : (entry - exit) * n(pos.qty);
         await sql`
@@ -675,6 +691,40 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         streak = pnl >= 0 ? 0 : streak + 1;
         closed += 1;
         notes.push(`${pos.weex_symbol} ${hitStop ? "stopped" : "took profit"} ${pnl.toFixed(2)}`);
+      }
+    }
+
+    const credsLive = await credsFrom(settings);
+    if (credsLive) {
+      const { listWeexPositions } = await import("@/lib/weex.server");
+      const livePos = await listWeexPositions(credsLive);
+      for (const lp of livePos) {
+        const [row] = await sql<SignalRow>`
+          select * from auto_signals
+          where user_id = ${userId} and weex_symbol = ${lp.symbol}
+          order by created_at desc
+          limit 1
+        `;
+        if (!row) continue;
+        if (row.status === "filled" || row.status === "working" || row.status === "proposed") {
+          if (lp.qty > 0 && n(row.qty) > 0 && lp.qty < n(row.qty) * 0.98) {
+            await sql`update auto_signals set qty = ${lp.qty}, updated_at = now() where id = ${row.id}`;
+          }
+          continue;
+        }
+        const fill = n(row.fill_px) || lp.entry || n(row.entry);
+        await sql`
+          update auto_signals
+          set status = 'filled',
+              qty = ${lp.qty},
+              fill_px = ${fill},
+              closed_px = null,
+              pnl = null,
+              filled_at = ${row.filled_at ?? new Date().toISOString()},
+              updated_at = now()
+          where id = ${row.id} and user_id = ${userId}
+        `;
+        notes.push(`Reopened ${lp.symbol} — still live on WEEX`);
       }
     }
 

@@ -185,24 +185,58 @@ export async function getWeexEquity(creds: WeexCreds): Promise<
   return { ok: false, error: "WEEX answered but no USDT futures row. Deposit USDT to futures, not spot.", status: 200 };
 }
 
+function parsePosition(row: unknown): { symbol: string; side: "long" | "short"; qty: number; entry: number } | null {
+  if (!row || typeof row !== "object") return null;
+  const r = row as {
+    symbol?: string;
+    contract?: string;
+    positionAmt?: string | number;
+    holdVol?: string | number;
+    total?: string | number;
+    size?: string | number;
+    available?: string | number;
+    positionSize?: string | number;
+    positionSide?: string;
+    holdSide?: string;
+    side?: string;
+    entryPrice?: string | number;
+    openPriceAvg?: string | number;
+    averagePrice?: string | number;
+  };
+  const symbol = String(r.symbol ?? r.contract ?? "").replace("_", "");
+  const q = Math.abs(Number(r.positionAmt ?? r.holdVol ?? r.positionSize ?? r.size ?? r.total ?? 0));
+  if (!symbol || !Number.isFinite(q) || q <= 0) return null;
+  const sideRaw = String(r.positionSide ?? r.holdSide ?? r.side ?? "").toLowerCase();
+  const amt = Number(r.positionAmt);
+  const side: "long" | "short" =
+    sideRaw.includes("short") || amt < 0 ? "short" : "long";
+  const entry = Number(r.entryPrice ?? r.openPriceAvg ?? r.averagePrice ?? 0);
+  return { symbol, side, qty: q, entry: Number.isFinite(entry) ? entry : 0 };
+}
+
 function positionQtyFrom(raw: unknown, symbol: string): number | null {
   const rows = rowsFrom(raw);
-  const hit = rows.find((row) => {
-    const r = row as { symbol?: string; contract?: string };
-    const s = r.symbol ?? r.contract ?? "";
-    return s === symbol || s.replace("_", "") === symbol;
-  }) ?? rows[0];
-  if (!hit || typeof hit !== "object") return null;
-  const r = hit as {
-    positionAmt?: string;
-    holdVol?: string;
-    total?: string;
-    size?: string;
-    available?: string;
-    positionSize?: string;
-  };
-  const q = Number(r.positionAmt ?? r.holdVol ?? r.positionSize ?? r.size ?? r.total ?? r.available);
-  return Number.isFinite(q) ? Math.abs(q) : null;
+  const hit = rows
+    .map(parsePosition)
+    .find((p) => p && (p.symbol === symbol || p.symbol.replace("_", "") === symbol));
+  return hit?.qty ?? null;
+}
+
+export async function listWeexPositions(
+  creds: WeexCreds,
+): Promise<{ symbol: string; side: "long" | "short"; qty: number; entry: number }[]> {
+  const paths = [
+    { path: "/capi/v3/account/positions", query: undefined as Record<string, string> | undefined },
+    { path: "/capi/v3/positionRisk", query: undefined },
+    { path: "/capi/v2/position", query: undefined },
+  ];
+  for (const p of paths) {
+    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
+    if (!res.ok) continue;
+    const parsed = rowsFrom(res.data).map(parsePosition).filter((x): x is NonNullable<typeof x> => x != null);
+    if (parsed.length) return parsed;
+  }
+  return [];
 }
 
 export async function getWeexPositionQty(
