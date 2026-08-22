@@ -85,10 +85,37 @@ export function fillMaxAgeMs(style: Style): number {
   return style === "scalp" ? 8 * 3600_000 : 20 * 3600_000;
 }
 
+export function chopTakeMs(style: Style): number {
+  return style === "scalp" ? 16 * 3600_000 : 40 * 3600_000;
+}
+
 export function shouldCancelStaleLimit(createdAt: string | Date, style: Style): boolean {
   const t = new Date(createdAt).getTime();
   if (!Number.isFinite(t)) return false;
   return Date.now() - t > limitMaxAgeMs(style);
+}
+
+/** Red/dead → flatten. Small green → lock fee-BE. Runners and BE leftovers → hold. */
+export function chopAction(opts: {
+  since: string | Date;
+  style: Style;
+  side: Side;
+  entry: number;
+  last: number;
+  stop: number;
+  beMoved: boolean;
+}): "hold" | "flatten" | "lockBe" {
+  if (opts.beMoved) return "hold";
+  const t = new Date(opts.since).getTime();
+  if (!Number.isFinite(t)) return "hold";
+  const age = Date.now() - t;
+  if (age < fillMaxAgeMs(opts.style)) return "hold";
+  const risk = Math.abs(opts.entry - opts.stop);
+  const favor = opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last;
+  const r = risk > 0 ? favor / risk : 0;
+  if (r <= 0) return "flatten";
+  if (age >= chopTakeMs(opts.style)) return "flatten";
+  return "lockBe";
 }
 
 export function shouldTimeStopFill(opts: {
@@ -99,12 +126,14 @@ export function shouldTimeStopFill(opts: {
   last: number;
   stop: number;
 }): boolean {
-  const t = new Date(opts.since).getTime();
-  if (!Number.isFinite(t) || Date.now() - t < fillMaxAgeMs(opts.style)) return false;
-  const risk = Math.abs(opts.entry - opts.stop);
-  if (risk <= 0) return true;
-  const favor = opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last;
-  return favor / risk < 0.3;
+  return (
+    chopAction({ ...opts, beMoved: false }) === "flatten"
+  );
+}
+
+/** Alts don't long into a BTC 15m dump (and reverse). */
+export function btcLeads(side: Side, btc15: Candle[]): boolean {
+  return ltfAllows(side, btc15);
 }
 
 export function trailStop(opts: {

@@ -740,9 +740,44 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
       if (
         !hitStop &&
-        !hitTp &&
-        rules.shouldTimeStopFill({ since, style, side, entry, last: px, stop })
+        !hitTp
       ) {
+        const act = rules.chopAction({
+          since,
+          style,
+          side,
+          entry,
+          last: px,
+          stop,
+          beMoved: Boolean(pos.be_moved),
+        });
+        if (act === "lockBe" && !pos.be_moved) {
+          const spec = await specFor(coinByWeex(pos.weex_symbol));
+          const be = breakevenPrice(side, entry);
+          const creds = credsNow ?? (await credsFrom(settings));
+          let moved = false;
+          if (creds) {
+            const { moveWeexStop } = await import("@/lib/weex.server");
+            const sent = await moveWeexStop(creds, {
+              symbol: pos.weex_symbol,
+              positionSide: side === "short" ? "SHORT" : "LONG",
+              stop: formatWeexPx(be, spec.pricePrecision),
+              clientOid: `velabe${pos.id}${Date.now().toString(36)}`.slice(0, 36),
+            });
+            moved = sent.ok;
+            if (!sent.ok) notes.push(`${pos.weex_symbol} chop BE failed: ${sent.error.slice(0, 80)}`);
+          }
+          if (moved || !creds) {
+            await sql`
+              update auto_signals
+              set stop = ${be}, be_moved = true, updated_at = now()
+              where id = ${pos.id} and user_id = ${userId}
+            `;
+            if (moved) notes.push(`${pos.weex_symbol} chop → WEEX BE (fees covered). Slot free.`);
+          }
+          continue;
+        }
+        if (act === "flatten") {
         if (credsNow && (left == null || left > 0)) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));
           const { flattenWeex } = await import("@/lib/weex.server");
@@ -763,7 +798,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         const why =
           pnl < 0
             ? "Sold at a loss to move on — went nowhere"
-            : "Time stop — flattened, dead tape";
+            : "Took the chop — 16h, no TP1";
         await sql`
           update auto_signals
           set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
@@ -774,6 +809,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         closed += 1;
         notes.push(`${pos.weex_symbol} ${why}`);
         continue;
+        }
       }
 
       if (hitStop || hitTp) {
@@ -909,6 +945,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             }
             btcRsi = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
           }
+          const btc15 = await getWeexKlines("BTCUSDT", "15m", 48).catch(() => []);
           let veto = raw.length
             ? `Setups seen (${raw.length}), none passed HTF/spread/funding/size. BTC RSI ${btcRsi.toFixed(0)} ATR ${regime.ratio.toFixed(1)}×.`
             : `No setup. BTC RSI ${btcRsi.toFixed(0)} last ${btcLast?.toFixed(0) ?? "?"} ATR ${regime.ratio.toFixed(1)}×.`;
@@ -930,6 +967,15 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             const m15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
             if (!rules.ltfAllows(pick.side, m15)) {
               veto = `15m against ${pick.weexSymbol}`;
+              continue;
+            }
+            if (pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
+              veto = `BTC 15m against ${pick.side} ${pick.weexSymbol}`;
+              continue;
+            }
+            const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
+            if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
+              veto = `Daily veto ${pick.weexSymbol}`;
               continue;
             }
             const book = await getBookTicker(pick.weexSymbol);
