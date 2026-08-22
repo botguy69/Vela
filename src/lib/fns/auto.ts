@@ -21,6 +21,7 @@ type SettingsRow = {
   goal_usd: string | number | null;
   peak_usd: string | number | null;
   loss_streak: number | null;
+  win_streak: number | null;
   last_correction: string | null;
   keep_alive: boolean | null;
   last_cron_at: string | null;
@@ -95,6 +96,8 @@ function livePhase(
   return adaptMethod({
     phase: phaseForRun(equity, Boolean(row.continue_to_goal)),
     lossStreak: row.loss_streak ?? 0,
+    winStreak: row.win_streak ?? 0,
+    lastMargin: n(row.risk_pct) || 2,
     drawdownPct: dd,
     closed: stats.closed,
     wins: stats.wins,
@@ -607,6 +610,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     let opened = 0;
     let equity = pub.accountUsd;
     let streak = pub.lossStreak;
+    let winStreak = n((settings as SettingsRow).win_streak) || 0;
     let peak = pub.peakUsd;
 
     for (const pos of open) {
@@ -766,6 +770,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           where id = ${pos.id} and user_id = ${userId}
         `;
         streak = pnl >= 0 ? 0 : streak + 1;
+        winStreak = pnl >= 0 ? winStreak + 1 : 0;
         closed += 1;
         notes.push(`${pos.weex_symbol} ${why}`);
         continue;
@@ -788,6 +793,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           where id = ${pos.id} and user_id = ${userId}
         `;
         streak = pnl >= 0 ? 0 : streak + 1;
+        winStreak = pnl >= 0 ? winStreak + 1 : 0;
         closed += 1;
         notes.push(`${pos.weex_symbol} ${why} ${pnl.toFixed(2)}`);
       }
@@ -840,6 +846,8 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     const corrected = adaptMethod({
       phase: phaseForRun(equity, Boolean(settings.continue_to_goal)),
       lossStreak: streak,
+      winStreak,
+      lastMargin: n(settings.risk_pct) || 2,
       drawdownPct: peak > 0 ? ((peak - equity) / peak) * 100 : 0,
       closed: afterStats.closed,
       wins: stats.wins,
@@ -1042,6 +1050,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           account_usd = ${equity},
           peak_usd = ${peak},
           loss_streak = ${streak},
+          win_streak = ${winStreak},
           risk_pct = ${corrected.marginPct},
           min_rr = ${corrected.minRr},
           max_open = ${corrected.maxOpen},
@@ -1103,9 +1112,10 @@ export const flattenSignal = createServerFn({ method: "POST" })
     const next = Math.max(5, n(settings?.account_usd) + pnl);
     const peak = Math.max(n(settings?.peak_usd) || next, next);
     const streak = pnl >= 0 ? 0 : (settings?.loss_streak ?? 0) + 1;
+    const winStreak = pnl >= 0 ? (settings?.win_streak ?? 0) + 1 : 0;
     await sql`
       update auto_settings
-      set account_usd = ${next}, peak_usd = ${peak}, loss_streak = ${streak}
+      set account_usd = ${next}, peak_usd = ${peak}, loss_streak = ${streak}, win_streak = ${winStreak}
       where user_id = ${context.userId}
     `;
     return { pnl };

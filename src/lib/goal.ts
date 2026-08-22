@@ -60,7 +60,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: full list. High-prob scalps to $1,000. Long + short ok. Not two same-way BTC bets.",
+      note: "Stage 1: full list. 2% margin. After TP1/BE, next ticket can open — up to 6 live.",
     };
   }
   if (equity < 1000) {
@@ -73,7 +73,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: full list to $1,000. Long + short ok. After TP1/BE, the next ticket can open — up to 6 live.",
+      note: "Stage 1: 2% until three losses, then 1.2% until two wins. BE compounding up to 6.",
     };
   }
   return {
@@ -85,7 +85,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
     minRr: 1.9,
     minConf: 70,
     method: "trend",
-    note: "Stage 2: $1k → $10k. Same high-prob bar. Majors only. Second ticket only if it isn’t the same beta. Stop at $10k.",
+    note: "Stage 2: $1k → $10k. Same 2% / 1.2% size rules. Majors only. Stop at $10k.",
   };
 }
 
@@ -125,6 +125,8 @@ export function phaseForRun(equity: number, continueToGoal: boolean): Phase {
 export function adaptMethod(opts: {
   phase: Phase;
   lossStreak: number;
+  winStreak: number;
+  lastMargin: number;
   drawdownPct: number;
   closed: number;
   wins: number;
@@ -143,29 +145,28 @@ export function adaptMethod(opts: {
     }
   }
 
-  // Size cools. Slot count does not — BE compounding still works.
+  next = { ...next, marginPct: 2 };
+
+  const recovering = opts.lastMargin < 1.95 && opts.winStreak < 2;
   if (opts.drawdownPct >= 30) {
     next = {
       ...next,
       marginPct: 1,
-      maxOpen: 1,
-      minRr: Math.max(next.minRr, 2),
-      minConf: Math.min(82, next.minConf + 6),
-      note: `${next.note} Book is ~30% off peak. One at-risk at 1% until equity heals.`,
+      minConf: Math.min(82, next.minConf + 4),
+      note: `${next.note} ~30% off peak. 1% size until two wins.`,
     };
   } else if (opts.lossStreak >= 5) {
     next = {
       ...next,
       marginPct: 1,
-      minConf: Math.min(82, next.minConf + 4),
-      note: `${next.note} Five losses: still two at-risk, 1% margin, higher conf.`,
+      minConf: Math.min(82, next.minConf + 3),
+      note: `${next.note} Five losses. 1% size. Two wins to get back to 2%.`,
     };
-  } else if (opts.lossStreak >= 4) {
+  } else if (opts.lossStreak >= 3 || recovering) {
     next = {
       ...next,
-      marginPct: Math.min(next.marginPct, 1.2),
-      minConf: Math.min(82, next.minConf + 2),
-      note: `${next.note} Four losses: 1.2% size, still two at-risk.`,
+      marginPct: 1.2,
+      note: `${next.note} Risk cut to 1.2% after three losses. Two wins restores 2%.`,
     };
   }
   return next;
