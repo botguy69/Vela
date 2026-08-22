@@ -245,3 +245,52 @@ export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
   if (filtered.length) return filtered;
   return ranked;
 }
+
+export function writeDeskNote(opts: {
+  phase: string;
+  equity: number;
+  marginPct: number;
+  correction: string;
+  tickets: {
+    symbol: string;
+    side: string;
+    leverage: number;
+    entry: number;
+    stop: number;
+    target: number;
+    last: number;
+    beMoved: boolean;
+    status: string;
+    targets: number[];
+  }[];
+}): string {
+  const eq = opts.equity;
+  const lines: string[] = [];
+  lines.push(
+    `${opts.phase}. Equity $${eq.toFixed(2)}. Margin cap ${opts.marginPct.toFixed(1)}% of the WEEX wallet, coin-max lev, cross. The stop is the SL — not isolated-style “liq in 0.25%.” Unused wallet backs the ticket. Residual risk is a gap through the SL, not liquidation before it.`,
+  );
+  if (!opts.tickets.length) {
+    lines.push("Nothing on. Waiting for a setup that clears 4h + 15m + spread + one-beta.");
+    if (opts.correction) lines.push(opts.correction);
+    return lines.join(" ");
+  }
+  for (const t of opts.tickets) {
+    const risk = Math.abs(t.entry - t.stop);
+    const favor = t.side === "short" ? t.entry - t.last : t.last - t.entry;
+    const r = risk > 0 ? favor / risk : 0;
+    const tp1 = t.targets[0] ?? t.target;
+    const hitTp1 =
+      tp1 > 0 && (t.side === "short" ? t.last <= tp1 : t.last >= tp1);
+    let action = "Hold.";
+    if (t.status === "working") action = "Limit working. Not filled.";
+    else if (r <= -0.85) action = "Against us. SL is the plan — do not add.";
+    else if (hitTp1 && !t.beMoved) action = "TP1 tagged. Next tick should lock BE.";
+    else if (t.beMoved && r > 1.2) action = "BE locked. Let the trail work.";
+    else if (r >= 0.4) action = "In the money. Hold for remaining takes.";
+    lines.push(
+      `${t.symbol} ${t.side} ${t.leverage}x · last ${t.last.toFixed(4)} vs entry ${t.entry.toFixed(4)} (${r >= 0 ? "+" : ""}${r.toFixed(2)}R) · ${action}`,
+    );
+  }
+  if (opts.correction) lines.push(opts.correction);
+  return lines.join(" ");
+}

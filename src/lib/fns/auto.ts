@@ -941,27 +941,21 @@ export const flattenSignal = createServerFn({ method: "POST" })
 export const reviewBook = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) return { ok: false as const, error: "Desk notes are unavailable here." };
     const { getSql } = await import("@/lib/db");
     const { getWeexLast } = await import("@/lib/weex-market.server");
+    const { writeDeskNote } = await import("@/lib/desk-rules");
     const sql = await getSql();
     const [settings] = await sql<SettingsRow>`select * from auto_settings where user_id = ${context.userId}`;
+    if (!settings) return { ok: false as const, error: "No desk yet." };
+    const stats = await closedStats(sql, context.userId);
+    const pulled = await pullWeexBook(settings).catch(() => ({ live: null as { equity: number; available: number } | null, error: null as string | null }));
+    const pub = publicSettings(settings, stats, pulled.live, pulled.error);
     const open = await sql<SignalRow>`
       select * from auto_signals
       where user_id = ${context.userId} and status in ('working','filled')
       order by created_at desc
     `;
-    const pub = settings ? publicSettings(settings) : null;
-    if (open.length === 0) {
-      return {
-        ok: true as const,
-        text: pub
-          ? `${pub.phase} on the road to $1M. ${pub.correction} Nothing on.`
-          : "Nothing on.",
-      };
-    }
-    const marked = await Promise.all(
+    const tickets = await Promise.all(
       open.map(async (p) => ({
         symbol: p.weex_symbol,
         side: p.side,
@@ -969,24 +963,19 @@ export const reviewBook = createServerFn({ method: "POST" })
         entry: n(p.fill_px ?? p.entry),
         stop: n(p.stop),
         target: n(p.target),
-        last: await getWeexLast(p.weex_symbol),
-        thesis: p.thesis,
+        last: await getWeexLast(p.weex_symbol).catch(() => n(p.fill_px ?? p.entry)),
+        beMoved: Boolean(p.be_moved),
+        status: p.status,
+        targets: parseNums(p.targets),
       })),
     );
-    const prompt = [
-      "You are the night desk at VELA. Goal is $1,000,000. Review these live WEEX cross tickets.",
-      pub ? `Phase ${pub.phase}. Equity ${pub.accountUsd}. ${pub.correction}` : "",
-      "For each: hold, tighten stop, or flatten. 120-180 words. No hype, no emoji.",
-      JSON.stringify(marked),
-    ].join("\n");
-    const res = await fetch("https://api.x.ai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: "grok-4.5", max_tokens: 360, messages: [{ role: "user", content: prompt }] }),
+    const text = writeDeskNote({
+      phase: pub.phase,
+      equity: pub.accountUsd,
+      marginPct: pub.riskPct,
+      correction: pub.correction ?? "",
+      tickets,
     });
-    if (!res.ok) return { ok: false as const, error: `Review failed (${res.status}).` };
-    const body = (await res.json()) as { choices: { message: { content: string } }[] };
-    const text = body.choices[0]?.message.content ?? "";
     for (const row of open) {
       await sql`update auto_signals set review = ${text}, updated_at = now() where id = ${row.id}`;
     }
