@@ -1,5 +1,5 @@
 import type { Candle } from "./engine";
-import type { RawSetup, Side, Style } from "./ta";
+import { breakevenPrice, type RawSetup, type Side, type Style } from "./ta";
 
 /** Most of the top 25 is one BTC trade. TON is the only soft exception. */
 export function betaWeight(weex: string): number {
@@ -116,13 +116,14 @@ export function trailStop(opts: {
   const a = atr(opts.hourly, 14);
   if (a == null || a <= 0 || opts.hourly.length < 8) return null;
   const slice = opts.hourly.slice(-8);
+  const be = breakevenPrice(opts.side, opts.entry);
   if (opts.side === "long") {
     const floor = Math.min(...slice.map((c) => c.low)) - 0.15 * a;
-    const next = Math.max(opts.stop, floor, opts.entry);
+    const next = Math.max(opts.stop, floor, be);
     return next > opts.stop * 1.0002 ? next : null;
   }
   const ceil = Math.max(...slice.map((c) => c.high)) + 0.15 * a;
-  const next = Math.min(opts.stop, ceil, opts.entry);
+  const next = Math.min(opts.stop, ceil, be);
   return next < opts.stop * 0.9998 ? next : null;
 }
 

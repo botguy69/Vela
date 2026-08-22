@@ -702,7 +702,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             set stop = ${be}, be_moved = true, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
-          if (moved) notes.push(`${pos.weex_symbol} stop to breakeven`);
+          if (moved) notes.push(`${pos.weex_symbol} stop to WEEX BE (fees covered)`);
         }
       } else if (pos.be_moved) {
         const hourly = await getWeexKlines(pos.weex_symbol, "1h", 40).catch(() => []);
