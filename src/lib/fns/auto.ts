@@ -792,6 +792,20 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         const { getWeexPositionQty } = await import("@/lib/weex.server");
         left = await getWeexPositionQty(credsNow, pos.weex_symbol);
       }
+      if (pos.status === "filled" && left === 0) {
+        const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
+        const why = "Closed on WEEX";
+        await sql`
+          update auto_signals
+          set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
+          where id = ${pos.id} and user_id = ${userId}
+        `;
+        streak = pnl >= 0 ? 0 : streak + 1;
+        winStreak = pnl >= 0 ? winStreak + 1 : 0;
+        closed += 1;
+        notes.push(`${pos.weex_symbol} ${why} ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`);
+        continue;
+      }
       if (
         !hitStop &&
         !hitTp

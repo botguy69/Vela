@@ -266,13 +266,18 @@ export async function getWeexPositionQty(
     { path: "/capi/v3/positionRisk", query: { symbol } },
     { path: "/capi/v2/position", query: { symbol } },
   ];
+  let sawOk = false;
   for (const p of paths) {
     const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
     if (!res.ok) continue;
+    sawOk = true;
     const q = positionQtyFrom(res.data, symbol);
-    if (q != null) return q;
+    if (q != null && q > 0) return q;
+    if (q === 0) return 0;
+    const rows = rowsFrom(res.data);
+    if (Array.isArray(rows)) return 0;
   }
-  return null;
+  return sawOk ? 0 : null;
 }
 
 export async function setCrossMaxLeverage(creds: WeexCreds, symbol: string, leverage: number) {
