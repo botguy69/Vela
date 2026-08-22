@@ -378,6 +378,10 @@ async function closeFlatOnWeex(
       set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
       where id = ${pos.id} and user_id = ${userId}
     `;
+    if (creds) {
+      const { cancelWeexProtective } = await import("@/lib/weex.server");
+      await cancelWeexProtective(creds, pos.weex_symbol).catch(() => null);
+    }
     notes.push(`${pos.weex_symbol} ${why} ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`);
   }
 }
