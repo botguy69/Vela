@@ -73,7 +73,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: high-prob scalps to $1,000. One ticket, 21h holds.",
+      note: "Stage 1: high-prob scalps to $1,000. One ticket, BTC ETH SOL XRP BNB only.",
     };
   }
   return {
@@ -82,10 +82,10 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
     marginPct: 2,
     style: "scalp",
     maxOpen: 2,
-    minRr: 1.7,
-    minConf: 64,
-    method: "vela",
-    note: "Stage 2: $1k → $10k. 2% margin, two tickets, scalps. Hard stop at $10k to re-evaluate.",
+    minRr: 1.9,
+    minConf: 70,
+    method: "trend",
+    note: "Stage 2: $1k → $10k. Same high-prob bar. Majors only. Second ticket only if it isn’t the same beta. Stop at $10k.",
   };
 }
 

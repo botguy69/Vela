@@ -50,6 +50,10 @@ export const TOP25: AutoCoin[] = [
 
 export const TOP25_WEEX = TOP25.map((c) => c.weex);
 
+/** Until $10k: only the tight books. */
+export const CORE_WEEX = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT"] as const;
+export const CORE_SET = new Set<string>(CORE_WEEX);
+
 export function coinByWeex(symbol: string): AutoCoin {
   return TOP25.find((c) => c.weex === symbol) ?? TOP25[0]!;
 }

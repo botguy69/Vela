@@ -114,6 +114,13 @@ export function AutoDesk() {
             value={s?.weexLive && s.multipleToGoal > 0 ? `${s.multipleToGoal.toFixed(0)}×` : "—"}
           />
         </div>
+        {s?.weexLive && (
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <Stat label="Win rate" value={s.closed ? `${s.winRate.toFixed(0)}%  (${s.wins}/${s.closed})` : "—"} />
+            <Stat label="Avg win" value={s.avgWinR ? `+${s.avgWinR.toFixed(2)}R` : "—"} />
+            <Stat label="Avg loss" value={s.avgLossR ? `${s.avgLossR.toFixed(2)}R` : "—"} />
+          </div>
+        )}
 
         {s && (
           <div className="mt-4 rounded-xl bg-surface p-4 shadow-border">
@@ -215,6 +222,7 @@ function TicketsTable({
     rr: number;
     confidence: number | null;
     liveOnWeex?: boolean;
+    closeReason?: string | null;
   }>;
   refresh: () => void;
 }) {
@@ -254,12 +262,14 @@ function TicketsTable({
               )}
               {rows.map((t) => {
                 const live = t.status === "filled" || t.status === "working" || Boolean(t.liveOnWeex);
-                const why = [
-                  t.rr > 0 ? `${t.rr.toFixed(1)}R` : null,
-                  t.confidence != null ? `${Math.round(t.confidence)}%` : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ");
+                const why = live
+                  ? [
+                      t.rr > 0 ? `${t.rr.toFixed(1)}R` : null,
+                      t.confidence != null ? `${Math.round(t.confidence)}%` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : t.closeReason || t.status;
                 return (
                 <tr key={t.id} className={cn("border-b border-line/70 last:border-0", !live && "opacity-55")}>
                   <td className="px-4 py-2.5 font-medium">

@@ -62,6 +62,7 @@ type SignalRow = {
   filled_at: string | null;
   score: string | number | null;
   confidence: string | number | null;
+  close_reason: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -102,7 +103,7 @@ function livePhase(
 
 function publicSettings(
   row: SettingsRow,
-  stats: { closed: number; wins: number } = { closed: 0, wins: 0 },
+  stats: { closed: number; wins: number; winRate?: number; avgWinR?: number; avgLossR?: number } = { closed: 0, wins: 0 },
   live?: { equity: number; available: number } | null,
   weexError?: string | null,
 ) {
@@ -145,6 +146,9 @@ function publicSettings(
         : "Store WEEX keys. Until then this is not a book — the $1M bar stays at zero.",
     closed: stats.closed,
     wins: stats.wins,
+    winRate: stats.winRate ?? 0,
+    avgWinR: stats.avgWinR ?? 0,
+    avgLossR: stats.avgLossR ?? 0,
     keepAlive: Boolean(row.keep_alive),
     lastCronAt: row.last_cron_at,
     publicOrigin: row.public_origin,
@@ -174,13 +178,48 @@ async function closedStats(
   sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
   userId: string,
 ) {
-  const rows = await sql<{ pnl: string | number | null }>`
-    select pnl from auto_signals
+  const rows = await sql<{
+    pnl: string | number | null;
+    entry: string | number | null;
+    stop: string | number | null;
+    qty: string | number | null;
+    fill_px: string | number | null;
+  }>`
+    select pnl, entry, stop, qty, fill_px from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
   `;
   const closed = rows.length;
   const wins = rows.filter((r) => n(r.pnl) > 0).length;
-  return { closed, wins };
+  const rs = rows
+    .map((r) => {
+      const entry = n(r.fill_px) || n(r.entry);
+      const risk = Math.abs(entry - n(r.stop)) * n(r.qty);
+      if (!(risk > 0)) return null;
+      return n(r.pnl) / risk;
+    })
+    .filter((x): x is number => x != null);
+  const winRs = rs.filter((x) => x > 0);
+  const lossRs = rs.filter((x) => x < 0);
+  const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+  return {
+    closed,
+    wins,
+    winRate: closed > 0 ? (wins / closed) * 100 : 0,
+    avgWinR: avg(winRs),
+    avgLossR: avg(lossRs),
+  };
+}
+
+function inferClose(row: SignalRow): string | null {
+  if (row.close_reason) return row.close_reason;
+  if (row.status === "stopped") return "Hit stop";
+  if (row.status === "targeted") return "Took profit";
+  if (row.status === "skipped") {
+    if (n(row.pnl) < 0) return "Sold at a loss to move on — went nowhere";
+    if (n(row.pnl) > 0) return "Time stop — flattened";
+    return "Limit never filled";
+  }
+  return null;
 }
 
 function parseNums(raw: string | null | undefined): number[] {
@@ -224,6 +263,7 @@ function mapSignal(row: SignalRow) {
     score: row.score == null ? null : n(row.score),
     confidence: row.confidence == null ? null : n(row.confidence),
     liveOnWeex: false,
+    closeReason: inferClose(row),
     createdAt: row.created_at,
   };
 }
@@ -530,7 +570,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     } = await import("@/lib/weex-market.server");
     const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf } = await import("@/lib/ta");
     const { sizeSetup } = await import("@/lib/risk");
-    const { coinByWeex } = await import("@/lib/universe");
+    const { coinByWeex, CORE_SET } = await import("@/lib/universe");
     const rules = await import("@/lib/desk-rules");
     const sql = await getSql();
     await ensureSettings(sql, userId);
@@ -588,7 +628,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           }
           await sql`
             update auto_signals
-            set status = 'skipped', closed_px = ${px}, pnl = 0, updated_at = now()
+            set status = 'skipped', closed_px = ${px}, pnl = 0, close_reason = ${"Limit never filled"}, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
           notes.push(`${pos.weex_symbol} limit expired`);
@@ -716,14 +756,18 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           }
         }
         const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
+        const why =
+          pnl < 0
+            ? "Sold at a loss to move on — went nowhere"
+            : "Time stop — flattened, dead tape";
         await sql`
           update auto_signals
-          set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, updated_at = now()
+          set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
           where id = ${pos.id} and user_id = ${userId}
         `;
         streak = pnl >= 0 ? 0 : streak + 1;
         closed += 1;
-        notes.push(`${pos.weex_symbol} time stop`);
+        notes.push(`${pos.weex_symbol} ${why}`);
         continue;
       }
 
@@ -736,15 +780,16 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         }
         const exit = hitStop ? stop : target;
         const pnl = side === "long" ? (exit - entry) * n(pos.qty) : (entry - exit) * n(pos.qty);
+        const why = hitStop ? "Hit stop" : "Took profit";
         await sql`
           update auto_signals
           set status = ${hitStop ? "stopped" : "targeted"},
-              closed_px = ${exit}, pnl = ${pnl}, updated_at = now()
+              closed_px = ${exit}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
           where id = ${pos.id} and user_id = ${userId}
         `;
         streak = pnl >= 0 ? 0 : streak + 1;
         closed += 1;
-        notes.push(`${pos.weex_symbol} ${hitStop ? "stopped" : "took profit"} ${pnl.toFixed(2)}`);
+        notes.push(`${pos.weex_symbol} ${why} ${pnl.toFixed(2)}`);
       }
     }
 
@@ -826,10 +871,11 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         if (regime.hot) {
           notes.push(`Regime: BTC shock wick (ATR ${regime.ratio.toFixed(1)}×). Standing down.`);
         } else {
-          const raw = rules.applyLedger(
+          const rawAll = rules.applyLedger(
             scanUniverse(books, corrected.style, corrected.minRr, corrected.method),
             ledger,
           );
+          const raw = equity < STAGE2_USD ? rawAll.filter((s) => CORE_SET.has(s.weexSymbol)) : rawAll;
           const busy = new Set(stillOpen.map((s) => s.weex_symbol));
           const betaBook = stillOpen.map((s) => ({
             weex: s.weex_symbol,
@@ -1040,9 +1086,10 @@ export const flattenSignal = createServerFn({ method: "POST" })
     const px = await getWeexLast(row.weex_symbol);
     const entry = n(row.fill_px ?? row.entry);
     const pnl = row.side === "short" ? (entry - px) * n(row.qty) : (px - entry) * n(row.qty);
+    const why = pnl < 0 ? "Flattened by you at a loss" : "Flattened by you";
     await sql`
       update auto_signals
-      set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, updated_at = now()
+      set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
       where id = ${row.id} and user_id = ${context.userId}
     `;
     const next = Math.max(5, n(settings?.account_usd) + pnl);
