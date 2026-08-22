@@ -190,6 +190,7 @@ async function closedStats(
   }>`
     select pnl, entry, stop, qty, fill_px from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
+      and (close_reason is null or close_reason not like 'Duplicate%')
   `;
   const closed = rows.length;
   const wins = rows.filter((r) => n(r.pnl) > 0).length;
@@ -283,6 +284,7 @@ async function ticketLedger(
   }>`
     select plan, side, weex_symbol, pnl from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
+      and (close_reason is null or close_reason not like 'Duplicate%')
   `;
   const { buildLedger } = await import("@/lib/desk-rules");
   return buildLedger(
@@ -328,32 +330,17 @@ async function collapseOpenDupes(
       `;
     }
     if (creds) {
-      const { getWeexPositionQty, flattenWeex } = await import("@/lib/weex.server");
-      const { specFor, formatWeexQty } = await import("@/lib/weex-market.server");
-      const { coinByWeex } = await import("@/lib/universe");
+      const { getWeexPositionQty } = await import("@/lib/weex.server");
       const liveQty = await getWeexPositionQty(creds, keep.weex_symbol);
-      const want = n(keep.qty);
-      if (liveQty != null && want > 0 && liveQty > want * 1.08) {
-        const spec = await specFor(coinByWeex(keep.weex_symbol));
-        const dump = liveQty - want;
-        const sent = await flattenWeex(creds, {
-          symbol: keep.weex_symbol,
-          side: keep.side === "short" ? "BUY" : "SELL",
-          positionSide: keep.side === "short" ? "SHORT" : "LONG",
-          quantity: formatWeexQty(dump, spec.quantityPrecision),
-          clientOid: `veladedup${keep.id}${Date.now().toString(36)}`.slice(0, 36),
-        });
-        notes.push(
-          sent.ok
-            ? `Merged ${rows.length} ${keep.weex_symbol} into one. Cut extra size on WEEX.`
-            : `Merged ${keep.weex_symbol} tickets; WEEX size cut failed: ${sent.error.slice(0, 80)}`,
-        );
-      } else {
-        notes.push(`Merged ${rows.length} ${keep.weex_symbol} tickets into one`);
+      if (liveQty != null && liveQty > 0) {
+        await sql`
+          update auto_signals
+          set qty = ${liveQty}, updated_at = now()
+          where id = ${keep.id} and user_id = ${userId}
+        `;
       }
-    } else {
-      notes.push(`Merged ${rows.length} ${keep.weex_symbol} tickets into one`);
     }
+    notes.push(`Merged ${rows.length} ${keep.weex_symbol} into one ticket. Full WEEX size kept.`);
   }
 }
 
@@ -386,7 +373,9 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       select * from auto_signals where user_id = ${context.userId}
       order by created_at desc limit 40
     `;
-    const mapped = signals.map(mapSignal);
+    const mapped = signals
+      .filter((r) => !(r.close_reason ?? "").startsWith("Duplicate"))
+      .map(mapSignal);
     const { getWeexLast } = await import("@/lib/weex-market.server");
     const { ticketPnl } = await import("@/lib/ta");
     const lastBy = new Map<string, number>();
