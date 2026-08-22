@@ -17,6 +17,7 @@ import {
   runAutoTick,
   saveWeexKeys,
   setArmed,
+  setContinueToGoal,
 } from "@/lib/fns/auto";
 import { cn } from "@/lib/utils";
 
@@ -108,19 +109,35 @@ export function AutoDesk() {
           <Stat label="WEEX" value={s?.weexLive ? formatUsd(s.accountUsd) : "—"} />
           <Stat label="Phase" value={s?.weexLive ? (s.phase ?? "—") : "Waiting"} />
           <Stat label="Method" value={s?.weexLive ? (s.method ?? "vela") : "—"} />
-          <Stat label="To $1M" value={s?.weexLive && s.multipleToGoal > 0 ? `${s.multipleToGoal.toFixed(0)}×` : "—"} />
+          <Stat
+            label={s?.stageTarget === 1_000_000 ? "To $1M" : "To $10k"}
+            value={s?.weexLive && s.multipleToGoal > 0 ? `${s.multipleToGoal.toFixed(0)}×` : "—"}
+          />
         </div>
 
         {s && (
           <div className="mt-4 rounded-xl bg-surface p-4 shadow-border">
             <div className="flex items-baseline justify-between gap-3 text-xs text-subtle">
-              <span>Of $1,000,000 (not a log scale)</span>
+              <span>Of {formatUsd(s.stageTarget ?? 10_000)}</span>
               <span>{s.progressPct.toFixed(1)}%</span>
             </div>
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
               <div className="h-full bg-accent" style={{ width: `${s.progressPct}%` }} />
             </div>
             <p className="mt-3 text-sm text-muted">{s.correction}</p>
+            {s.phaseId === "checkpoint" && (
+              <Button
+                className="mt-3"
+                onClick={() =>
+                  void setContinueToGoal({ data: { on: true } }).then(() => {
+                    toast.success("Stage 3 on. Scaling toward $1M.");
+                    refresh();
+                  })
+                }
+              >
+                Re-evaluated — continue to $1M
+              </Button>
+            )}
           </div>
         )}
 

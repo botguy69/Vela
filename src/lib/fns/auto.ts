@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { adaptMethod, GOAL_USD, multipleToGoal, phaseFor, progressPct } from "@/lib/goal";
+import { adaptMethod, GOAL_USD, STAGE2_USD, multipleToGoal, phaseForRun, progressPct, stageTarget } from "@/lib/goal";
 
 type SettingsRow = {
   user_id: string;
@@ -25,6 +25,7 @@ type SettingsRow = {
   keep_alive: boolean | null;
   last_cron_at: string | null;
   public_origin: string | null;
+  continue_to_goal: boolean | null;
   updated_at: string;
 };
 
@@ -91,7 +92,7 @@ function livePhase(
   const peak = Math.max(n(row.peak_usd) || equity, equity);
   const dd = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
   return adaptMethod({
-    phase: phaseFor(equity),
+    phase: phaseForRun(equity, Boolean(row.continue_to_goal)),
     lossStreak: row.loss_streak ?? 0,
     drawdownPct: dd,
     closed: stats.closed,
@@ -130,8 +131,10 @@ function publicSettings(
     peakUsd: peak,
     lossStreak: row.loss_streak ?? 0,
     drawdownPct: dd,
-    progressPct: liveEq != null ? progressPct(equity) : 0,
-    multipleToGoal: liveEq != null && equity > 0 ? multipleToGoal(equity) : 0,
+    progressPct: liveEq != null ? progressPct(equity, stageTarget(equity, Boolean(row.continue_to_goal))) : 0,
+    multipleToGoal: liveEq != null && equity > 0 ? multipleToGoal(equity, stageTarget(equity, Boolean(row.continue_to_goal))) : 0,
+    stageTarget: liveEq != null ? stageTarget(equity, Boolean(row.continue_to_goal)) : STAGE2_USD,
+    continueToGoal: Boolean(row.continue_to_goal),
     phase: liveEq != null ? phase.name : "Waiting",
     phaseId: liveEq != null ? phase.id : "micro",
     style: phase.style,
@@ -446,6 +449,21 @@ export const setArmed = createServerFn({ method: "POST" })
       ensureAutoLoop();
     }
     return { armed: data.armed };
+  });
+
+export const setContinueToGoal = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { on: boolean }) => input)
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureSettings(sql, context.userId);
+    await sql`
+      update auto_settings
+      set continue_to_goal = ${data.on}, updated_at = now()
+      where user_id = ${context.userId}
+    `;
+    return { on: data.on };
   });
 
 export const setKeepAlive = createServerFn({ method: "POST" })
@@ -775,7 +793,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     }
     const afterStats = { closed: stats.closed + closed, wins: stats.wins };
     const corrected = adaptMethod({
-      phase: phaseFor(equity),
+      phase: phaseForRun(equity, Boolean(settings.continue_to_goal)),
       lossStreak: streak,
       drawdownPct: peak > 0 ? ((peak - equity) / peak) * 100 : 0,
       closed: afterStats.closed,

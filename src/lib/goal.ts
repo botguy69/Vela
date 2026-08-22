@@ -1,8 +1,9 @@
 import type { Style } from "./ta";
 
 export const GOAL_USD = 1_000_000;
+export const STAGE2_USD = 10_000;
 
-export type PhaseId = "micro" | "seed" | "grow" | "scale" | "harvest" | "done";
+export type PhaseId = "micro" | "seed" | "grow" | "checkpoint" | "scale" | "harvest" | "done";
 export type MethodId = "vela" | "trend" | "fade" | "break";
 
 export type Phase = {
@@ -17,59 +18,79 @@ export type Phase = {
   note: string;
 };
 
-export function phaseFor(equity: number): Phase {
+export function stageTarget(equity: number, continueToGoal: boolean): number {
+  if (continueToGoal || equity >= GOAL_USD) return GOAL_USD;
+  return STAGE2_USD;
+}
+
+export function phaseFor(equity: number, continueToGoal = false): Phase {
   if (equity >= GOAL_USD) {
     return {
       id: "done",
       name: "Done",
       marginPct: 1,
       style: "swing",
-      maxOpen: 1,
+      maxOpen: 0,
       minRr: 2.2,
       minConf: 74,
       method: "trend",
       note: "Goal printed. Stand down unless you raise the target.",
     };
   }
+  if (equity >= STAGE2_USD && !continueToGoal) {
+    return {
+      id: "checkpoint",
+      name: "Re-evaluate",
+      marginPct: 1,
+      style: "swing",
+      maxOpen: 0,
+      minRr: 2,
+      minConf: 74,
+      method: "trend",
+      note: "Stage 2 printed ($10k). No new tickets. Re-evaluate, then tap Continue to $1M.",
+    };
+  }
   if (equity < 100) {
     return {
       id: "micro",
-      name: "Micro",
+      name: "Stage 1",
       marginPct: 2,
       style: "scalp",
       maxOpen: 1,
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: high-prob scalps only (70%+ conf, 1.9R+) until $1,000.",
+      note: "Stage 1: high-prob scalps (70%+ conf, 1.9R+) to $1,000.",
     };
   }
   if (equity < 1000) {
     return {
       id: "seed",
-      name: "Seed",
+      name: "Stage 1",
       marginPct: 2,
       style: "scalp",
       maxOpen: 1,
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: high-prob scalps only until $1,000. One ticket, 21h holds.",
+      note: "Stage 1: high-prob scalps to $1,000. One ticket, 21h holds.",
     };
   }
-  if (equity < 10_000) {
-    return {
-      id: "grow",
-      name: "Grow",
-      marginPct: 1.5,
-      style: "swing",
-      maxOpen: 2,
-      minRr: 1.8,
-      minConf: 64,
-      method: "vela",
-      note: "Stage 2. Past $1,000. Same 1–2% box, wider swings.",
-    };
-  }
+  return {
+    id: "grow",
+    name: "Stage 2",
+    marginPct: 2,
+    style: "scalp",
+    maxOpen: 2,
+    minRr: 1.7,
+    minConf: 64,
+    method: "vela",
+    note: "Stage 2: $1k → $10k. 2% margin, two tickets, scalps. Hard stop at $10k to re-evaluate.",
+  };
+}
+
+export function afterCheckpoint(equity: number): Phase {
+  if (equity >= GOAL_USD) return phaseFor(equity, true);
   if (equity < 100_000) {
     return {
       id: "scale",
@@ -80,7 +101,7 @@ export function phaseFor(equity: number): Phase {
       minRr: 2,
       minConf: 68,
       method: "trend",
-      note: "Protect the pile. Tighter R, 1.2% margin.",
+      note: "You signed off. Scale toward $1M. Tighter R, 1.2% margin.",
     };
   }
   return {
@@ -96,6 +117,11 @@ export function phaseFor(equity: number): Phase {
   };
 }
 
+export function phaseForRun(equity: number, continueToGoal: boolean): Phase {
+  if (continueToGoal && equity >= STAGE2_USD && equity < GOAL_USD) return afterCheckpoint(equity);
+  return phaseFor(equity, continueToGoal);
+}
+
 export function adaptMethod(opts: {
   phase: Phase;
   lossStreak: number;
@@ -103,10 +129,10 @@ export function adaptMethod(opts: {
   closed: number;
   wins: number;
 }): Phase {
+  if (opts.phase.id === "checkpoint" || opts.phase.id === "done") return opts.phase;
   let next = { ...opts.phase };
   const wr = opts.closed >= 5 ? opts.wins / opts.closed : 1;
 
-  // Honest first try stays on vela until the tape proves it isn't paying.
   if (opts.closed >= 12 && wr < 0.35) {
     if (next.method === "vela") {
       next = { ...next, method: "trend", minRr: Math.max(next.minRr, 1.9), note: "First method missed. Rotating to trend-only, still 1–2% margin at coin max." };
@@ -138,12 +164,12 @@ export function adaptMethod(opts: {
   return next;
 }
 
-export function progressPct(equity: number): number {
-  if (equity <= 0) return 0;
-  return Math.min(100, Math.max(0, (equity / GOAL_USD) * 100));
+export function progressPct(equity: number, target = GOAL_USD): number {
+  if (equity <= 0 || target <= 0) return 0;
+  return Math.min(100, Math.max(0, (equity / target) * 100));
 }
 
-export function multipleToGoal(equity: number): number {
-  if (equity <= 0) return GOAL_USD / 5;
-  return GOAL_USD / equity;
+export function multipleToGoal(equity: number, target = GOAL_USD): number {
+  if (equity <= 0) return target / 5;
+  return target / equity;
 }
