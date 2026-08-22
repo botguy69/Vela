@@ -159,17 +159,89 @@ export function fundingBlocks(side: Side, rate: number): boolean {
   return false;
 }
 
-export type PlanRecord = { plan: string; closed: number; wins: number };
+export type PlanRecord = { plan: string; closed: number; wins: number; pnl: number };
+
+export type ClosedTicket = {
+  plan: string | null;
+  side: string | null;
+  weex: string | null;
+  pnl: number;
+};
+
+export type Ledger = {
+  plans: PlanRecord[];
+  skipPlans: Set<string>;
+  skipSymbols: Set<string>;
+  note: string;
+};
+
+function bucket(map: Map<string, PlanRecord>, key: string, pnl: number) {
+  const cur = map.get(key) ?? { plan: key, closed: 0, wins: 0, pnl: 0 };
+  cur.closed += 1;
+  if (pnl > 0) cur.wins += 1;
+  cur.pnl += pnl;
+  map.set(key, cur);
+}
+
+export function buildLedger(rows: ClosedTicket[]): Ledger {
+  const plans = new Map<string, PlanRecord>();
+  const symbols = new Map<string, PlanRecord>();
+  const sides = new Map<string, PlanRecord>();
+  for (const r of rows) {
+    bucket(plans, r.plan || "vela", r.pnl);
+    if (r.weex) bucket(symbols, r.weex, r.pnl);
+    if (r.side) bucket(sides, r.side, r.pnl);
+  }
+  const skipPlans = new Set<string>();
+  for (const p of plans.values()) {
+    if (p.closed >= 8 && p.wins / p.closed < 0.28 && p.pnl <= 0) skipPlans.add(p.plan);
+  }
+  const skipSymbols = new Set<string>();
+  for (const s of symbols.values()) {
+    if (s.closed >= 6 && s.wins / s.closed < 0.25 && s.pnl <= 0) skipSymbols.add(s.plan);
+  }
+  const bits: string[] = [];
+  const best = [...plans.values()].sort((a, b) => b.pnl - a.pnl)[0];
+  const worst = [...plans.values()].filter((p) => p.closed >= 5).sort((a, b) => a.pnl - b.pnl)[0];
+  if (best && best.pnl > 0 && best.closed >= 4) bits.push(`keeping ${best.plan} ($${best.pnl.toFixed(1)})`);
+  if (worst && skipPlans.has(worst.plan)) bits.push(`killed ${worst.plan}`);
+  if (skipSymbols.size) bits.push(`skip ${[...skipSymbols].slice(0, 3).join(", ")}`);
+  const long = sides.get("long");
+  const short = sides.get("short");
+  if (long && short && long.closed >= 4 && short.closed >= 4) {
+    if (long.pnl > short.pnl + 1) bits.push("favor longs");
+    if (short.pnl > long.pnl + 1) bits.push("favor shorts");
+  }
+  return {
+    plans: [...plans.values()],
+    skipPlans,
+    skipSymbols,
+    note: bits.length ? `Learned: ${bits.join("; ")}.` : "Learning: not enough closes yet (needs 6–8 per setup).",
+  };
+}
 
 export function rankSetups(setups: RawSetup[], records: PlanRecord[]): RawSetup[] {
   const byPlan = new Map(records.map((r) => [r.plan, r]));
   return [...setups]
     .map((s) => {
       const rec = byPlan.get(s.plan);
-      if (!rec || rec.closed < 8) return s;
+      if (!rec || rec.closed < 6) return s;
       const wr = rec.wins / rec.closed;
-      const adj = wr < 0.3 ? 0.55 : wr > 0.55 ? 1.2 : 1;
+      const edge = rec.pnl;
+      let adj = 1;
+      if (wr < 0.28 || edge < 0) adj = 0.45;
+      else if (wr > 0.55 && edge > 0) adj = 1.35;
+      else if (wr > 0.45) adj = 1.12;
       return { ...s, score: s.score * adj };
     })
     .sort((a, b) => b.score - a.score);
+}
+
+export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
+  const ranked = rankSetups(setups, ledger.plans);
+  const filtered = ranked.filter(
+    (s) => !ledger.skipPlans.has(s.plan) && !ledger.skipSymbols.has(s.weexSymbol),
+  );
+  if (filtered.length) return filtered;
+  return ranked;
 }

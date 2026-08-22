@@ -220,23 +220,28 @@ function mapSignal(row: SignalRow) {
   };
 }
 
-async function planRecords(
+async function ticketLedger(
   sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
   userId: string,
 ) {
-  const rows = await sql<{ plan: string | null; pnl: string | number | null }>`
-    select plan, pnl from auto_signals
+  const rows = await sql<{
+    plan: string | null;
+    side: string | null;
+    weex_symbol: string | null;
+    pnl: string | number | null;
+  }>`
+    select plan, side, weex_symbol, pnl from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
   `;
-  const map = new Map<string, { plan: string; closed: number; wins: number }>();
-  for (const r of rows) {
-    const plan = r.plan || "vela";
-    const cur = map.get(plan) ?? { plan, closed: 0, wins: 0 };
-    cur.closed += 1;
-    if (n(r.pnl) > 0) cur.wins += 1;
-    map.set(plan, cur);
-  }
-  return [...map.values()];
+  const { buildLedger } = await import("@/lib/desk-rules");
+  return buildLedger(
+    rows.map((r) => ({
+      plan: r.plan,
+      side: r.side,
+      weex: r.weex_symbol,
+      pnl: n(r.pnl),
+    })),
+  );
 }
 
 export const getAutoDesk = createServerFn({ method: "GET" })
@@ -695,6 +700,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       select * from auto_signals
       where user_id = ${userId} and status in ('proposed','working','filled')
     `;
+    const ledger = await ticketLedger(sql, userId);
 
     if (settings.armed && stillOpen.length < corrected.maxOpen) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
@@ -708,9 +714,9 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         if (regime.hot) {
           notes.push(`Regime: BTC shock wick (ATR ${regime.ratio.toFixed(1)}×). Standing down.`);
         } else {
-          const raw = rules.rankSetups(
+          const raw = rules.applyLedger(
             scanUniverse(books, corrected.style, corrected.minRr, corrected.method),
-            await planRecords(sql, userId),
+            ledger,
           );
           const busy = new Set(stillOpen.map((s) => s.weex_symbol));
           const betaBook = stillOpen.map((s) => ({
@@ -854,12 +860,13 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       notes.push("Book full. Watching open tickets.");
     }
 
-    const note = [corrected.note, ...notes].filter(Boolean).slice(0, 5).join(" · ");
+    const learned = [corrected.note, ledger.note].filter(Boolean).join(" · ");
+    const note = [learned, ...notes].filter(Boolean).slice(0, 6).join(" · ");
     await sql`
       update auto_settings
       set last_tick_at = now(),
           last_tick_note = ${note},
-          last_correction = ${corrected.note},
+          last_correction = ${learned},
           account_usd = ${equity},
           peak_usd = ${peak},
           loss_streak = ${streak},
