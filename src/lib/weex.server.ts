@@ -240,7 +240,7 @@ function positionQtyFrom(raw: unknown, symbol: string): number | null {
 
 export async function listWeexPositions(
   creds: WeexCreds,
-): Promise<{ symbol: string; side: "long" | "short"; qty: number; entry: number }[]> {
+): Promise<{ symbol: string; side: "long" | "short"; qty: number; entry: number }[] | null> {
   const paths = [
     { path: "/capi/v3/account/positions", query: undefined as Record<string, string> | undefined },
     { path: "/capi/v3/positionRisk", query: undefined },
@@ -248,13 +248,15 @@ export async function listWeexPositions(
     { path: "/capi/v2/position", query: undefined },
     { path: "/capi/v2/account/positions", query: undefined },
   ];
+  let sawOk = false;
   for (const p of paths) {
     const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
     if (!res.ok) continue;
+    sawOk = true;
     const parsed = rowsFrom(res.data).map(parsePosition).filter((x): x is NonNullable<typeof x> => x != null);
     if (parsed.length) return parsed;
   }
-  return [];
+  return sawOk ? [] : null;
 }
 
 export async function getWeexPositionQty(

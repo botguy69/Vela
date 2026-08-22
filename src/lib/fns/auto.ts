@@ -344,6 +344,38 @@ async function collapseOpenDupes(
   }
 }
 
+async function closeFlatOnWeex(
+  sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
+  userId: string,
+  livePos: { symbol: string; qty: number }[],
+  notes: string[],
+) {
+  const filled = await sql<SignalRow>`
+    select * from auto_signals
+    where user_id = ${userId} and status = 'filled'
+  `;
+  const { getWeexLast } = await import("@/lib/weex-market.server");
+  for (const pos of filled) {
+    const key = pos.weex_symbol.replace(/_/g, "").toUpperCase();
+    const held = livePos.find((p) => {
+      const s = p.symbol.replace(/_/g, "").toUpperCase();
+      return (s === key || p.symbol === pos.weex_symbol) && p.qty > 0;
+    });
+    if (held) continue;
+    const entry = n(pos.fill_px ?? pos.entry);
+    const px = await getWeexLast(pos.weex_symbol).catch(() => entry);
+    const side = pos.side === "short" ? "short" : "long";
+    const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
+    const why = "Closed on WEEX";
+    await sql`
+      update auto_signals
+      set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
+      where id = ${pos.id} and user_id = ${userId}
+    `;
+    notes.push(`${pos.weex_symbol} ${why} ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`);
+  }
+}
+
 export const getAutoDesk = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -358,6 +390,14 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     const pulled = settings ? await pullWeexBook(settings) : { live: null, error: null };
     const live = pulled.live;
     if (settings) await collapseOpenDupes(sql, context.userId, settings, []);
+    if (settings) {
+      const creds = await credsFrom(settings);
+      if (creds) {
+        const { listWeexPositions } = await import("@/lib/weex.server");
+        const livePos = await listWeexPositions(creds);
+        if (livePos) await closeFlatOnWeex(sql, context.userId, livePos, []);
+      }
+    }
     if (settings && live) {
       const peak = Math.max(n(settings.peak_usd) || live.equity, live.equity);
       await sql`
@@ -654,6 +694,14 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
 
     const notes: string[] = [];
     await collapseOpenDupes(sql, userId, settings, notes);
+    {
+      const creds = await credsFrom(settings);
+      if (creds) {
+        const { listWeexPositions } = await import("@/lib/weex.server");
+        const livePos = await listWeexPositions(creds);
+        if (livePos) await closeFlatOnWeex(sql, userId, livePos, notes);
+      }
+    }
 
     const open = await sql<SignalRow>`
       select * from auto_signals
@@ -907,7 +955,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     if (credsLive) {
       const { listWeexPositions } = await import("@/lib/weex.server");
       const livePos = await listWeexPositions(credsLive);
-      for (const lp of livePos) {
+      for (const lp of livePos ?? []) {
         const [row] = await sql<SignalRow>`
           select * from auto_signals
           where user_id = ${userId} and weex_symbol = ${lp.symbol}

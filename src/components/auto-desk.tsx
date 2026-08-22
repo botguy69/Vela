@@ -227,7 +227,7 @@ function TicketsTable({
   refresh: () => void;
 }) {
   const open = signals.filter(
-    (t) => t.status === "filled" || t.status === "working" || t.liveOnWeex,
+    (t) => Boolean(t.liveOnWeex) || t.status === "working",
   );
   const closed = signals.filter((t) => !open.includes(t)).slice(0, 8);
   const rows = [...open, ...closed];
@@ -261,7 +261,7 @@ function TicketsTable({
                 </tr>
               )}
               {rows.map((t) => {
-                const live = t.status === "filled" || t.status === "working" || Boolean(t.liveOnWeex);
+                const live = Boolean(t.liveOnWeex) || t.status === "working";
                 const why = live
                   ? [
                       t.rr > 0 ? `${t.rr.toFixed(1)}R` : null,
