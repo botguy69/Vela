@@ -347,21 +347,29 @@ async function collapseOpenDupes(
 async function closeFlatOnWeex(
   sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
   userId: string,
-  livePos: { symbol: string; qty: number }[],
+  livePos: { symbol: string; qty: number }[] | null,
   notes: string[],
+  creds: { apiKey: string; apiSecret: string; passphrase: string } | null,
 ) {
   const filled = await sql<SignalRow>`
     select * from auto_signals
     where user_id = ${userId} and status = 'filled'
   `;
   const { getWeexLast } = await import("@/lib/weex-market.server");
+  const { getWeexPositionQty } = await import("@/lib/weex.server");
   for (const pos of filled) {
     const key = pos.weex_symbol.replace(/_/g, "").toUpperCase();
-    const held = livePos.find((p) => {
+    const onList = (livePos ?? []).find((p) => {
       const s = p.symbol.replace(/_/g, "").toUpperCase();
       return (s === key || p.symbol === pos.weex_symbol) && p.qty > 0;
     });
-    if (held) continue;
+    if (onList) continue;
+    if (livePos == null && creds) {
+      const q = await getWeexPositionQty(creds, pos.weex_symbol);
+      if (q == null || q > 0) continue;
+    } else if (livePos == null) {
+      continue;
+    }
     const entry = n(pos.fill_px ?? pos.entry);
     const px = await getWeexLast(pos.weex_symbol).catch(() => entry);
     const side = pos.side === "short" ? "short" : "long";
@@ -395,7 +403,7 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       if (creds) {
         const { listWeexPositions } = await import("@/lib/weex.server");
         const livePos = await listWeexPositions(creds);
-        if (livePos) await closeFlatOnWeex(sql, context.userId, livePos, []);
+        await closeFlatOnWeex(sql, context.userId, livePos, [], creds);
       }
     }
     if (settings && live) {
@@ -694,12 +702,13 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
 
     const notes: string[] = [];
     await collapseOpenDupes(sql, userId, settings, notes);
+    let weexBook: { symbol: string; qty: number }[] | null = null;
     {
       const creds = await credsFrom(settings);
       if (creds) {
         const { listWeexPositions } = await import("@/lib/weex.server");
-        const livePos = await listWeexPositions(creds);
-        if (livePos) await closeFlatOnWeex(sql, userId, livePos, notes);
+        weexBook = await listWeexPositions(creds);
+        await closeFlatOnWeex(sql, userId, weexBook, notes, creds);
       }
     }
 
@@ -1005,10 +1014,22 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       wins: stats.wins,
     });
 
-    const stillOpen = await sql<SignalRow>`
+    const stillOpenRaw = await sql<SignalRow>`
       select * from auto_signals
       where user_id = ${userId} and status in ('proposed','working','filled')
     `;
+    const stillOpen =
+      weexBook == null
+        ? stillOpenRaw
+        : stillOpenRaw.filter((s) => {
+            if (s.status === "working" || s.status === "proposed") return true;
+            const key = s.weex_symbol.replace(/_/g, "").toUpperCase();
+            return weexBook.some(
+              (p) =>
+                p.qty > 0 &&
+                (p.symbol === s.weex_symbol || p.symbol.replace(/_/g, "").toUpperCase() === key),
+            );
+          });
     const atRisk = stillOpen.filter((s) => s.status !== "filled" || !s.be_moved);
     const LIVE_CAP = 6;
     const ledger = await ticketLedger(sql, userId);
