@@ -1,0 +1,50 @@
+create table if not exists auto_settings (
+  user_id text primary key,
+  venue text not null default 'paper',
+  weex_mode text not null default 'sim',
+  armed boolean not null default false,
+  api_key_enc text,
+  api_secret_enc text,
+  api_pass_enc text,
+  key_hint text,
+  risk_pct numeric not null default 1.5,
+  account_usd numeric not null default 250,
+  max_leverage integer not null default 8,
+  min_rr numeric not null default 1.8,
+  max_open integer not null default 2,
+  last_tick_at timestamptz,
+  last_tick_note text,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists auto_signals (
+  id serial primary key,
+  user_id text not null,
+  symbol text not null,
+  weex_symbol text not null,
+  side text not null,
+  style text not null,
+  entry_type text not null,
+  entry numeric not null,
+  stop numeric not null,
+  target numeric not null,
+  qty numeric not null,
+  leverage integer not null,
+  risk_usd numeric not null,
+  notional numeric not null,
+  rr numeric not null,
+  thesis text not null,
+  invalidation text,
+  status text not null default 'proposed',
+  venue text not null default 'paper',
+  client_oid text,
+  weex_resp text,
+  fill_px numeric,
+  closed_px numeric,
+  pnl numeric,
+  review text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists auto_signals_user_idx on auto_signals (user_id, created_at desc);
+create index if not exists auto_signals_open_idx on auto_signals (user_id, status);

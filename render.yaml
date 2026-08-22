@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: vela
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/cron/tick?src=alive
+    envVars:
+      - key: VELA_WORKER
+        value: "1"
+      - key: NITRO_PRESET
+        value: node-server
+      - key: NODE_ENV
+        value: production
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: BETTER_AUTH_URL
+        sync: false

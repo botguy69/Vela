@@ -1,0 +1,16 @@
+#cloud-config
+# Paste as custom cloud-init when creating the Always Free Ampere A1 VM
+# (Canonical Ubuntu 22.04, shape VM.Standard.A1.Flex, 1–2 OCPU / 6–12 GB).
+package_update: true
+packages:
+  - iptables
+runcmd:
+  - mkdir -p /opt/vela /var/lib/vela
+  - chown ubuntu:ubuntu /opt/vela /var/lib/vela
+  - echo "Upload vela-oracle.tgz to /opt/vela, then: cd /opt/vela && tar xzf vela-oracle.tgz && bash deploy/oracle/setup.sh"
+write_files:
+  - path: /etc/motd
+    content: |
+      VELA worker host. After the pack is in /opt/vela:
+        cd /opt/vela && tar xzf vela-oracle.tgz && bash deploy/oracle/setup.sh
+      Then open http://THIS_IP:8080 — sign in, store keys, arm.

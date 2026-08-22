@@ -1,0 +1,10 @@
+node_modules
+.git
+data
+artifacts
+attachments
+screenshots
+*.tgz
+.tmp
+.vercel
+.tanstack
