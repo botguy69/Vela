@@ -295,6 +295,68 @@ async function ticketLedger(
   );
 }
 
+async function collapseOpenDupes(
+  sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
+  userId: string,
+  settings: SettingsRow,
+  notes: string[],
+) {
+  const open = await sql<SignalRow>`
+    select * from auto_signals
+    where user_id = ${userId} and status in ('proposed','working','filled')
+    order by created_at asc
+  `;
+  const groups = new Map<string, SignalRow[]>();
+  for (const r of open) {
+    const k = `${r.weex_symbol}:${r.side}`;
+    const g = groups.get(k) ?? [];
+    g.push(r);
+    groups.set(k, g);
+  }
+  const creds = await credsFrom(settings);
+  for (const [, rows] of groups) {
+    if (rows.length < 2) continue;
+    const keep = rows[0]!;
+    for (const extra of rows.slice(1)) {
+      await sql`
+        update auto_signals
+        set status = 'skipped',
+            pnl = 0,
+            close_reason = ${"Duplicate — merged into one ticket"},
+            updated_at = now()
+        where id = ${extra.id} and user_id = ${userId}
+      `;
+    }
+    if (creds) {
+      const { getWeexPositionQty, flattenWeex } = await import("@/lib/weex.server");
+      const { specFor, formatWeexQty } = await import("@/lib/weex-market.server");
+      const { coinByWeex } = await import("@/lib/universe");
+      const liveQty = await getWeexPositionQty(creds, keep.weex_symbol);
+      const want = n(keep.qty);
+      if (liveQty != null && want > 0 && liveQty > want * 1.08) {
+        const spec = await specFor(coinByWeex(keep.weex_symbol));
+        const dump = liveQty - want;
+        const sent = await flattenWeex(creds, {
+          symbol: keep.weex_symbol,
+          side: keep.side === "short" ? "BUY" : "SELL",
+          positionSide: keep.side === "short" ? "SHORT" : "LONG",
+          quantity: formatWeexQty(dump, spec.quantityPrecision),
+          clientOid: `veladedup${keep.id}${Date.now().toString(36)}`.slice(0, 36),
+        });
+        notes.push(
+          sent.ok
+            ? `Merged ${rows.length} ${keep.weex_symbol} into one. Cut extra size on WEEX.`
+            : `Merged ${keep.weex_symbol} tickets; WEEX size cut failed: ${sent.error.slice(0, 80)}`,
+        );
+      } else {
+        notes.push(`Merged ${rows.length} ${keep.weex_symbol} tickets into one`);
+      }
+    } else {
+      notes.push(`Merged ${rows.length} ${keep.weex_symbol} tickets into one`);
+    }
+  }
+}
+
 export const getAutoDesk = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -308,6 +370,7 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     `;
     const pulled = settings ? await pullWeexBook(settings) : { live: null, error: null };
     const live = pulled.live;
+    if (settings) await collapseOpenDupes(sql, context.userId, settings, []);
     if (settings && live) {
       const peak = Math.max(n(settings.peak_usd) || live.equity, live.equity);
       await sql`
@@ -600,12 +663,14 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       return { opened: 0, closed: 0, note: phase.note };
     }
 
+    const notes: string[] = [];
+    await collapseOpenDupes(sql, userId, settings, notes);
+
     const open = await sql<SignalRow>`
       select * from auto_signals
       where user_id = ${userId} and status in ('proposed','working','filled')
     `;
 
-    const notes: string[] = [];
     let closed = 0;
     let opened = 0;
     let equity = pub.accountUsd;
@@ -1001,6 +1066,17 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           if (!sized || !spec) {
             notes.push(veto);
           } else {
+            const [taken] = await sql<{ id: number }>`
+              select id from auto_signals
+              where user_id = ${userId}
+                and weex_symbol = ${sized.weexSymbol}
+                and side = ${sized.side}
+                and status in ('proposed','working','filled')
+              limit 1
+            `;
+            if (taken) {
+              notes.push(`Skip ${sized.weexSymbol} — already one ticket`);
+            } else {
             const { placeWeexOrder, setCrossMaxLeverage } = await import("@/lib/weex.server");
             const creds = (await credsFrom(settings))!;
             await setCrossMaxLeverage(creds, sized.weexSymbol, sized.leverage);
@@ -1058,7 +1134,8 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             }
 
             const filledAt = status === "filled" ? new Date().toISOString() : null;
-            await sql`
+            try {
+              await sql`
               insert into auto_signals (
                 user_id, symbol, weex_symbol, side, style, entry_type, entry, stop, target,
                 qty, leverage, risk_usd, notional, rr, thesis, invalidation, status, venue,
@@ -1072,7 +1149,11 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
                 ${sized.score}, ${sized.confidence}
               )
             `;
-            if (status !== "error") opened += 1;
+              if (status !== "error") opened += 1;
+            } catch {
+              notes.push(`Skip ${sized.weexSymbol} — already one ticket`);
+            }
+            }
           }
         }
       }
