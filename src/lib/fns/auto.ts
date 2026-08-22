@@ -382,6 +382,76 @@ async function closeFlatOnWeex(
   }
 }
 
+async function trimToTwoPct(
+  sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
+  userId: string,
+  settings: SettingsRow,
+  livePos: { symbol: string; qty: number }[] | null,
+  notes: string[],
+  creds: { apiKey: string; apiSecret: string; passphrase: string },
+  equity: number,
+) {
+  const filled = await sql<SignalRow>`
+    select * from auto_signals
+    where user_id = ${userId} and status = 'filled'
+  `;
+  if (!filled.length) return;
+  const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
+  const { flattenWeex, cancelWeexProtective, moveWeexStop, placeWeexTake } = await import("@/lib/weex.server");
+  const { coinByWeex } = await import("@/lib/universe");
+  for (const pos of filled) {
+    const spec = await specFor(coinByWeex(pos.weex_symbol));
+    const entry = n(pos.fill_px ?? pos.entry);
+    if (!(entry > 0) || !(equity > 0)) continue;
+    const wantQty = (equity * 0.02 * spec.maxLeverage) / entry;
+    const key = pos.weex_symbol.replace(/_/g, "").toUpperCase();
+    const live =
+      livePos?.find((p) => p.symbol.replace(/_/g, "").toUpperCase() === key || p.symbol === pos.weex_symbol)
+        ?.qty ?? n(pos.qty);
+    if (live > wantQty * 1.12) {
+      const dump = live - wantQty;
+      const sent = await flattenWeex(creds, {
+        symbol: pos.weex_symbol,
+        side: pos.side === "short" ? "BUY" : "SELL",
+        positionSide: pos.side === "short" ? "SHORT" : "LONG",
+        quantity: formatWeexQty(dump, spec.quantityPrecision),
+        clientOid: `velatrim${pos.id}${Date.now().toString(36)}`.slice(0, 36),
+      });
+      notes.push(
+        sent.ok
+          ? `Trimmed ${pos.weex_symbol} to ~2% margin`
+          : `Trim ${pos.weex_symbol} failed: ${sent.error.slice(0, 80)}`,
+      );
+      if (sent.ok) {
+        await sql`update auto_signals set qty = ${wantQty}, updated_at = now() where id = ${pos.id}`;
+      }
+    } else {
+      continue;
+    }
+    await cancelWeexProtective(creds, pos.weex_symbol);
+    await moveWeexStop(creds, {
+      symbol: pos.weex_symbol,
+      positionSide: pos.side === "short" ? "SHORT" : "LONG",
+      stop: formatWeexPx(n(pos.stop), spec.pricePrecision),
+      clientOid: `velasl${pos.id}${Date.now().toString(36)}`.slice(0, 36),
+    });
+    const tps = parseNums(pos.targets);
+    const weights = tps.length ? tps.map(() => 1 / tps.length) : [1];
+    const left = Math.min(live, wantQty);
+    for (let i = 0; i < tps.length; i += 1) {
+      const q = formatWeexQty(left * (weights[i] ?? 0), spec.quantityPrecision);
+      if (Number(q) <= 0) continue;
+      await placeWeexTake(creds, {
+        symbol: pos.weex_symbol,
+        positionSide: pos.side === "short" ? "SHORT" : "LONG",
+        tp: formatWeexPx(tps[i]!, spec.pricePrecision),
+        quantity: q,
+        clientOid: `velatp${pos.id}${i}${Date.now().toString(36)}`.slice(0, 36),
+      });
+    }
+  }
+}
+
 export const getAutoDesk = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -721,6 +791,10 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     let streak = pub.lossStreak;
     let winStreak = n((settings as SettingsRow).win_streak) || 0;
     let peak = pub.peakUsd;
+    {
+      const creds = await credsFrom(settings);
+      if (creds) await trimToTwoPct(sql, userId, settings, weexBook, notes, creds, equity);
+    }
 
     for (const pos of open) {
       const px = await getWeexLast(pos.weex_symbol);
@@ -1147,56 +1221,67 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             if (taken) {
               notes.push(`Skip ${sized.weexSymbol} — already one ticket`);
             } else {
-            const { placeWeexOrder, setCrossMaxLeverage } = await import("@/lib/weex.server");
+            const { placeWeexOrder, setCrossMaxLeverage, placeWeexTake } = await import("@/lib/weex.server");
             const creds = (await credsFrom(settings))!;
+            let ticketId: number | null = null;
+            try {
+              const [claim] = await sql<{ id: number }>`
+                insert into auto_signals (
+                  user_id, symbol, weex_symbol, side, style, entry_type, entry, stop, target,
+                  qty, leverage, risk_usd, notional, rr, thesis, invalidation, status, venue,
+                  client_oid, targets, scale, plan, score, confidence
+                ) values (
+                  ${userId}, ${sized.symbol}, ${sized.weexSymbol}, ${sized.side}, ${sized.style},
+                  ${sized.entryType}, ${sized.entry}, ${sized.stop}, ${sized.target}, ${sized.qty},
+                  ${Math.round(sized.leverage)}, ${sized.riskUsd}, ${sized.notional}, ${sized.rr},
+                  ${sized.thesis}, ${sized.invalidation}, ${"proposed"}, 'weex',
+                  ${`vela${Date.now().toString(36)}`.slice(0, 36)},
+                  ${JSON.stringify(sized.targets.length ? sized.targets : [sized.target])},
+                  ${JSON.stringify(sized.scale)}, ${sized.plan}, ${sized.score}, ${sized.confidence}
+                ) returning id
+              `;
+              ticketId = claim?.id ?? null;
+            } catch {
+              notes.push(`Skip ${sized.weexSymbol} — already one ticket`);
+            }
+            if (!ticketId) {
+              /* unique lost the race */
+            } else {
             await setCrossMaxLeverage(creds, sized.weexSymbol, sized.leverage);
 
             const tps = sized.targets.length ? sized.targets : [sized.target];
             const weights = sized.scale.length === tps.length ? sized.scale : tps.map(() => 1 / tps.length);
-            const slices: { qty: string; tp: string; oid: string }[] = [];
-            for (let i = 0; i < tps.length; i += 1) {
-              const q = formatWeexQty(sized.qty * (weights[i] ?? 0), spec.quantityPrecision);
-              if (Number(q) <= 0) continue;
-              slices.push({
-                qty: q,
-                tp: formatWeexPx(tps[i]!, spec.pricePrecision),
-                oid: `vela${Date.now().toString(36)}${i}${Math.floor(Math.random() * 99)}`.slice(0, 36),
-              });
-            }
-            if (slices.length === 0) {
-              const q = formatWeexQty(sized.qty, spec.quantityPrecision);
-              if (Number(q) > 0) {
-                slices.push({
-                  qty: q,
-                  tp: formatWeexPx(sized.target, spec.pricePrecision),
-                  oid: `vela${Date.now().toString(36)}`.slice(0, 36),
+            const fullQty = formatWeexQty(sized.qty, spec.quantityPrecision);
+            const oid = `vela${Date.now().toString(36)}`.slice(0, 36);
+            const sent = await placeWeexOrder(creds, false, {
+              symbol: sized.weexSymbol,
+              side: sized.side === "long" ? "BUY" : "SELL",
+              positionSide: sized.side === "long" ? "LONG" : "SHORT",
+              type: sized.entryType === "market" ? "MARKET" : "LIMIT",
+              quantity: fullQty,
+              price: formatWeexPx(sized.entry, spec.pricePrecision),
+              clientOid: oid,
+              sl: formatWeexPx(sized.stop, spec.pricePrecision),
+            });
+            const replies = [sent.ok ? JSON.stringify(sent.data).slice(0, 180) : sent.error.slice(0, 180)];
+            if (sent.ok) {
+              for (let i = 0; i < tps.length; i += 1) {
+                const q = formatWeexQty(sized.qty * (weights[i] ?? 0), spec.quantityPrecision);
+                if (Number(q) <= 0) continue;
+                await placeWeexTake(creds, {
+                  symbol: sized.weexSymbol,
+                  positionSide: sized.side === "long" ? "LONG" : "SHORT",
+                  tp: formatWeexPx(tps[i]!, spec.pricePrecision),
+                  quantity: q,
+                  clientOid: `velatp${ticketId}${i}${Date.now().toString(36)}`.slice(0, 36),
                 });
               }
             }
 
-            const replies: string[] = [];
-            let okAny = false;
-            for (const slice of slices) {
-              const sent = await placeWeexOrder(creds, false, {
-                symbol: sized.weexSymbol,
-                side: sized.side === "long" ? "BUY" : "SELL",
-                positionSide: sized.side === "long" ? "LONG" : "SHORT",
-                type: sized.entryType === "market" ? "MARKET" : "LIMIT",
-                quantity: slice.qty,
-                price: formatWeexPx(sized.entry, spec.pricePrecision),
-                clientOid: slice.oid,
-                tp: slice.tp,
-                sl: formatWeexPx(sized.stop, spec.pricePrecision),
-              });
-              replies.push(sent.ok ? JSON.stringify(sent.data).slice(0, 180) : sent.error.slice(0, 180));
-              if (sent.ok) okAny = true;
-            }
-
             const weexResp = replies.join(" | ").slice(0, 500);
-            const status = okAny ? (sized.entryType === "market" ? "filled" : "working") : "error";
+            const status = sent.ok ? (sized.entryType === "market" ? "filled" : "working") : "error";
             const fillPx = status === "filled" ? sized.entry : null;
-            const clientOid = slices[0]?.oid ?? `vela${Date.now().toString(36)}`.slice(0, 36);
-            if (!okAny) notes.push(`WEEX reject ${sized.weexSymbol}: ${replies[0]?.slice(0, 80) ?? "empty"}`);
+            if (!sent.ok) notes.push(`WEEX reject ${sized.weexSymbol}: ${replies[0]?.slice(0, 80) ?? "empty"}`);
             else {
               notes.push(
                 `${corrected.name} ${sized.leverage}x ${sized.side} ${sized.weexSymbol} · ${sized.rr.toFixed(1)}R · conf ${sized.confidence}% · $${sized.marginUsd.toFixed(2)}`,
@@ -1204,24 +1289,17 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             }
 
             const filledAt = status === "filled" ? new Date().toISOString() : null;
-            try {
-              await sql`
-              insert into auto_signals (
-                user_id, symbol, weex_symbol, side, style, entry_type, entry, stop, target,
-                qty, leverage, risk_usd, notional, rr, thesis, invalidation, status, venue,
-                client_oid, weex_resp, fill_px, targets, scale, plan, filled_at, score, confidence
-              ) values (
-                ${userId}, ${sized.symbol}, ${sized.weexSymbol}, ${sized.side}, ${sized.style},
-                ${sized.entryType}, ${sized.entry}, ${sized.stop}, ${sized.target}, ${sized.qty},
-                ${Math.round(sized.leverage)}, ${sized.riskUsd}, ${sized.notional}, ${sized.rr},
-                ${sized.thesis}, ${sized.invalidation}, ${status}, 'weex', ${clientOid}, ${weexResp}, ${fillPx},
-                ${JSON.stringify(tps)}, ${JSON.stringify(weights)}, ${sized.plan}, ${filledAt},
-                ${sized.score}, ${sized.confidence}
-              )
+            await sql`
+              update auto_signals
+              set status = ${status},
+                  client_oid = ${oid},
+                  weex_resp = ${weexResp},
+                  fill_px = ${fillPx},
+                  filled_at = ${filledAt},
+                  updated_at = now()
+              where id = ${ticketId} and user_id = ${userId}
             `;
-              if (status !== "error") opened += 1;
-            } catch {
-              notes.push(`Skip ${sized.weexSymbol} — already one ticket`);
+            if (status !== "error") opened += 1;
             }
             }
           }

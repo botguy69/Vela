@@ -309,8 +309,8 @@ export async function placeWeexOrder(
     quantity: string;
     price?: string;
     clientOid: string;
-    tp: string;
-    sl: string;
+    tp?: string;
+    sl?: string;
   },
 ): Promise<WeexResult<unknown>> {
   const body: Record<string, string> = {
@@ -320,11 +320,15 @@ export async function placeWeexOrder(
     type: order.type,
     quantity: order.quantity,
     newClientOrderId: order.clientOid.slice(0, 36),
-    tpTriggerPrice: order.tp,
-    slTriggerPrice: order.sl,
-    TpWorkingType: "CONTRACT_PRICE",
-    SlWorkingType: "MARK_PRICE",
   };
+  if (order.sl) {
+    body.slTriggerPrice = order.sl;
+    body.SlWorkingType = "MARK_PRICE";
+  }
+  if (order.tp) {
+    body.tpTriggerPrice = order.tp;
+    body.TpWorkingType = "CONTRACT_PRICE";
+  }
   if (order.type === "LIMIT") {
     body.timeInForce = "POST_ONLY";
     body.price = order.price ?? "";
@@ -397,5 +401,43 @@ export async function cancelWeexOrder(
     method: "DELETE",
     path: "/capi/v3/order",
     query: { symbol: order.symbol, origClientOrderId: order.clientOid.slice(0, 36) },
+  });
+}
+
+export async function cancelWeexProtective(creds: WeexCreds, symbol: string) {
+  const tries = [
+    () => weexRequest({ creds, method: "DELETE", path: "/capi/v3/allOpenOrders", query: { symbol } }),
+    () => weexRequest({ creds, method: "DELETE", path: "/capi/v3/openOrders", query: { symbol } }),
+    () => weexRequest({ creds, method: "POST", path: "/capi/v3/algoOrder/cancelAll", body: { symbol } }),
+    () => weexRequest({ creds, method: "DELETE", path: "/capi/v3/tpslOrder", query: { symbol } }),
+    () => weexRequest({ creds, method: "POST", path: "/capi/v3/cancelAllTpSl", body: { symbol } }),
+  ];
+  for (const t of tries) await t().catch(() => null);
+}
+
+export async function placeWeexTake(
+  creds: WeexCreds,
+  order: {
+    symbol: string;
+    positionSide: "LONG" | "SHORT";
+    tp: string;
+    quantity: string;
+    clientOid: string;
+  },
+) {
+  return weexRequest({
+    creds,
+    method: "POST",
+    path: "/capi/v3/placeTpSlOrder",
+    body: {
+      symbol: order.symbol,
+      clientAlgoId: order.clientOid.slice(0, 36),
+      planType: "TAKE_PROFIT",
+      triggerPrice: order.tp,
+      executePrice: "0",
+      quantity: order.quantity,
+      positionSide: order.positionSide,
+      triggerPriceType: "CONTRACT_PRICE",
+    },
   });
 }
