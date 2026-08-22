@@ -73,7 +73,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: full list to $1,000. Long + short ok. A BE lock frees the slot for the next ticket.",
+      note: "Stage 1: full list to $1,000. Long + short ok. After TP1/BE, the next ticket can open — up to 6 live.",
     };
   }
   return {

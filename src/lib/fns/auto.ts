@@ -850,7 +850,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       where user_id = ${userId} and status in ('proposed','working','filled')
     `;
     const atRisk = stillOpen.filter((s) => s.status !== "filled" || !s.be_moved);
-    const LIVE_CAP = 4;
+    const LIVE_CAP = 6;
     const ledger = await ticketLedger(sql, userId);
     const closedConf = await sql<{ confidence: string | number | null; pnl: string | number | null }>`
       select confidence, pnl from auto_signals
@@ -1025,7 +1025,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     } else if (!settings.armed) {
       notes.push("Disarmed. No new orders.");
     } else if (stillOpen.length >= LIVE_CAP) {
-      notes.push("Live cap (4 names). Waiting on an exit.");
+      notes.push("Live cap (6 names). Waiting on an exit.");
     } else {
       notes.push(
         `${atRisk.length} at-risk / ${stillOpen.length} live. BE lock frees a slot for the next long or short.`,
