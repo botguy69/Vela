@@ -27,6 +27,7 @@ type SettingsRow = {
   last_cron_at: string | null;
   public_origin: string | null;
   continue_to_goal: boolean | null;
+  stats_from: string | null;
   updated_at: string;
 };
 
@@ -180,7 +181,9 @@ async function pullWeexBook(row: SettingsRow) {
 async function closedStats(
   sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
   userId: string,
+  statsFrom?: string | Date | null,
 ) {
+  const from = statsFrom ?? new Date(0).toISOString();
   const rows = await sql<{
     pnl: string | number | null;
     entry: string | number | null;
@@ -191,6 +194,7 @@ async function closedStats(
     select pnl, entry, stop, qty, fill_px from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
       and (close_reason is null or close_reason not like 'Duplicate%')
+      and created_at >= ${from}
   `;
   const closed = rows.length;
   const wins = rows.filter((r) => n(r.pnl) > 0).length;
@@ -275,7 +279,9 @@ function mapSignal(row: SignalRow) {
 async function ticketLedger(
   sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
   userId: string,
+  statsFrom?: string | Date | null,
 ) {
+  const from = statsFrom ?? new Date(0).toISOString();
   const rows = await sql<{
     plan: string | null;
     side: string | null;
@@ -285,6 +291,7 @@ async function ticketLedger(
     select plan, side, weex_symbol, pnl from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
       and (close_reason is null or close_reason not like 'Duplicate%')
+      and created_at >= ${from}
   `;
   const { buildLedger } = await import("@/lib/desk-rules");
   return buildLedger(
@@ -383,6 +390,36 @@ async function closeFlatOnWeex(
       await cancelWeexProtective(creds, pos.weex_symbol).catch(() => null);
     }
     notes.push(`${pos.weex_symbol} ${why} ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`);
+  }
+
+  const recent = await sql<{ weex_symbol: string }>`
+    select distinct weex_symbol from auto_signals
+    where user_id = ${userId}
+      and close_reason = 'Closed on WEEX'
+      and updated_at > now() - interval '2 hours'
+  `;
+  const cooled = new Set(recent.map((r) => r.weex_symbol));
+  if (cooled.size && creds) {
+    const leftover = await sql<SignalRow>`
+      select * from auto_signals
+      where user_id = ${userId}
+        and status in ('proposed','working')
+        and weex_symbol = any(${Array.from(cooled)})
+    `;
+    const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
+    for (const row of leftover) {
+      if (row.client_oid) await cancelWeexOrder(creds, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
+      await cancelWeexProtective(creds, row.weex_symbol).catch(() => null);
+      await sql`
+        update auto_signals
+        set status = 'skipped',
+            close_reason = ${"Cancelled — you flattened WEEX"},
+            pnl = 0,
+            updated_at = now()
+        where id = ${row.id} and user_id = ${userId}
+      `;
+      notes.push(`${row.weex_symbol} leftover limit cancelled`);
+    }
   }
 }
 
@@ -488,7 +525,7 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       settings.account_usd = live.equity;
       settings.peak_usd = peak;
     }
-    const stats = await closedStats(sql, context.userId);
+    const stats = await closedStats(sql, context.userId, settings?.stats_from);
     const signals = await sql<SignalRow>`
       select * from auto_signals where user_id = ${context.userId}
       order by created_at desc limit 40
@@ -759,7 +796,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     } else if (pulled.error) {
       /* shown in last tick note if we skip size */
     }
-    const stats = await closedStats(sql, userId);
+    const stats = await closedStats(sql, userId, settings.stats_from);
     const pub = publicSettings(settings, stats, live, pulled.error);
     const phase = livePhase(settings, stats);
 
@@ -1108,7 +1145,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           });
     const atRisk = stillOpen.filter((s) => s.status !== "filled" || !s.be_moved);
     const LIVE_CAP = 6;
-    const ledger = await ticketLedger(sql, userId);
+    const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const closedConf = await sql<{ confidence: string | number | null; pnl: string | number | null }>`
       select confidence, pnl from auto_signals
       where user_id = ${userId} and status in ('stopped','targeted','skipped')
@@ -1138,6 +1175,16 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             ? rawAll.filter((s) => CORE_SET.has(s.weexSymbol))
             : rawAll;
           const busy = new Set(stillOpen.map((s) => s.weex_symbol));
+          const flattened = new Set(
+            (
+              await sql<{ weex_symbol: string }>`
+                select distinct weex_symbol from auto_signals
+                where user_id = ${userId}
+                  and close_reason = 'Closed on WEEX'
+                  and updated_at > now() - interval '2 hours'
+              `
+            ).map((r) => r.weex_symbol),
+          );
           const betaBook = atRisk.map((s) => ({
             weex: s.weex_symbol,
             side: (s.side === "short" ? "short" : "long") as "long" | "short",
@@ -1164,6 +1211,10 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             : `No setup. BTC RSI ${btcRsi.toFixed(0)} last ${btcLast?.toFixed(0) ?? "?"} ATR ${regime.ratio.toFixed(1)}×.`;
 
           for (const pick of raw) {
+            if (flattened.has(pick.weexSymbol)) {
+              veto = `You flattened ${pick.weexSymbol}. 2h pause on that pair.`;
+              continue;
+            }
             if (busy.has(pick.weexSymbol)) continue;
             if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side })) {
               const held = stillOpen[0];
@@ -1409,7 +1460,7 @@ export const reviewBook = createServerFn({ method: "POST" })
     const sql = await getSql();
     const [settings] = await sql<SettingsRow>`select * from auto_settings where user_id = ${context.userId}`;
     if (!settings) return { ok: false as const, error: "No desk yet." };
-    const stats = await closedStats(sql, context.userId);
+    const stats = await closedStats(sql, context.userId, settings?.stats_from);
     const pulled = await pullWeexBook(settings).catch(() => ({ live: null as { equity: number; available: number } | null, error: null as string | null }));
     const pub = publicSettings(settings, stats, pulled.live, pulled.error);
     const open = await sql<SignalRow>`
