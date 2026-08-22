@@ -153,17 +153,19 @@ function pickUsdt(rows: unknown[]): { equity: number; available: number; asset: 
 function rowsFrom(raw: unknown): unknown[] {
   if (Array.isArray(raw)) return raw;
   if (!raw || typeof raw !== "object") return [];
-  const o = raw as { data?: unknown; balances?: unknown; list?: unknown };
+  const o = raw as Record<string, unknown>;
   if (Array.isArray(o.data)) return o.data;
   if (Array.isArray(o.balances)) return o.balances;
   if (Array.isArray(o.list)) return o.list;
+  if (Array.isArray(o.positions)) return o.positions;
   if (o.data && typeof o.data === "object") {
-    const d = o.data as { balances?: unknown; list?: unknown };
-    if (Array.isArray(d.balances)) return d.balances;
-    if (Array.isArray(d.list)) return d.list;
-    if (!Array.isArray(d) && ("asset" in d || "coinName" in d || "balance" in d)) return [d];
+    const d = o.data as Record<string, unknown>;
+    for (const k of ["balances", "list", "positions", "positionList", "holdList", "records", "result"]) {
+      if (Array.isArray(d[k])) return d[k] as unknown[];
+    }
+    if ("asset" in d || "coinName" in d || "symbol" in d || "holdVol" in d) return [d];
   }
-  if ("asset" in o || "coinName" in o) return [o];
+  if ("asset" in o || "coinName" in o || "symbol" in o || "holdVol" in o) return [o];
   return [];
 }
 
@@ -203,8 +205,22 @@ function parsePosition(row: unknown): { symbol: string; side: "long" | "short"; 
     openPriceAvg?: string | number;
     averagePrice?: string | number;
   };
-  const symbol = String(r.symbol ?? r.contract ?? "").replace("_", "");
-  const q = Math.abs(Number(r.positionAmt ?? r.holdVol ?? r.positionSize ?? r.size ?? r.total ?? 0));
+  const symbol = String(r.symbol ?? r.contract ?? "")
+    .replace(/_/g, "")
+    .replace(/^cmt/i, "")
+    .toUpperCase();
+  const q = Math.abs(
+    Number(
+      r.positionAmt ??
+        r.holdVol ??
+        r.positionSize ??
+        r.size ??
+        r.total ??
+        (r as { volume?: string | number }).volume ??
+        (r as { qty?: string | number }).qty ??
+        0,
+    ),
+  );
   if (!symbol || !Number.isFinite(q) || q <= 0) return null;
   const sideRaw = String(r.positionSide ?? r.holdSide ?? r.side ?? "").toLowerCase();
   const amt = Number(r.positionAmt);
@@ -228,7 +244,9 @@ export async function listWeexPositions(
   const paths = [
     { path: "/capi/v3/account/positions", query: undefined as Record<string, string> | undefined },
     { path: "/capi/v3/positionRisk", query: undefined },
+    { path: "/capi/v3/position/open", query: undefined },
     { path: "/capi/v2/position", query: undefined },
+    { path: "/capi/v2/account/positions", query: undefined },
   ];
   for (const p of paths) {
     const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });

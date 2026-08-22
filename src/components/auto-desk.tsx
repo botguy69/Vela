@@ -197,12 +197,21 @@ function TicketsTable({
     thesis: string | null;
     rr: number;
     confidence: number | null;
+    liveOnWeex?: boolean;
   }>;
   refresh: () => void;
 }) {
+  const open = signals.filter(
+    (t) => t.status === "filled" || t.status === "working" || t.liveOnWeex,
+  );
+  const closed = signals.filter((t) => !open.includes(t)).slice(0, 8);
+  const rows = [...open, ...closed];
   return (
     <section>
       <h2 className="font-display text-2xl font-medium tracking-tight">Tickets</h2>
+      <p className="mt-1 text-sm text-muted">
+        {open.length ? `${open.length} live on WEEX` : "No live tickets"}
+      </p>
       <div className="mt-3 overflow-hidden rounded-xl bg-surface shadow-border">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
@@ -219,22 +228,26 @@ function TicketsTable({
               </tr>
             </thead>
             <tbody>
-              {signals.length === 0 && (
+              {rows.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-4 py-10 text-center text-muted">
                     No tickets. Store keys, then arm.
                   </td>
                 </tr>
               )}
-              {signals.map((t) => (
-                <tr key={t.id} className="border-b border-line/70 last:border-0">
+              {rows.map((t) => {
+                const live = t.status === "filled" || t.status === "working" || Boolean(t.liveOnWeex);
+                const why = [
+                  t.rr > 0 ? `${t.rr.toFixed(1)}R` : null,
+                  t.confidence != null ? `${Math.round(t.confidence)}%` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+                return (
+                <tr key={t.id} className={cn("border-b border-line/70 last:border-0", !live && "opacity-55")}>
                   <td className="px-4 py-2.5 font-medium">
                     {t.weexSymbol}
-                    <div className="max-w-[16rem] text-[11px] leading-snug text-subtle">
-                      {t.rr > 0 ? `${t.rr.toFixed(1)}R` : ""}
-                      {t.confidence != null ? ` · ${Math.round(t.confidence)}%` : ""}
-                      {t.thesis ? ` · ${t.thesis}` : ""}
-                    </div>
+                    <div className="text-[11px] text-subtle">{why || "cross"}</div>
                   </td>
                   <td className={cn("px-4 py-2.5 uppercase", t.side === "long" ? "text-up" : "text-down")}>
                     {t.side}
@@ -257,12 +270,12 @@ function TicketsTable({
                     {t.pnl == null ? "—" : formatUsd(t.pnl)}
                   </td>
                   <td className="px-4 py-2.5">
-                    <Badge variant={t.status === "filled" || t.status === "working" ? "live" : "default"}>
-                      {t.beMoved ? "BE locked" : t.status}
+                    <Badge variant={live ? "live" : "default"}>
+                      {live ? (t.beMoved ? "BE locked" : t.status === "working" ? "working" : "live") : t.status}
                     </Badge>
                   </td>
                   <td className="px-4 py-2.5">
-                    {(t.status === "filled" || t.status === "working") && (
+                    {live && (
                       <button
                         type="button"
                         className="text-xs text-muted underline-offset-4 hover:text-fg hover:underline"
@@ -282,7 +295,8 @@ function TicketsTable({
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

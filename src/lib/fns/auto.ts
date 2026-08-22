@@ -220,6 +220,7 @@ function mapSignal(row: SignalRow) {
     plan: row.plan,
     score: row.score == null ? null : n(row.score),
     confidence: row.confidence == null ? null : n(row.confidence),
+    liveOnWeex: false,
     createdAt: row.created_at,
   };
 }
@@ -286,10 +287,23 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       if (creds) {
         const { listWeexPositions } = await import("@/lib/weex.server");
         const livePos = await listWeexPositions(creds).catch(() => []);
-        for (const p of livePos) leftBy.set(p.symbol, p.qty);
+        for (const p of livePos) {
+          leftBy.set(p.symbol, p.qty);
+          leftBy.set(p.symbol.replace(/_/g, "").toUpperCase(), p.qty);
+        }
       }
     }
     for (const t of mapped) {
+      const key = t.weexSymbol.replace(/_/g, "").toUpperCase();
+      const left = leftBy.get(t.weexSymbol) ?? leftBy.get(key);
+      if (left != null && left > 0) {
+        t.liveOnWeex = true;
+        if (t.status !== "working" && t.status !== "filled" && t.status !== "proposed") {
+          t.status = "filled";
+        }
+      } else {
+        t.liveOnWeex = false;
+      }
       if (t.status !== "filled" && t.status !== "working") continue;
       if (!lastBy.has(t.weexSymbol)) {
         try {
@@ -306,7 +320,7 @@ export const getAutoDesk = createServerFn({ method: "GET" })
           entry,
           last,
           qty: t.qty,
-          leftover: leftBy.get(t.weexSymbol) ?? null,
+          leftover: left ?? null,
           targets: t.targets,
           beMoved: t.beMoved,
         });
