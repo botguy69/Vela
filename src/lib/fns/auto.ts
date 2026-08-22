@@ -424,7 +424,7 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       const creds = await credsFrom(settings);
       if (creds) {
         const { listWeexPositions } = await import("@/lib/weex.server");
-        const livePos = await listWeexPositions(creds).catch(() => []);
+        const livePos = (await listWeexPositions(creds).catch(() => null)) ?? [];
         for (const p of livePos) {
           leftBy.set(p.symbol, p.qty);
           leftBy.set(p.symbol.replace(/_/g, "").toUpperCase(), p.qty);
