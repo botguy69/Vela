@@ -849,6 +849,8 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       select * from auto_signals
       where user_id = ${userId} and status in ('proposed','working','filled')
     `;
+    const atRisk = stillOpen.filter((s) => s.status !== "filled" || !s.be_moved);
+    const LIVE_CAP = 4;
     const ledger = await ticketLedger(sql, userId);
     const closedConf = await sql<{ confidence: string | number | null; pnl: string | number | null }>`
       select confidence, pnl from auto_signals
@@ -859,7 +861,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       corrected.minConf,
     );
 
-    if (settings.armed && stillOpen.length < corrected.maxOpen) {
+    if (settings.armed && atRisk.length < corrected.maxOpen && stillOpen.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
         notes.push("Armed with no keys. Store keys on this page.");
       } else if (!live) {
@@ -879,7 +881,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             ? rawAll.filter((s) => CORE_SET.has(s.weexSymbol))
             : rawAll;
           const busy = new Set(stillOpen.map((s) => s.weex_symbol));
-          const betaBook = stillOpen.map((s) => ({
+          const betaBook = atRisk.map((s) => ({
             weex: s.weex_symbol,
             side: (s.side === "short" ? "short" : "long") as "long" | "short",
           }));
@@ -1022,8 +1024,12 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
     } else if (!settings.armed) {
       notes.push("Disarmed. No new orders.");
+    } else if (stillOpen.length >= LIVE_CAP) {
+      notes.push("Live cap (4 names). Waiting on an exit.");
     } else {
-      notes.push("Book full. Watching open tickets.");
+      notes.push(
+        `${atRisk.length} at-risk / ${stillOpen.length} live. BE lock frees a slot for the next long or short.`,
+      );
     }
 
     const learned = [corrected.note, bar.note, ledger.note].filter(Boolean).join(" · ");
