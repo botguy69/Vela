@@ -143,21 +143,29 @@ export function adaptMethod(opts: {
     }
   }
 
-  if (opts.lossStreak >= 5 || opts.drawdownPct >= 30) {
+  // Size cools. Slot count does not — BE compounding still works.
+  if (opts.drawdownPct >= 30) {
     next = {
       ...next,
       marginPct: 1,
       maxOpen: 1,
       minRr: Math.max(next.minRr, 2),
       minConf: Math.min(82, next.minConf + 6),
-      note: `${next.note} Re-evaluate: 5 losses. 1% margin, one at-risk ticket, higher conf.`,
+      note: `${next.note} Book is ~30% off peak. One at-risk at 1% until equity heals.`,
+    };
+  } else if (opts.lossStreak >= 5) {
+    next = {
+      ...next,
+      marginPct: 1,
+      minConf: Math.min(82, next.minConf + 4),
+      note: `${next.note} Five losses: still two at-risk, 1% margin, higher conf.`,
     };
   } else if (opts.lossStreak >= 4) {
     next = {
       ...next,
       marginPct: Math.min(next.marginPct, 1.2),
-      minConf: Math.min(82, next.minConf + 3),
-      note: `${next.note} Four losses. 1.2% margin, still two at-risk. Next loss and it cools.`,
+      minConf: Math.min(82, next.minConf + 2),
+      note: `${next.note} Four losses: 1.2% size, still two at-risk.`,
     };
   }
   return next;
