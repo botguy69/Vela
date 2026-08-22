@@ -143,22 +143,21 @@ export function adaptMethod(opts: {
     }
   }
 
-  if (opts.lossStreak >= 3 || opts.drawdownPct >= 25) {
+  if (opts.lossStreak >= 5 || opts.drawdownPct >= 30) {
     next = {
       ...next,
       marginPct: 1,
       maxOpen: 1,
       minRr: Math.max(next.minRr, 2),
       minConf: Math.min(82, next.minConf + 6),
-      note: `${next.note} Cooling: 1% margin, one ticket, higher conf until the book heals.`,
+      note: `${next.note} Re-evaluate: 5 losses. 1% margin, one at-risk ticket, higher conf.`,
     };
-  } else if (opts.lossStreak >= 2 || opts.drawdownPct >= 15) {
+  } else if (opts.lossStreak >= 4) {
     next = {
       ...next,
       marginPct: Math.min(next.marginPct, 1.2),
-      maxOpen: 1,
-      minConf: Math.min(82, next.minConf + 4),
-      note: `${next.note} Pulled back to 1.2% and one ticket. Raising the conf bar.`,
+      minConf: Math.min(82, next.minConf + 3),
+      note: `${next.note} Four losses. 1.2% margin, still two at-risk. Next loss and it cools.`,
     };
   }
   return next;
