@@ -550,12 +550,26 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
 
       const tps = parseNums(pos.targets);
+      let mark = px;
+      if (pos.status === "filled" && !pos.be_moved) {
+        const sinceMs = new Date(pos.filled_at ?? pos.created_at).getTime();
+        const minutes = await getWeexKlines(pos.weex_symbol, "1m", 120).catch(() => []);
+        const after = minutes.filter((c) => {
+          const t = c.time > 1e12 ? c.time : c.time * 1000;
+          return t >= sinceMs - 60_000;
+        });
+        if (after.length) {
+          mark = side === "long"
+            ? Math.max(px, ...after.map((c) => c.high))
+            : Math.min(px, ...after.map((c) => c.low));
+        }
+      }
       if (
         shouldLockBreakeven({
           side,
           entry,
           stop,
-          last: px,
+          last: mark,
           targets: tps,
           already: Boolean(pos.be_moved),
         })
@@ -563,21 +577,26 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         const be = breakevenPrice(side, entry);
         const spec = await specFor(coinByWeex(pos.weex_symbol));
         const creds = await credsFrom(settings);
+        let moved = false;
         if (creds) {
           const { moveWeexStop } = await import("@/lib/weex.server");
-          await moveWeexStop(creds, {
+          const sent = await moveWeexStop(creds, {
             symbol: pos.weex_symbol,
             positionSide: side === "short" ? "SHORT" : "LONG",
             stop: formatWeexPx(be, spec.pricePrecision),
             clientOid: `velabe${pos.id}${Date.now().toString(36)}`.slice(0, 36),
           });
+          moved = sent.ok;
+          if (!sent.ok) notes.push(`${pos.weex_symbol} BE on WEEX failed: ${sent.error.slice(0, 80)}`);
         }
-        await sql`
-          update auto_signals
-          set stop = ${be}, be_moved = true, updated_at = now()
-          where id = ${pos.id} and user_id = ${userId}
-        `;
-        notes.push(`${pos.weex_symbol} stop to breakeven`);
+        if (moved || !creds) {
+          await sql`
+            update auto_signals
+            set stop = ${be}, be_moved = true, updated_at = now()
+            where id = ${pos.id} and user_id = ${userId}
+          `;
+          if (moved) notes.push(`${pos.weex_symbol} stop to breakeven`);
+        }
       } else if (pos.be_moved) {
         const hourly = await getWeexKlines(pos.weex_symbol, "1h", 40).catch(() => []);
         const next = rules.trailStop({ side, entry, stop, hourly });
