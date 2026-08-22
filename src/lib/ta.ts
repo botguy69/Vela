@@ -239,6 +239,40 @@ export function analyzeMarket(
     });
   }
 
+  const prior = hourly.slice(0, -1);
+  if (prior.length >= 24) {
+    const hiPrior = swing(prior, 20, "high");
+    const loPrior = swing(prior, 20, "low");
+    const failedHigh =
+      lastBar.high > hiPrior && lastBar.close < hiPrior && lastBar.close <= lastBar.open && r >= 52;
+    if (failedHigh) {
+      ideas.push({
+        side: "short",
+        entry: last,
+        stop: lastBar.high + stopPad * a * 0.35,
+        entryType: "market",
+        score: 74,
+        thesis: `Failed range high, RSI ${r.toFixed(0)}`,
+        invalidation: `Hourly close back above the failed high.`,
+        plan: "scale2",
+      });
+    }
+    const failedLow =
+      lastBar.low < loPrior && lastBar.close > loPrior && lastBar.close >= lastBar.open && r <= 48;
+    if (failedLow) {
+      ideas.push({
+        side: "long",
+        entry: last,
+        stop: lastBar.low - stopPad * a * 0.35,
+        entryType: "market",
+        score: 74,
+        thesis: `Failed range low, RSI ${r.toFixed(0)}`,
+        invalidation: `Hourly close back below the failed low.`,
+        plan: "scale2",
+      });
+    }
+  }
+
   let best: Idea | null = null;
   for (const idea of ideas) {
     if (!best || idea.score > best.score) best = idea;
