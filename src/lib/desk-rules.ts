@@ -246,6 +246,31 @@ export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
   return ranked;
 }
 
+/** If high-confidence tickets keep stopping out, the bar moves up. Never claims 90%. */
+export function confidenceBar(
+  closed: { conf: number; pnl: number }[],
+  base: number,
+): { minConf: number; note: string } {
+  const rows = closed.filter((c) => c.conf > 0);
+  if (rows.length < 4) return { minConf: base, note: "" };
+  const high = rows.filter((c) => c.conf >= base);
+  const highLose = high.filter((c) => c.pnl < 0);
+  if (high.length >= 3 && highLose.length / high.length >= 0.5) {
+    const minConf = Math.min(82, base + 8);
+    return {
+      minConf,
+      note: `High-conf SLs ${highLose.length}/${high.length}. Bar now ${minConf}%.`,
+    };
+  }
+  const low = rows.filter((c) => c.conf < base);
+  const lowWin = low.filter((c) => c.pnl > 0);
+  if (low.length >= 4 && lowWin.length / low.length >= 0.6) {
+    const minConf = Math.max(58, base - 4);
+    return { minConf, note: `Lower-conf tickets paid. Bar ${minConf}%.` };
+  }
+  return { minConf: base, note: "" };
+}
+
 export function writeDeskNote(opts: {
   phase: string;
   equity: number;

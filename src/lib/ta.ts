@@ -24,6 +24,7 @@ export type RawSetup = {
   targets: number[];
   scale: number[];
   plan: "single" | "scale2" | "scale3";
+  confidence: number;
 };
 
 function sma(values: number[], period: number): number | null {
@@ -62,6 +63,11 @@ function swing(candles: Candle[], lookback: number, kind: "high" | "low"): numbe
   return kind === "high"
     ? Math.max(...slice.map((c) => c.high))
     : Math.min(...slice.map((c) => c.low));
+}
+
+export function scoreToConf(score: number): number {
+  const x = Math.max(0, Math.min(1, (score - 58) / 28));
+  return Math.round(48 + x * 32);
 }
 
 export function weexSymbol(id: MarketId | string): string {
@@ -112,7 +118,7 @@ export function analyzeMarket(
       stop,
       entryType: last - entry < 0.2 * a ? "market" : "limit",
       score: 70 + Math.max(0, 52 - Math.abs(r - 44)) / 4 + (up ? 8 : 0),
-      thesis: `Uptrend hold. RSI ${r.toFixed(0)}. Bid the 21-hour mean, not the spike.`,
+      thesis: `Bid 21h mean, RSI ${r.toFixed(0)}`,
       invalidation: `Hourly close back through the 21-hour average.`,
       plan: "scale2",
     });
@@ -127,7 +133,7 @@ export function analyzeMarket(
       stop,
       entryType: entry - last < 0.2 * a ? "market" : "limit",
       score: 70 + Math.max(0, 52 - Math.abs(r - 56)) / 4 + (down ? 8 : 0),
-      thesis: `Downtrend hold. RSI ${r.toFixed(0)}. Offer the mean.`,
+      thesis: `Offer 21h mean, RSI ${r.toFixed(0)}`,
       invalidation: `Hourly close back above the 21-hour average.`,
       plan: "scale2",
     });
@@ -143,7 +149,7 @@ export function analyzeMarket(
       stop,
       entryType: last - entry < 0.25 * a ? "market" : "limit",
       score: 76 + (66 - r) * 0.2,
-      thesis: `Trend continuation. RSI ${r.toFixed(0)}, still on the 21-hour mean. Scalp with the 4h.`,
+      thesis: `Continuation on 21h, RSI ${r.toFixed(0)}`,
       invalidation: `Lose the 21-hour average.`,
       plan: "scale2",
     });
@@ -158,7 +164,7 @@ export function analyzeMarket(
       stop,
       entryType: entry - last < 0.25 * a ? "market" : "limit",
       score: 76 + (r - 34) * 0.2,
-      thesis: `Trend continuation short. RSI ${r.toFixed(0)}, still under the 21-hour mean.`,
+      thesis: `Continuation short on 21h, RSI ${r.toFixed(0)}`,
       invalidation: `Reclaim the 21-hour average.`,
       plan: "scale2",
     });
@@ -173,7 +179,7 @@ export function analyzeMarket(
       stop,
       entryType: "market",
       score: 62 + (32 - r),
-      thesis: `Washed-out print. RSI ${r.toFixed(0)} with the larger mean still intact.`,
+      thesis: `Washout RSI ${r.toFixed(0)}, slow mean intact`,
       invalidation: `Break of the local swing low.`,
       plan: "single",
     });
@@ -188,7 +194,7 @@ export function analyzeMarket(
       stop,
       entryType: "market",
       score: 60 + (r - 72),
-      thesis: `Crowded tape. RSI ${r.toFixed(0)} into a stretched high.`,
+      thesis: `Stretched high, RSI ${r.toFixed(0)}`,
       invalidation: `Break of the local swing high.`,
       plan: "single",
     });
@@ -211,7 +217,7 @@ export function analyzeMarket(
       stop,
       entryType: "market",
       score: 66,
-      thesis: `Range high taken with the fast average still leading.`,
+      thesis: `Range high taken, fast still leading`,
       invalidation: `Failed break — back inside the 20-hour range.`,
       plan: "scale3",
     });
@@ -227,7 +233,7 @@ export function analyzeMarket(
       stop,
       entryType: "market",
       score: 66,
-      thesis: `Range low lost with the fast average still leading lower.`,
+      thesis: `Range low lost, fast still leading`,
       invalidation: `Failed break — back inside the 20-hour range.`,
       plan: "scale3",
     });
@@ -255,12 +261,9 @@ export function analyzeMarket(
   const rr = Math.abs(target - best.entry) / risk;
   if (rr < minRr) return null;
 
-  const planNote =
-    best.plan === "scale3"
-      ? " Three takes (34/33/33)."
-      : best.plan === "scale2"
-        ? " Two takes (50/50)."
-        : " One take.";
+  const conf = scoreToConf(best.score);
+  const planTag = best.plan === "scale2" ? "hold" : best.plan === "scale3" ? "break" : "fade";
+  const thesis = `${best.side} ${planTag} · RSI ${r.toFixed(0)} · ${rr.toFixed(1)}R · conf ${conf}% · ${best.thesis}`;
 
   return {
     symbol,
@@ -276,7 +279,8 @@ export function analyzeMarket(
     plan: best.plan,
     rr,
     score: best.score,
-    thesis: best.thesis + planNote,
+    confidence: conf,
+    thesis,
     invalidation: best.invalidation,
     atr: a,
     rsi: r,

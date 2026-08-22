@@ -181,7 +181,7 @@ function TicketsTable({
   refresh,
 }: {
   signals: Array<{
-    id: string;
+    id: number;
     weexSymbol: string;
     side: "long" | "short";
     entryType: string;
@@ -195,6 +195,8 @@ function TicketsTable({
     status: string;
     beMoved: boolean;
     thesis: string | null;
+    rr: number;
+    confidence: number | null;
   }>;
   refresh: () => void;
 }) {
@@ -228,7 +230,11 @@ function TicketsTable({
                 <tr key={t.id} className="border-b border-line/70 last:border-0">
                   <td className="px-4 py-2.5 font-medium">
                     {t.weexSymbol}
-                    <div className="text-[11px] text-subtle">cross</div>
+                    <div className="max-w-[16rem] text-[11px] leading-snug text-subtle">
+                      {t.rr > 0 ? `${t.rr.toFixed(1)}R` : ""}
+                      {t.confidence != null ? ` · ${Math.round(t.confidence)}%` : ""}
+                      {t.thesis ? ` · ${t.thesis}` : ""}
+                    </div>
                   </td>
                   <td className={cn("px-4 py-2.5 uppercase", t.side === "long" ? "text-up" : "text-down")}>
                     {t.side}
@@ -281,7 +287,6 @@ function TicketsTable({
           </table>
         </div>
       </div>
-      {signals[0]?.thesis && <p className="mt-3 text-sm text-muted">{signals[0].thesis}</p>}
     </section>
   );
 }

@@ -59,6 +59,8 @@ type SignalRow = {
   be_moved: boolean;
   plan: string | null;
   filled_at: string | null;
+  score: string | number | null;
+  confidence: string | number | null;
   created_at: string;
   updated_at: string;
 };
@@ -216,6 +218,8 @@ function mapSignal(row: SignalRow) {
     targets: parseNums(row.targets),
     beMoved: Boolean(row.be_moved),
     plan: row.plan,
+    score: row.score == null ? null : n(row.score),
+    confidence: row.confidence == null ? null : n(row.confidence),
     createdAt: row.created_at,
   };
 }
@@ -492,7 +496,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       getWeexFourHour,
       getWeexKlines,
     } = await import("@/lib/weex-market.server");
-    const { scanUniverse, shouldLockBreakeven, breakevenPrice } = await import("@/lib/ta");
+    const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf } = await import("@/lib/ta");
     const { sizeSetup } = await import("@/lib/risk");
     const { coinByWeex } = await import("@/lib/universe");
     const rules = await import("@/lib/desk-rules");
@@ -769,6 +773,14 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       where user_id = ${userId} and status in ('proposed','working','filled')
     `;
     const ledger = await ticketLedger(sql, userId);
+    const closedConf = await sql<{ confidence: string | number | null; pnl: string | number | null }>`
+      select confidence, pnl from auto_signals
+      where user_id = ${userId} and status in ('stopped','targeted','skipped')
+    `;
+    const bar = rules.confidenceBar(
+      closedConf.map((r) => ({ conf: n(r.confidence), pnl: n(r.pnl) })),
+      corrected.minConf,
+    );
 
     if (settings.armed && stillOpen.length < corrected.maxOpen) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
@@ -841,6 +853,11 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
               continue;
             }
             spec = await specFor(coinByWeex(pick.weexSymbol));
+            const conf = pick.confidence ?? scoreToConf(pick.score);
+            if (conf < bar.minConf) {
+              veto = `${pick.weexSymbol} conf ${conf}% below ${bar.minConf}% bar`;
+              continue;
+            }
             sized = sizeSetup(pick, equity, corrected.marginPct, spec.maxLeverage);
             if (sized) break;
           }
@@ -900,7 +917,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             if (!okAny) notes.push(`WEEX reject ${sized.weexSymbol}: ${replies[0]?.slice(0, 80) ?? "empty"}`);
             else {
               notes.push(
-                `${corrected.name} ${sized.leverage}x ${sized.side} ${sized.weexSymbol} · $${sized.marginUsd.toFixed(2)} · ${sized.entryType} · ${slices.length} take${slices.length === 1 ? "" : "s"}`,
+                `${corrected.name} ${sized.leverage}x ${sized.side} ${sized.weexSymbol} · ${sized.rr.toFixed(1)}R · conf ${sized.confidence}% · $${sized.marginUsd.toFixed(2)}`,
               );
             }
 
@@ -909,13 +926,14 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
               insert into auto_signals (
                 user_id, symbol, weex_symbol, side, style, entry_type, entry, stop, target,
                 qty, leverage, risk_usd, notional, rr, thesis, invalidation, status, venue,
-                client_oid, weex_resp, fill_px, targets, scale, plan, filled_at
+                client_oid, weex_resp, fill_px, targets, scale, plan, filled_at, score, confidence
               ) values (
                 ${userId}, ${sized.symbol}, ${sized.weexSymbol}, ${sized.side}, ${sized.style},
                 ${sized.entryType}, ${sized.entry}, ${sized.stop}, ${sized.target}, ${sized.qty},
                 ${Math.round(sized.leverage)}, ${sized.riskUsd}, ${sized.notional}, ${sized.rr},
                 ${sized.thesis}, ${sized.invalidation}, ${status}, 'weex', ${clientOid}, ${weexResp}, ${fillPx},
-                ${JSON.stringify(tps)}, ${JSON.stringify(weights)}, ${sized.plan}, ${filledAt}
+                ${JSON.stringify(tps)}, ${JSON.stringify(weights)}, ${sized.plan}, ${filledAt},
+                ${sized.score}, ${sized.confidence}
               )
             `;
             if (status !== "error") opened += 1;
@@ -928,7 +946,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       notes.push("Book full. Watching open tickets.");
     }
 
-    const learned = [corrected.note, ledger.note].filter(Boolean).join(" · ");
+    const learned = [corrected.note, bar.note, ledger.note].filter(Boolean).join(" · ");
     const note = [learned, ...notes].filter(Boolean).slice(0, 6).join(" · ");
     await sql`
       update auto_settings

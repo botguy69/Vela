@@ -12,6 +12,7 @@ export type Phase = {
   style: Style;
   maxOpen: number;
   minRr: number;
+  minConf: number;
   method: MethodId;
   note: string;
 };
@@ -25,6 +26,7 @@ export function phaseFor(equity: number): Phase {
       style: "swing",
       maxOpen: 1,
       minRr: 2.2,
+      minConf: 74,
       method: "trend",
       note: "Goal printed. Stand down unless you raise the target.",
     };
@@ -36,9 +38,10 @@ export function phaseFor(equity: number): Phase {
       marginPct: 2,
       style: "scalp",
       maxOpen: 1,
-      minRr: 1.6,
-      method: "vela",
-      note: "First try: 2% margin, coin-max leverage, one ticket. Compound whatever WEEX shows.",
+      minRr: 1.9,
+      minConf: 70,
+      method: "trend",
+      note: "Stage 1: high-prob scalps only (70%+ conf, 1.9R+) until $1,000.",
     };
   }
   if (equity < 1000) {
@@ -47,10 +50,11 @@ export function phaseFor(equity: number): Phase {
       name: "Seed",
       marginPct: 2,
       style: "scalp",
-      maxOpen: 2,
-      minRr: 1.7,
-      method: "vela",
-      note: "Still the first method. Two tickets. Size follows live WEEX equity.",
+      maxOpen: 1,
+      minRr: 1.9,
+      minConf: 70,
+      method: "trend",
+      note: "Stage 1: high-prob scalps only until $1,000. One ticket, 21h holds.",
     };
   }
   if (equity < 10_000) {
@@ -61,8 +65,9 @@ export function phaseFor(equity: number): Phase {
       style: "swing",
       maxOpen: 2,
       minRr: 1.8,
+      minConf: 64,
       method: "vela",
-      note: "Past $1,000. Same 1–2% box, wider swings.",
+      note: "Stage 2. Past $1,000. Same 1–2% box, wider swings.",
     };
   }
   if (equity < 100_000) {
@@ -73,6 +78,7 @@ export function phaseFor(equity: number): Phase {
       style: "swing",
       maxOpen: 2,
       minRr: 2,
+      minConf: 68,
       method: "trend",
       note: "Protect the pile. Tighter R, 1.2% margin.",
     };
@@ -84,6 +90,7 @@ export function phaseFor(equity: number): Phase {
     style: "swing",
     maxOpen: 1,
     minRr: 2.2,
+    minConf: 74,
     method: "trend",
     note: "Last stretch to $1M. One high-quality swing at 1%.",
   };
@@ -116,14 +123,16 @@ export function adaptMethod(opts: {
       marginPct: 1,
       maxOpen: 1,
       minRr: Math.max(next.minRr, 2),
-      note: `${next.note} Cooling: 1% margin, one ticket until the WEEX book heals.`,
+      minConf: Math.min(82, next.minConf + 6),
+      note: `${next.note} Cooling: 1% margin, one ticket, higher conf until the book heals.`,
     };
   } else if (opts.lossStreak >= 2 || opts.drawdownPct >= 15) {
     next = {
       ...next,
       marginPct: Math.min(next.marginPct, 1.2),
       maxOpen: 1,
-      note: `${next.note} Pulled back to 1.2% and one ticket.`,
+      minConf: Math.min(82, next.minConf + 4),
+      note: `${next.note} Pulled back to 1.2% and one ticket. Raising the conf bar.`,
     };
   }
   return next;
