@@ -366,9 +366,7 @@ async function closeFlatOnWeex(
     if (onList) continue;
     if (livePos == null && creds) {
       const q = await getWeexPositionQty(creds, pos.weex_symbol);
-      if (q == null || q > 0) continue;
-    } else if (livePos == null) {
-      continue;
+      if (q != null && q > 0) continue;
     }
     const entry = n(pos.fill_px ?? pos.entry);
     const px = await getWeexLast(pos.weex_symbol).catch(() => entry);
@@ -1020,7 +1018,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     `;
     const stillOpen =
       weexBook == null
-        ? stillOpenRaw
+        ? stillOpenRaw.filter((s) => s.status === "working" || s.status === "proposed")
         : stillOpenRaw.filter((s) => {
             if (s.status === "working" || s.status === "proposed") return true;
             const key = s.weex_symbol.replace(/_/g, "").toUpperCase();
