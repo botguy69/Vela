@@ -1642,13 +1642,13 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
     } else if (!settings.armed) {
       notes.push("Disarmed. No new orders.");
-    } else if (liveAtRisk >= 1) {
-      notes.push(`${liveAtRisk} live on WEEX, none at BE. No new tickets.`);
+    } else if (riskL >= 1 && riskS >= 1) {
+      notes.push("Long and short both live, none at BE. No new tickets.");
     } else if (stillOpen.length >= LIVE_CAP) {
       notes.push("Live cap (6 names). Waiting on an exit.");
     } else {
       notes.push(
-        `${atRisk.length} at-risk / ${stillOpen.length} live. BE lock frees a slot for the next long or short.`,
+        `${riskL} long / ${riskS} short at-risk. Opposite side can still open.`,
       );
     }
 
