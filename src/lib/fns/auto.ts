@@ -1492,12 +1492,22 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             }
             if (busy.has(pick.weexSymbol)) continue;
             if (pick.side === "long" && riskL >= 1) {
-              veto = "Short is live. Hunting a long (or wait for BE).";
+              veto = "Already long at-risk. Next long after TP1/BE.";
               continue;
             }
             if (pick.side === "short" && riskS >= 1) {
-              veto = "Long is live. Hunting a short (or wait for BE).";
+              veto = "Already short at-risk. Next short after TP1/BE.";
               continue;
+            }
+            if (riskL + riskS >= 1) {
+              const confOpp = pick.confidence ?? scoreToConf(pick.score);
+              if (pick.bypassHtf || confOpp < Math.max(bar.minConf, 78)) {
+                veto =
+                  riskS >= 1
+                    ? "Short live. Not adding a long unless HTF + high conf."
+                    : "Long live. Not adding a short unless HTF + high conf.";
+                continue;
+              }
             }
             if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side })) {
               const held = stillOpen[0];
