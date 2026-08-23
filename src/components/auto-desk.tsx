@@ -235,7 +235,11 @@ function TicketsTable({
     <section>
       <h2 className="font-display text-2xl font-medium tracking-tight">Tickets</h2>
       <p className="mt-1 text-sm text-muted">
-        {open.length ? `${open.length} live on WEEX` : "No live tickets"}
+        {open.some((t) => t.liveOnWeex)
+          ? `${open.filter((t) => t.liveOnWeex).length} live on WEEX`
+          : open.length
+            ? `${open.length} working limit`
+            : "No live tickets"}
       </p>
       <div className="mt-3 overflow-hidden rounded-xl bg-surface shadow-border">
         <div className="overflow-x-auto">
@@ -261,7 +265,8 @@ function TicketsTable({
                 </tr>
               )}
               {rows.map((t) => {
-                const live = Boolean(t.liveOnWeex) || t.status === "working";
+                const live = Boolean(t.liveOnWeex);
+                const pending = t.status === "working" && !live;
                 const why = live
                   ? [
                       t.rr > 0 ? `${t.rr.toFixed(1)}R` : null,
@@ -276,7 +281,8 @@ function TicketsTable({
                   className={cn(
                     "border-b border-line/70 last:border-0",
                     live && "bg-up/10",
-                    !live && "opacity-45",
+                    pending && "bg-warn/10",
+                    !live && !pending && "opacity-45",
                   )}
                 >
                   <td className={cn("px-4 py-2.5 font-medium", live && "text-up")}>
@@ -305,7 +311,7 @@ function TicketsTable({
                   </td>
                   <td className="px-4 py-2.5">
                     <Badge variant={live ? "live" : "default"}>
-                      {live ? (t.beMoved ? "BE locked" : t.status === "working" ? "working" : "live") : t.status}
+                      {live ? (t.beMoved ? "BE locked" : "live") : pending ? "working" : t.status}
                     </Badge>
                   </td>
                   <td className="px-4 py-2.5">

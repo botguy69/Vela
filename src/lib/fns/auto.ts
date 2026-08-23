@@ -570,6 +570,10 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       } else {
         t.liveOnWeex = false;
       }
+      if (t.status === "working" && !t.liveOnWeex) {
+        t.pnl = null;
+        continue;
+      }
       if (t.status !== "filled" && t.status !== "working") continue;
       if (!lastBy.has(t.weexSymbol)) {
         try {
@@ -885,13 +889,32 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         }
         const e = n(pos.entry);
         const crossed = side === "long" ? px <= e : px >= e;
-        if (crossed) {
-          await sql`
-            update auto_signals
-            set status = 'filled', fill_px = ${e}, filled_at = now(), updated_at = now()
-            where id = ${pos.id} and user_id = ${userId}
-          `;
-          notes.push(`Filled ${pos.weex_symbol} limit`);
+        const credsFill = await credsFrom(settings);
+        if (crossed && credsFill) {
+          const { getWeexPositionQty, placeWeexTake } = await import("@/lib/weex.server");
+          const q = await getWeexPositionQty(credsFill, pos.weex_symbol);
+          if (q != null && q > 0) {
+            await sql`
+              update auto_signals
+              set status = 'filled', fill_px = ${e}, qty = ${q}, filled_at = now(), updated_at = now()
+              where id = ${pos.id} and user_id = ${userId}
+            `;
+            const spec = await specFor(coinByWeex(pos.weex_symbol));
+            const tps = parseNums(pos.targets);
+            const weights = tps.length ? tps.map(() => 1 / tps.length) : [1];
+            for (let i = 0; i < tps.length; i += 1) {
+              const slice = formatWeexQty(q * (weights[i] ?? 0), spec.quantityPrecision);
+              if (Number(slice) <= 0) continue;
+              await placeWeexTake(credsFill, {
+                symbol: pos.weex_symbol,
+                positionSide: side === "short" ? "SHORT" : "LONG",
+                tp: formatWeexPx(tps[i]!, spec.pricePrecision),
+                quantity: slice,
+                clientOid: `velatp${pos.id}${i}${Date.now().toString(36)}`.slice(0, 36),
+              });
+            }
+            notes.push(`Filled ${pos.weex_symbol} limit`);
+          }
         }
         continue;
       }
@@ -1387,7 +1410,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
               sl: formatWeexPx(sized.stop, spec.pricePrecision),
             });
             const replies = [sent.ok ? JSON.stringify(sent.data).slice(0, 180) : sent.error.slice(0, 180)];
-            if (sent.ok) {
+            if (sent.ok && sized.entryType === "market") {
               for (let i = 0; i < tps.length; i += 1) {
                 const q = formatWeexQty(sized.qty * (weights[i] ?? 0), spec.quantityPrecision);
                 if (Number(q) <= 0) continue;
