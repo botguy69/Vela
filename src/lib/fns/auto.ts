@@ -87,6 +87,11 @@ function origQty(row: {
   return Math.max(n(row.qty), fromNotional);
 }
 
+function throughStop(side: string, last: number, stop: number): boolean {
+  if (!(stop > 0) || !(last > 0)) return false;
+  return side === "short" ? last >= stop * 0.997 : last <= stop * 1.003;
+}
+
 /** 1R in dollars: original stop distance × full size. Ignore the BE stop. */
 function oneRUsd(row: {
   qty?: string | number | null;
@@ -435,8 +440,14 @@ async function closeFlatOnWeex(
       targets: parseNums(pos.targets),
       beMoved: Boolean(pos.be_moved),
     });
-    const why = pos.be_moved ? (pnl >= 0 ? "TP1 then BE" : "TP1 then leftover stopped") : "Closed on WEEX";
-    const st = pos.be_moved && pnl >= 0 ? "targeted" : pos.be_moved ? "stopped" : "skipped";
+    const why = pos.be_moved
+      ? pnl >= 0
+        ? "TP1 then BE"
+        : "TP1 then leftover stopped"
+      : throughStop(side, px, n(pos.stop))
+        ? "Hit stop"
+        : "Closed on WEEX";
+    const st = pos.be_moved && pnl >= 0 ? "targeted" : why === "Hit stop" || (pos.be_moved && pnl < 0) ? "stopped" : "skipped";
     await sql`
       update auto_signals
       set status = ${st}, closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
@@ -935,6 +946,29 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       `;
       notes.push(`${row.weex_symbol} restated: TP1 then BE +${pnl.toFixed(2)}`);
     }
+    const fakeFlat = await sql<SignalRow>`
+      select * from auto_signals
+      where user_id = ${userId}
+        and close_reason = 'Closed on WEEX'
+        and updated_at > now() - interval '12 hours'
+    `;
+    for (const row of fakeFlat) {
+      const side = row.side === "short" ? "short" : "long";
+      const last = n(row.closed_px) || n(row.stop);
+      const r = oneRUsd(row);
+      const pnl = n(row.pnl);
+      const wasStop =
+        throughStop(side, last, n(row.stop)) || (r > 0 && pnl < 0 && Math.abs(pnl) >= r * 0.7);
+      if (!wasStop) continue;
+      await sql`
+        update auto_signals
+        set status = 'stopped',
+            close_reason = ${"Hit stop"},
+            updated_at = now()
+        where id = ${row.id} and user_id = ${userId}
+      `;
+      notes.push(`${row.weex_symbol} restated: hit SL, not a flatten`);
+    }
     await collapseOpenDupes(sql, userId, settings, notes);
     await sql`
       update auto_signals
@@ -1117,10 +1151,11 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
       if (pos.status === "filled" && left === 0) {
         const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
-        const why = "Closed on WEEX";
+        const why = throughStop(side, px, stop) ? "Hit stop" : "Closed on WEEX";
+        const st = why === "Hit stop" ? "stopped" : "skipped";
         await sql`
           update auto_signals
-          set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
+          set status = ${st}, closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
           where id = ${pos.id} and user_id = ${userId}
         `;
         streak = pnl >= 0 ? 0 : streak + 1;
