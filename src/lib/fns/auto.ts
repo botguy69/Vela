@@ -75,6 +75,39 @@ function n(v: string | number | null | undefined): number {
   return Number.isFinite(x) ? x : 0;
 }
 
+/** Full size from notional — qty is shrunk after TP1. */
+function origQty(row: {
+  qty?: string | number | null;
+  notional?: string | number | null;
+  fill_px?: string | number | null;
+  entry?: string | number | null;
+}): number {
+  const e = n(row.fill_px) || n(row.entry);
+  const fromNotional = e > 0 ? n(row.notional) / e : 0;
+  return Math.max(n(row.qty), fromNotional);
+}
+
+/** 1R in dollars: original stop distance × full size. Ignore the BE stop. */
+function oneRUsd(row: {
+  qty?: string | number | null;
+  notional?: string | number | null;
+  fill_px?: string | number | null;
+  entry?: string | number | null;
+  stop?: string | number | null;
+  targets?: string | null;
+  be_moved?: boolean;
+}): number {
+  const e = n(row.fill_px) || n(row.entry);
+  const q = origQty(row);
+  if (!(e > 0) || !(q > 0)) return 0;
+  let dist = Math.abs(e - n(row.stop));
+  const tp1 = parseNums(row.targets)[0];
+  if ((row.be_moved || (e > 0 && dist / e < 0.003)) && tp1 != null) {
+    dist = Math.abs(tp1 - e) / 1.2;
+  }
+  return dist * q;
+}
+
 const OPEN = new Set(["proposed", "working", "filled"]);
 
 async function ensureSettings(
@@ -191,8 +224,11 @@ async function closedStats(
     qty: string | number | null;
     fill_px: string | number | null;
     risk_usd: string | number | null;
+    notional: string | number | null;
+    targets: string | null;
+    be_moved: boolean | null;
   }>`
-    select pnl, entry, stop, qty, fill_px, risk_usd from auto_signals
+    select pnl, entry, stop, qty, fill_px, risk_usd, notional, targets, be_moved from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
       and (close_reason is null or (
         close_reason not like 'Duplicate%'
@@ -206,15 +242,9 @@ async function closedStats(
   const wins = rows.filter((r) => n(r.pnl) > 0).length;
   const rs = rows
     .map((r) => {
-      const pnl = n(r.pnl);
-      const riskUsd = n(r.risk_usd);
-      if (riskUsd > 0.01) return pnl / riskUsd;
-      const entry = n(r.fill_px) || n(r.entry);
-      const stopDist = Math.abs(entry - n(r.stop));
-      if (entry > 0 && stopDist / entry < 0.002) return null;
-      const risk = stopDist * n(r.qty);
-      if (!(risk > 0)) return null;
-      return pnl / risk;
+      const risk = oneRUsd(r);
+      if (!(risk > 0.01)) return null;
+      return n(r.pnl) / risk;
     })
     .filter((x): x is number => x != null);
   const winRs = rs.filter((x) => x > 0);
@@ -400,7 +430,7 @@ async function closeFlatOnWeex(
       side,
       entry,
       last: px,
-      qty: n(pos.qty),
+      qty: origQty(pos),
       leftover: 0,
       targets: parseNums(pos.targets),
       beMoved: Boolean(pos.be_moved),
@@ -874,10 +904,11 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       select * from auto_signals
       where user_id = ${userId}
         and be_moved = true
-        and status in ('skipped','stopped')
+        and status in ('skipped','stopped','targeted')
         and (
           close_reason = 'Closed on WEEX'
           or close_reason = 'Hit stop'
+          or close_reason = 'TP1 then BE'
         )
     `;
     for (const row of botched) {
@@ -888,7 +919,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         side,
         entry,
         last,
-        qty: n(row.qty),
+        qty: origQty(row),
         leftover: 0,
         targets: parseNums(row.targets),
         beMoved: true,
@@ -1185,7 +1216,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           side,
           entry,
           last: exit,
-          qty: n(pos.qty),
+          qty: origQty(pos),
           leftover: 0,
           targets: tps,
           beMoved: Boolean(pos.be_moved),
@@ -1225,7 +1256,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         if (!row) continue;
         if (row.status === "filled" || row.status === "working" || row.status === "proposed") {
           if (lp.qty > 0 && n(row.qty) > 0 && lp.qty < n(row.qty) * 0.98) {
-            await sql`update auto_signals set qty = ${lp.qty}, updated_at = now() where id = ${row.id}`;
+            /* leftover after TP1 — keep original qty so PnL still credits the take */
           }
           continue;
         }
