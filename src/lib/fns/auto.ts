@@ -945,7 +945,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         and status = 'proposed'
         and created_at < now() - interval '3 minutes'
     `;
-    let weexBook: { symbol: string; qty: number }[] | null = null;
+    let weexBook: { symbol: string; qty: number; side?: string }[] | null = null;
     {
       const creds = await credsFrom(settings);
       if (creds) {
@@ -1384,8 +1384,19 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       (s) => s.status === "filled" && !s.be_moved && !flattened.has(s.weex_symbol),
     );
     const credsGate2 = await credsFrom(settings);
-    if (credsGate2 && (liveN.length > 0 || dbFilled.length > 0)) {
-      const extras = stillOpenRaw.filter((s) => s.status === "working" || s.status === "proposed");
+    const filledSides = new Set<string>();
+    for (const p of liveN) {
+      if (!beNames.has(p.symbol.replace(/_/g, "").toUpperCase())) {
+        filledSides.add(p.side === "short" ? "short" : "long");
+      }
+    }
+    for (const s of dbFilled) filledSides.add(s.side === "short" ? "short" : "long");
+    if (credsGate2 && filledSides.size) {
+      const extras = stillOpenRaw.filter(
+        (s) =>
+          (s.status === "working" || s.status === "proposed") &&
+          filledSides.has(s.side === "short" ? "short" : "long"),
+      );
       const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
       for (const row of extras) {
         if (row.client_oid) {
@@ -1395,28 +1406,39 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         await sql`
           update auto_signals
           set status = 'skipped',
-              close_reason = ${"Cancelled — one live ticket only"},
+              close_reason = ${"Cancelled — one live ticket per side"},
               pnl = 0,
               updated_at = now()
           where id = ${row.id} and user_id = ${userId}
         `;
-        notes.push(`${row.weex_symbol} limit cancelled — ${dbFilled[0]?.weex_symbol ?? "live"} is the ticket`);
+        notes.push(`${row.weex_symbol} limit cancelled — same side already live`);
       }
     }
-    const pending = stillOpenRaw.filter((s) => s.status === "working" || s.status === "proposed").length;
-    const liveAtRisk =
-      liveN.filter((p) => !beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length +
-      hiddenLive +
-      (weexBook == null ? dbFilled.length : 0) +
-      (liveN.length || dbFilled.length ? 0 : pending ? 1 : 0);
+    const countAtRisk = (side: "long" | "short") => {
+      const fromLive = liveN.filter(
+        (p) =>
+          (p.side === "short" ? "short" : "long") === side &&
+          !beNames.has(p.symbol.replace(/_/g, "").toUpperCase()),
+      ).length;
+      const fromDb = dbFilled.filter((s) => (s.side === "short" ? "short" : "long") === side).length;
+      const pend = stillOpenRaw.filter(
+        (s) =>
+          (s.status === "working" || s.status === "proposed") &&
+          (s.side === "short" ? "short" : "long") === side,
+      ).length;
+      const filled = weexBook == null ? fromDb : fromLive;
+      return filled + (filled ? 0 : pend ? 1 : 0);
+    };
+    const riskL = countAtRisk("long");
+    const riskS = countAtRisk("short");
 
-    if (liveAtRisk >= 1) {
+    if (riskL >= 1 && riskS >= 1) {
       const names = [
         ...liveN.map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
         ...dbFilled.map((s) => s.weex_symbol),
       ];
-      notes.push(`${[...new Set(names)].join(" ")} live. No new tickets until TP1/BE.`);
-    } else if (settings.armed && liveAtRisk < 1 && liveN.length < LIVE_CAP) {
+      notes.push(`${[...new Set(names)].join(" ")} live. Next after TP1/BE.`);
+    } else if (settings.armed && liveN.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
         notes.push("Armed with no keys. Store keys on this page.");
       } else if (!live) {
@@ -1469,6 +1491,14 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
               continue;
             }
             if (busy.has(pick.weexSymbol)) continue;
+            if (pick.side === "long" && riskL >= 1) {
+              veto = "Short is live. Hunting a long (or wait for BE).";
+              continue;
+            }
+            if (pick.side === "short" && riskS >= 1) {
+              veto = "Long is live. Hunting a short (or wait for BE).";
+              continue;
+            }
             if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side })) {
               const held = stillOpen[0];
               veto = held
