@@ -1206,7 +1206,27 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       corrected.minConf,
     );
 
-    if (settings.armed && atRisk.length < corrected.maxOpen && stillOpen.length < LIVE_CAP) {
+    const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
+    const beNames = new Set(
+      stillOpenRaw.filter((s) => s.be_moved).map((s) => s.weex_symbol.replace(/_/g, "").toUpperCase()),
+    );
+    let hiddenLive = 0;
+    if (liveN.length === 0 && flattened.size) {
+      const credsGate = await credsFrom(settings);
+      if (credsGate) {
+        const { getWeexPositionQty } = await import("@/lib/weex.server");
+        for (const sym of flattened) {
+          const q = await getWeexPositionQty(credsGate, sym);
+          if (q != null && q > 0) hiddenLive += 1;
+        }
+      }
+    }
+    const liveAtRisk =
+      liveN.filter((p) => !beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length + hiddenLive;
+
+    if (weexBook == null) {
+      notes.push("WEEX positions unread. No new orders.");
+    } else if (settings.armed && liveAtRisk < 1 && liveN.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
         notes.push("Armed with no keys. Store keys on this page.");
       } else if (!live) {
@@ -1400,6 +1420,8 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
     } else if (!settings.armed) {
       notes.push("Disarmed. No new orders.");
+    } else if (liveAtRisk >= 1) {
+      notes.push(`${liveAtRisk} live on WEEX, none at BE. No new tickets.`);
     } else if (stillOpen.length >= LIVE_CAP) {
       notes.push("Live cap (6 names). Waiting on an exit.");
     } else {
