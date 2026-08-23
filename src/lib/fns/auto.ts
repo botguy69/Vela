@@ -811,6 +811,15 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
 
     const notes: string[] = [];
     await collapseOpenDupes(sql, userId, settings, notes);
+    await sql`
+      update auto_signals
+      set status = 'error',
+          close_reason = ${"Stale claim — never sent"},
+          updated_at = now()
+      where user_id = ${userId}
+        and status = 'proposed'
+        and created_at < now() - interval '3 minutes'
+    `;
     let weexBook: { symbol: string; qty: number }[] | null = null;
     {
       const creds = await credsFrom(settings);
@@ -1127,23 +1136,37 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       wins: stats.wins,
     });
 
+    const flattened = new Set(
+      (
+        await sql<{ weex_symbol: string }>`
+          select distinct weex_symbol from auto_signals
+          where user_id = ${userId}
+            and close_reason = 'Closed on WEEX'
+            and updated_at > now() - interval '2 hours'
+        `
+      ).map((r) => r.weex_symbol),
+    );
+
     const stillOpenRaw = await sql<SignalRow>`
       select * from auto_signals
       where user_id = ${userId} and status in ('proposed','working','filled')
     `;
-    const stillOpen =
-      weexBook == null
-        ? stillOpenRaw.filter((s) => s.status === "working" || s.status === "proposed")
-        : stillOpenRaw.filter((s) => {
-            if (s.status === "working" || s.status === "proposed") return true;
-            const key = s.weex_symbol.replace(/_/g, "").toUpperCase();
-            return weexBook.some(
-              (p) =>
-                p.qty > 0 &&
-                (p.symbol === s.weex_symbol || p.symbol.replace(/_/g, "").toUpperCase() === key),
-            );
-          });
-    const atRisk = stillOpen.filter((s) => s.status !== "filled" || !s.be_moved);
+    const onWeex = (sym: string) => {
+      const key = sym.replace(/_/g, "").toUpperCase();
+      return (weexBook ?? []).some(
+        (p) =>
+          p.qty > 0 &&
+          (p.symbol === sym || p.symbol.replace(/_/g, "").toUpperCase() === key),
+      );
+    };
+    const stillOpen = stillOpenRaw.filter((s) => {
+      if (flattened.has(s.weex_symbol)) return false;
+      if (s.status === "working" || s.status === "proposed") return true;
+      return onWeex(s.weex_symbol);
+    });
+    const atRisk = stillOpen.filter(
+      (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
+    );
     const LIVE_CAP = 6;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const closedConf = await sql<{ confidence: string | number | null; pnl: string | number | null }>`
@@ -1175,20 +1198,12 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             ? rawAll.filter((s) => CORE_SET.has(s.weexSymbol))
             : rawAll;
           const busy = new Set(stillOpen.map((s) => s.weex_symbol));
-          const flattened = new Set(
-            (
-              await sql<{ weex_symbol: string }>`
-                select distinct weex_symbol from auto_signals
-                where user_id = ${userId}
-                  and close_reason = 'Closed on WEEX'
-                  and updated_at > now() - interval '2 hours'
-              `
-            ).map((r) => r.weex_symbol),
-          );
-          const betaBook = atRisk.map((s) => ({
-            weex: s.weex_symbol,
-            side: (s.side === "short" ? "short" : "long") as "long" | "short",
-          }));
+          const betaBook = (weexBook ?? [])
+            .filter((p) => p.qty > 0 && !flattened.has(p.symbol) && !flattened.has(p.symbol.replace(/_/g, "").toUpperCase()))
+            .map((p) => ({
+              weex: p.symbol.replace(/_/g, "").toUpperCase(),
+              side: ((p as { side?: string }).side === "short" ? "short" : "long") as "long" | "short",
+            }));
 
           let sized = null as ReturnType<typeof sizeSetup>;
           let spec = null as Awaited<ReturnType<typeof specFor>> | null;
@@ -1207,7 +1222,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           }
           const btc15 = await getWeexKlines("BTCUSDT", "15m", 48).catch(() => []);
           let veto = raw.length
-            ? `Setups seen (${raw.length}), none passed HTF/spread/funding/size. BTC RSI ${btcRsi.toFixed(0)} ATR ${regime.ratio.toFixed(1)}×.`
+            ? `${raw.length} setups this tick, none cleared HTF/15m/spread. BTC RSI ${btcRsi.toFixed(0)} ATR ${regime.ratio.toFixed(1)}×.`
             : `No setup. BTC RSI ${btcRsi.toFixed(0)} last ${btcLast?.toFixed(0) ?? "?"} ATR ${regime.ratio.toFixed(1)}×.`;
 
           for (const pick of raw) {
@@ -1226,11 +1241,6 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
             if (!rules.htfAllows(pick.side, h4)) {
               veto = `HTF veto ${pick.weexSymbol}`;
-              continue;
-            }
-            const m15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
-            if (!rules.ltfAllows(pick.side, m15)) {
-              veto = `15m against ${pick.weexSymbol}`;
               continue;
             }
             if (pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {

@@ -61,8 +61,8 @@ export function ltfAllows(side: Side, fifteen: Candle[]): boolean {
   const mid = sma(closes, 21);
   const last = closes[closes.length - 1];
   if (mid == null || last == null) return true;
-  if (side === "long") return last >= mid * 0.996;
-  return last <= mid * 1.004;
+  if (side === "long") return last >= mid * 0.992;
+  return last <= mid * 1.008;
 }
 
 export function spreadBps(bid: number, ask: number): number {
