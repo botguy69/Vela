@@ -16,13 +16,8 @@ export function blocksBeta(
   open: { weex: string; side: Side }[],
   next: { weex: string; side: Side },
 ): boolean {
-  const net = open.reduce((s, p) => s + signedBeta(p.weex, p.side), 0);
-  const add = signedBeta(next.weex, next.side);
-  // Hedge is allowed: long one name, short another.
-  if (Math.abs(add) <= 0.3) return false;
-  const sameWay = (net > 0 && add > 0) || (net < 0 && add < 0);
-  if (!sameWay) return false;
-  return Math.abs(net + add) > 1.15 && Math.abs(net + add) > Math.abs(net);
+  const same = open.filter((p) => p.side === next.side).length;
+  return same >= 2;
 }
 
 export function sma(values: number[], period: number): number | null {

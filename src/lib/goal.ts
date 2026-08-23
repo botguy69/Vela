@@ -56,7 +56,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       name: "Stage 1",
       marginPct: 2,
       style: "scalp",
-      maxOpen: 2,
+      maxOpen: 4,
       minRr: 1.9,
       minConf: 70,
       method: "trend",
@@ -69,11 +69,11 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       name: "Stage 1",
       marginPct: 2,
       style: "scalp",
-      maxOpen: 2,
+      maxOpen: 4,
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: 1.2–2% on one ticket. Next name only after TP1/BE. Then up to 6 BE leftovers.",
+      note: "Stage 1: 2% (1.2% after 3 losses). Up to 2 longs + 2 shorts at-risk. TP1/BE before a 3rd of that side. Cap 6.",
     };
   }
   return {
@@ -97,7 +97,7 @@ export function afterCheckpoint(equity: number): Phase {
       name: "Scale",
       marginPct: 1.2,
       style: "swing",
-      maxOpen: 2,
+      maxOpen: 4,
       minRr: 2,
       minConf: 68,
       method: "trend",

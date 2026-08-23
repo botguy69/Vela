@@ -1355,6 +1355,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
     );
     const LIVE_CAP = 6;
+    const SIDE_CAP = 2;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const closedConf = await sql<{ confidence: string | number | null; pnl: string | number | null }>`
       select confidence, pnl from auto_signals
@@ -1383,37 +1384,6 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     const dbFilled = stillOpenRaw.filter(
       (s) => s.status === "filled" && !s.be_moved && !flattened.has(s.weex_symbol),
     );
-    const credsGate2 = await credsFrom(settings);
-    const filledSides = new Set<string>();
-    for (const p of liveN) {
-      if (!beNames.has(p.symbol.replace(/_/g, "").toUpperCase())) {
-        filledSides.add(p.side === "short" ? "short" : "long");
-      }
-    }
-    for (const s of dbFilled) filledSides.add(s.side === "short" ? "short" : "long");
-    if (credsGate2 && filledSides.size) {
-      const extras = stillOpenRaw.filter(
-        (s) =>
-          (s.status === "working" || s.status === "proposed") &&
-          filledSides.has(s.side === "short" ? "short" : "long"),
-      );
-      const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
-      for (const row of extras) {
-        if (row.client_oid) {
-          await cancelWeexOrder(credsGate2, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
-        }
-        await cancelWeexProtective(credsGate2, row.weex_symbol).catch(() => null);
-        await sql`
-          update auto_signals
-          set status = 'skipped',
-              close_reason = ${"Cancelled — one live ticket per side"},
-              pnl = 0,
-              updated_at = now()
-          where id = ${row.id} and user_id = ${userId}
-        `;
-        notes.push(`${row.weex_symbol} limit cancelled — same side already live`);
-      }
-    }
     const countAtRisk = (side: "long" | "short") => {
       const fromLive = liveN.filter(
         (p) =>
@@ -1427,19 +1397,56 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           (s.side === "short" ? "short" : "long") === side,
       ).length;
       const filled = weexBook == null ? fromDb : fromLive;
-      return filled + (filled ? 0 : pend ? 1 : 0);
+      return filled + pend;
     };
     const riskL = countAtRisk("long");
     const riskS = countAtRisk("short");
+    const credsGate2 = await credsFrom(settings);
+    if (credsGate2) {
+      const filledSym = new Set(
+        liveN
+          .filter((p) => !beNames.has(p.symbol.replace(/_/g, "").toUpperCase()))
+          .map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
+      );
+      for (const s of dbFilled) filledSym.add(s.weex_symbol.replace(/_/g, "").toUpperCase());
+      const extras = stillOpenRaw.filter((s) => {
+        if (s.status !== "working" && s.status !== "proposed") return false;
+        const sym = s.weex_symbol.replace(/_/g, "").toUpperCase();
+        if (filledSym.has(sym)) return true;
+        const side = s.side === "short" ? "short" : "long";
+        const filledSide = liveN.filter(
+          (p) =>
+            (p.side === "short" ? "short" : "long") === side &&
+            !beNames.has(p.symbol.replace(/_/g, "").toUpperCase()),
+        ).length;
+        return filledSide >= SIDE_CAP;
+      });
+      const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
+      for (const row of extras) {
+        if (row.client_oid) {
+          await cancelWeexOrder(credsGate2, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
+        }
+        await cancelWeexProtective(credsGate2, row.weex_symbol).catch(() => null);
+        await sql`
+          update auto_signals
+          set status = 'skipped',
+              close_reason = ${"Cancelled — duplicate or side cap (2)"},
+              pnl = 0,
+              updated_at = now()
+          where id = ${row.id} and user_id = ${userId}
+        `;
+        notes.push(`${row.weex_symbol} limit cancelled — duplicate or 2 already on that side`);
+      }
+    }
 
-    if (riskL >= 1 && riskS >= 1) {
+    if (riskL >= SIDE_CAP && riskS >= SIDE_CAP) {
       const names = [
         ...liveN.map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
         ...dbFilled.map((s) => s.weex_symbol),
       ];
       const beN = liveN.filter((p) => beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
       notes.push(
-        `${[...new Set(names)].join(" ")} long+short at-risk. Next after TP1/BE. ${beN} leftover(s) · cap 6.`,
+        `${[...new Set(names)].join(" ")} · 2 long + 2 short at-risk. Next after TP1/BE. ${beN} leftover(s) · cap 6.`,
       );
     } else if (settings.armed && liveN.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
@@ -1493,18 +1500,20 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           }
           const btc15 = await getWeexKlines("BTCUSDT", "15m", 48).catch(() => []);
           const ordered =
-            riskS >= 1 && riskL === 0
+            riskL < SIDE_CAP && riskS >= SIDE_CAP
               ? [...raw.filter((s) => s.side === "long"), ...raw.filter((s) => s.side !== "long")]
-              : riskL >= 1 && riskS === 0
+              : riskS < SIDE_CAP && riskL >= SIDE_CAP
                 ? [...raw.filter((s) => s.side === "short"), ...raw.filter((s) => s.side !== "short")]
-                : raw;
+                : riskL < riskS
+                  ? [...raw.filter((s) => s.side === "long"), ...raw.filter((s) => s.side !== "long")]
+                  : riskS < riskL
+                    ? [...raw.filter((s) => s.side === "short"), ...raw.filter((s) => s.side !== "short")]
+                    : raw;
           let veto = ordered.length
             ? `${ordered.length} setups this tick, none cleared HTF/15m/spread. BTC RSI ${btcRsi.toFixed(0)} ATR ${regime.ratio.toFixed(1)}×.`
             : `No setup. BTC RSI ${btcRsi.toFixed(0)} last ${btcLast?.toFixed(0) ?? "?"} ATR ${regime.ratio.toFixed(1)}×.`;
-          if (riskS >= 1 && riskL === 0) {
-            veto = "Short live. No long cleared 4h/daily/conf this tick.";
-          } else if (riskL >= 1 && riskS === 0) {
-            veto = "Long live. No short cleared 4h/daily/conf this tick.";
+          if (riskS < SIDE_CAP || riskL < SIDE_CAP) {
+            veto = `At-risk ${riskL}L/${riskS}S (cap 2 each). No extra name cleared 4h/daily/conf.`;
           }
 
           for (const pick of ordered) {
@@ -1513,13 +1522,9 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
               continue;
             }
             if (busy.has(pick.weexSymbol)) continue;
-            if (pick.side === "long" && riskL >= 1) {
-              continue;
-            }
-            if (pick.side === "short" && riskS >= 1) {
-              continue;
-            }
-            const opposite = (riskS >= 1 && pick.side === "long") || (riskL >= 1 && pick.side === "short");
+            if (pick.side === "long" && riskL >= SIDE_CAP) continue;
+            if (pick.side === "short" && riskS >= SIDE_CAP) continue;
+            const opposite = (riskS > 0 && pick.side === "long") || (riskL > 0 && pick.side === "short");
             if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side })) {
               const held = stillOpen[0];
               veto = held
@@ -1664,11 +1669,11 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     } else if (!settings.armed) {
       notes.push("Disarmed. No new orders.");
     } else if (riskL >= 1 && riskS >= 1) {
-      notes.push("Long and short both at-risk. Next after TP1/BE. Max 6.");
+      notes.push("2 longs + 2 shorts at-risk. Next after TP1/BE on a side. Cap 6.");
     } else if (stillOpen.length >= LIVE_CAP) {
       notes.push("Live cap (6 names). Waiting on an exit.");
     } else {
-      notes.push("Hunting. Same side waits for BE. Opposite only on a real HTF setup.");
+      notes.push("Hunting up to 2L + 2S at-risk. 4h/daily/conf must print. Cap 6.");
     }
 
     const learned = [corrected.note, bar.note, ledger.note].filter(Boolean).join(" · ");
