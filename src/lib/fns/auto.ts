@@ -95,7 +95,7 @@ function oneRUsd(row: {
   entry?: string | number | null;
   stop?: string | number | null;
   targets?: string | null;
-  be_moved?: boolean;
+  be_moved?: boolean | null;
 }): number {
   const e = n(row.fill_px) || n(row.entry);
   const q = origQty(row);
