@@ -1426,13 +1426,8 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           !beNames.has(p.symbol.replace(/_/g, "").toUpperCase()),
       ).length;
       const fromDb = dbFilled.filter((s) => (s.side === "short" ? "short" : "long") === side).length;
-      const pend = stillOpenRaw.filter(
-        (s) =>
-          (s.status === "working" || s.status === "proposed") &&
-          (s.side === "short" ? "short" : "long") === side,
-      ).length;
       const filled = weexBook == null ? fromDb : fromLive;
-      return filled + pend;
+      return filled;
     };
     const riskL = countAtRisk("long");
     const riskS = countAtRisk("short");
