@@ -1492,34 +1492,34 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             btcRsi = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
           }
           const btc15 = await getWeexKlines("BTCUSDT", "15m", 48).catch(() => []);
-          let veto = raw.length
-            ? `${raw.length} setups this tick, none cleared HTF/15m/spread. BTC RSI ${btcRsi.toFixed(0)} ATR ${regime.ratio.toFixed(1)}×.`
+          const ordered =
+            riskS >= 1 && riskL === 0
+              ? [...raw.filter((s) => s.side === "long"), ...raw.filter((s) => s.side !== "long")]
+              : riskL >= 1 && riskS === 0
+                ? [...raw.filter((s) => s.side === "short"), ...raw.filter((s) => s.side !== "short")]
+                : raw;
+          let veto = ordered.length
+            ? `${ordered.length} setups this tick, none cleared HTF/15m/spread. BTC RSI ${btcRsi.toFixed(0)} ATR ${regime.ratio.toFixed(1)}×.`
             : `No setup. BTC RSI ${btcRsi.toFixed(0)} last ${btcLast?.toFixed(0) ?? "?"} ATR ${regime.ratio.toFixed(1)}×.`;
+          if (riskS >= 1 && riskL === 0) {
+            veto = "Short live. No long cleared 4h/daily/conf this tick.";
+          } else if (riskL >= 1 && riskS === 0) {
+            veto = "Long live. No short cleared 4h/daily/conf this tick.";
+          }
 
-          for (const pick of raw) {
+          for (const pick of ordered) {
             if (flattened.has(pick.weexSymbol)) {
               veto = `You flattened ${pick.weexSymbol}. 2h pause on that pair.`;
               continue;
             }
             if (busy.has(pick.weexSymbol)) continue;
             if (pick.side === "long" && riskL >= 1) {
-              veto = "Long already at-risk. Next long after TP1/BE.";
               continue;
             }
             if (pick.side === "short" && riskS >= 1) {
-              veto = "Short already at-risk. Next short after TP1/BE.";
               continue;
             }
-            if (riskL + riskS >= 1) {
-              const confOpp = pick.confidence ?? scoreToConf(pick.score);
-              if (pick.bypassHtf || confOpp < Math.max(bar.minConf, 78)) {
-                veto =
-                  riskS >= 1
-                    ? "Short live. Long only if HTF + high conf — not to fill a slot."
-                    : "Long live. Short only if HTF + high conf — not to fill a slot.";
-                continue;
-              }
-            }
+            const opposite = (riskS >= 1 && pick.side === "long") || (riskL >= 1 && pick.side === "short");
             if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side })) {
               const held = stillOpen[0];
               veto = held
@@ -1530,16 +1530,16 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             if (!pick.bypassHtf) {
               const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
               if (!rules.htfAllows(pick.side, h4)) {
-                veto = `HTF veto ${pick.weexSymbol}`;
+                veto = `HTF veto ${pick.weexSymbol} ${pick.side}`;
                 continue;
               }
-              if (pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
+              if (!opposite && pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
                 veto = `BTC 15m against ${pick.side} ${pick.weexSymbol}`;
                 continue;
               }
               const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
               if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
-                veto = `Daily veto ${pick.weexSymbol}`;
+                veto = `Daily veto ${pick.weexSymbol} ${pick.side}`;
                 continue;
               }
             }
@@ -1556,7 +1556,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             spec = await specFor(coinByWeex(pick.weexSymbol));
             const conf = pick.confidence ?? scoreToConf(pick.score);
             if (conf < bar.minConf) {
-              veto = `${pick.weexSymbol} conf ${conf}% below ${bar.minConf}% bar`;
+              veto = `${pick.weexSymbol} ${pick.side} conf ${conf}% below ${bar.minConf}% bar`;
               continue;
             }
             sized = sizeSetup(pick, equity, corrected.marginPct, spec.maxLeverage);
