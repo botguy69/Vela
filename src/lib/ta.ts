@@ -67,8 +67,7 @@ function swing(candles: Candle[], lookback: number, kind: "high" | "low"): numbe
 }
 
 export function scoreToConf(score: number): number {
-  const x = Math.max(0, Math.min(1, (score - 58) / 28));
-  return Math.round(48 + x * 32);
+  return Math.round(Math.min(86, Math.max(58, score)));
 }
 
 export function weexSymbol(id: MarketId | string): string {
@@ -80,8 +79,8 @@ export function analyzeMarket(
   hourly: Candle[],
   style: Style,
   minRr: number,
-): RawSetup | null {
-  if (hourly.length < 40) return null;
+): RawSetup[] {
+  if (hourly.length < 40) return [];
   const closes = hourly.map((c) => c.close);
   const last = closes[closes.length - 1]!;
   const fast = sma(closes, 9);
@@ -89,7 +88,7 @@ export function analyzeMarket(
   const slow = sma(closes, 50);
   const r = rsi(closes, 14);
   const a = atr(hourly, 14);
-  if (fast == null || mid == null || r == null || a == null || a <= 0) return null;
+  if (fast == null || mid == null || r == null || a == null || a <= 0) return [];
 
   const hi = swing(hourly, 20, "high");
   const lo = swing(hourly, 20, "low");
@@ -295,54 +294,60 @@ export function analyzeMarket(
     }
   }
 
-  let best: Idea | null = null;
-  for (const idea of ideas) {
-    if (!best || idea.score > best.score) best = idea;
-  }
-  if (!best) return null;
-
-  const risk = Math.abs(best.entry - best.stop);
-  if (risk <= 0) return null;
-  const push = (mult: number) =>
-    best.side === "long" ? best.entry + risk * mult : best.entry - risk * mult;
-  const targets =
-    best.plan === "scale3"
-      ? [push(1), push(2), push(3.2)]
-      : best.plan === "scale2"
-        ? [push(1.2), push(2.5)]
-        : [push(style === "scalp" ? 1.8 : 2.2)];
-  const scale =
-    best.plan === "scale3" ? [0.34, 0.33, 0.33] : best.plan === "scale2" ? [0.5, 0.5] : [1];
-  const target = targets[targets.length - 1]!;
-  const rr = Math.abs(target - best.entry) / risk;
-  if (rr < minRr) return null;
-
-  const conf = scoreToConf(best.score);
-  const planTag = best.plan === "scale2" ? "hold" : best.plan === "scale3" ? "break" : "fade";
-  const thesis = `${best.side} ${planTag} · RSI ${r.toFixed(0)} · ${rr.toFixed(1)}R · conf ${conf}% · ${best.thesis}`;
-
-  return {
-    symbol,
-    weexSymbol: weexSymbol(symbol),
-    side: best.side,
-    style,
-    entryType: best.entryType,
-    entry: best.entry,
-    stop: best.stop,
-    target,
-    targets,
-    scale,
-    plan: best.plan,
-    rr,
-    score: best.score,
-    confidence: conf,
-    thesis,
-    invalidation: best.invalidation,
-    atr: a,
-    rsi: r,
-    last,
-    bypassHtf: Boolean(best.bypassHtf),
+  const finish = (best: Idea): RawSetup | null => {
+    const risk = Math.abs(best.entry - best.stop);
+    if (risk <= 0) return null;
+    const push = (mult: number) =>
+      best.side === "long" ? best.entry + risk * mult : best.entry - risk * mult;
+    const targets =
+      best.plan === "scale3"
+        ? [push(1), push(2), push(3.2)]
+        : best.plan === "scale2"
+          ? [push(1.2), push(2.5)]
+          : [push(style === "scalp" ? 1.8 : 2.2)];
+    const scale =
+      best.plan === "scale3" ? [0.34, 0.33, 0.33] : best.plan === "scale2" ? [0.5, 0.5] : [1];
+    const target = targets[targets.length - 1]!;
+    const rr = Math.abs(target - best.entry) / risk;
+    if (rr < minRr) return null;
+    const conf = scoreToConf(best.score);
+    const planTag = best.plan === "scale2" ? "hold" : best.plan === "scale3" ? "break" : "fade";
+    const thesis = `${best.side} ${planTag} · RSI ${r.toFixed(0)} · ${rr.toFixed(1)}R · conf ${conf}% · ${best.thesis}`;
+    return {
+      symbol,
+      weexSymbol: weexSymbol(symbol),
+      side: best.side,
+      style,
+      entryType: best.entryType,
+      entry: best.entry,
+      stop: best.stop,
+      target,
+      targets,
+      scale,
+      plan: best.plan,
+      rr,
+      score: best.score,
+      confidence: conf,
+      thesis,
+      invalidation: best.invalidation,
+      atr: a,
+      rsi: r,
+      last,
+      bypassHtf: Boolean(best.bypassHtf),
+    };
   };
+
+  const out: RawSetup[] = [];
+  for (const side of ["long", "short"] as const) {
+    let best: Idea | null = null;
+    for (const idea of ideas) {
+      if (idea.side !== side) continue;
+      if (!best || idea.score > best.score) best = idea;
+    }
+    const s = best ? finish(best) : null;
+    if (s) out.push(s);
+  }
+  return out;
 }
 
 export function pickStyle(accountUsd: number, forced?: Style | "auto"): Style {
@@ -358,8 +363,8 @@ export function scanUniverse(
 ): RawSetup[] {
   const out: RawSetup[] = [];
   for (const [symbol, candles] of Object.entries(books)) {
-    const setup = analyzeMarket(symbol, candles, style, minRr);
-    if (setup) out.push(setup);
+    const setups = analyzeMarket(symbol, candles, style, minRr);
+    for (const setup of setups) out.push(setup);
   }
   const filtered =
     method === "trend"

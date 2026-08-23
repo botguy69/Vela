@@ -151,7 +151,8 @@ function publicSettings(
 ) {
   const liveEq = live?.equity;
   const equity = liveEq != null ? liveEq : 0;
-  const peak = liveEq != null ? Math.max(n(row.peak_usd) || liveEq, liveEq) : 0;
+  let peak = liveEq != null ? Math.max(n(row.peak_usd) || liveEq, liveEq) : 0;
+  if (equity > 50 && peak > equity * 1.42) peak = equity / 0.82;
   const dd = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
   const phase = livePhase({ ...row, account_usd: Math.max(equity, liveEq != null ? equity : 0) }, stats);
   return {
@@ -1029,6 +1030,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     let streak = pub.lossStreak;
     let winStreak = n((settings as SettingsRow).win_streak) || 0;
     let peak = pub.peakUsd;
+    if (equity > 50 && peak > equity * 1.42) peak = equity / 0.82;
     {
       const creds = await credsFrom(settings);
       if (creds) await trimToTwoPct(sql, userId, settings, weexBook, notes, creds, equity);
@@ -1602,10 +1604,12 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
                 veto = `BTC 15m against ${pick.side} ${pick.weexSymbol}`;
                 continue;
               }
-              const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
-              if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
-                veto = `Daily veto ${pick.weexSymbol} ${pick.side}`;
-                continue;
+              if (!opposite) {
+                const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
+                if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
+                  veto = `Daily veto ${pick.weexSymbol} ${pick.side}`;
+                  continue;
+                }
               }
             }
             const book = await getBookTicker(pick.weexSymbol);
