@@ -179,10 +179,23 @@ export function analyzeMarket(
       entry,
       stop,
       entryType: "market",
-      score: 62 + (32 - r),
+      score: 70 + (32 - r),
       thesis: `Washout RSI ${r.toFixed(0)}, slow mean intact`,
       invalidation: `Break of the local swing low.`,
-      plan: "single",
+      plan: "scale2",
+    });
+  }
+
+  if (r <= 42 && last < mid && last > (slow ?? last) * 0.93) {
+    ideas.push({
+      side: "long",
+      entry: last,
+      stop: lo - stopPad * a * 0.35,
+      entryType: "market",
+      score: 71 + Math.min(6, 42 - r) * 0.5,
+      thesis: `Oversold bounce RSI ${r.toFixed(0)} under 21h`,
+      invalidation: `Hourly close through the swing low.`,
+      plan: "scale2",
     });
   }
 

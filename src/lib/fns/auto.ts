@@ -1574,8 +1574,13 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           let veto = ordered.length
             ? `${ordered.length} setups this tick, none cleared HTF/15m/spread. BTC RSI ${btcRsi.toFixed(0)} ATR ${regime.ratio.toFixed(1)}×.`
             : `No setup. BTC RSI ${btcRsi.toFixed(0)} last ${btcLast?.toFixed(0) ?? "?"} ATR ${regime.ratio.toFixed(1)}×.`;
-          if (riskS < SIDE_CAP || riskL < SIDE_CAP) {
-            veto = `At-risk ${riskL}L/${riskS}S (cap 2 each). No extra name cleared 4h/daily/conf.`;
+          if (riskL < SIDE_CAP) {
+            const longIdeas = ordered.filter((s) => s.side === "long" && !busy.has(s.weexSymbol));
+            veto = longIdeas.length
+              ? `At-risk ${riskL}L/${riskS}S (cap 2). ${longIdeas.length} 1h long(s) — none cleared conf/spread.`
+              : `At-risk ${riskL}L/${riskS}S (cap 2). No 1h long this tick. Not forcing one.`;
+          } else if (riskS < SIDE_CAP) {
+            veto = `At-risk ${riskL}L/${riskS}S (cap 2). No extra short cleared.`;
           }
 
           for (const pick of ordered) {
@@ -1594,22 +1599,20 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
                 : "Same-way beta is full.";
               continue;
             }
-            if (!pick.bypassHtf) {
+            if (!pick.bypassHtf && !opposite) {
               const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
               if (!rules.htfAllows(pick.side, h4)) {
                 veto = `HTF veto ${pick.weexSymbol} ${pick.side}`;
                 continue;
               }
-              if (!opposite && pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
+              if (pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
                 veto = `BTC 15m against ${pick.side} ${pick.weexSymbol}`;
                 continue;
               }
-              if (!opposite) {
-                const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
-                if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
-                  veto = `Daily veto ${pick.weexSymbol} ${pick.side}`;
-                  continue;
-                }
+              const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
+              if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
+                veto = `Daily veto ${pick.weexSymbol} ${pick.side}`;
+                continue;
               }
             }
             const book = await getBookTicker(pick.weexSymbol);

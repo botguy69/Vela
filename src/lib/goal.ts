@@ -147,7 +147,7 @@ export function adaptMethod(opts: {
 
   next = { ...next, marginPct: 2 };
 
-  const recovering = opts.lastMargin < 1.95 && opts.winStreak < 2 && opts.closed >= 3;
+  const recovering = opts.winStreak < 2 && opts.lastMargin < 1.95 && (opts.lossStreak >= 3 || opts.winStreak >= 1);
   if (opts.drawdownPct >= 30) {
     next = {
       ...next,
