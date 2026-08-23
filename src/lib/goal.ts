@@ -73,7 +73,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: 2% until three losses, then 1.2% until two wins. BE compounding up to 6.",
+      note: "Stage 1: 1.2–2% on one ticket. Next name only after TP1/BE. Then up to 6 BE leftovers.",
     };
   }
   return {

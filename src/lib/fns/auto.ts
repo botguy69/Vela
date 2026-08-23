@@ -1284,10 +1284,21 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         }
       }
     }
+    const dbFilled = stillOpenRaw.filter(
+      (s) => s.status === "filled" && !s.be_moved && !flattened.has(s.weex_symbol),
+    );
     const liveAtRisk =
-      liveN.filter((p) => !beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length + hiddenLive;
+      liveN.filter((p) => !beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length +
+      hiddenLive +
+      (weexBook == null ? dbFilled.length : 0);
 
-    if (weexBook == null && (hiddenLive > 0 || stillOpenRaw.some((s) => s.status === "filled"))) {
+    if (liveAtRisk >= 1) {
+      const names = [
+        ...liveN.map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
+        ...dbFilled.map((s) => s.weex_symbol),
+      ];
+      notes.push(`${[...new Set(names)].join(" ")} live. No new tickets until TP1/BE.`);
+    } else if (weexBook == null) {
       notes.push("WEEX positions unread. No new orders.");
     } else if (settings.armed && liveAtRisk < 1 && liveN.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
