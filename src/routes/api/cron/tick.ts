@@ -42,20 +42,13 @@ async function handle(request: Request) {
     const { executeAutoTick } = await import("@/lib/fns/auto");
     const sql = await getSql();
     const rows = await sql<{ user_id: string }>`select user_id from auto_settings where armed = true`;
-    const results = [];
-    for (const row of rows) {
-      try {
-        results.push({ userId: row.user_id, ...(await executeAutoTick(row.user_id)) });
-      } catch (err) {
-        results.push({ userId: row.user_id, error: err instanceof Error ? err.message : "tick failed" });
-      }
-    }
+    void Promise.allSettled(rows.map((row) => executeAutoTick(row.user_id))).catch(() => null);
     return cors({
       ok: true,
       awake: true,
-      ticked: results.length,
+      ticked: rows.length,
+      kicked: true,
       at: new Date().toISOString(),
-      results,
     });
   } catch (err) {
     return cors({
