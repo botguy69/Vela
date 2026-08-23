@@ -443,3 +443,32 @@ export async function placeWeexTake(
     },
   });
 }
+
+export async function hasWeexWorkingOrder(
+  creds: WeexCreds,
+  symbol: string,
+  clientOid?: string | null,
+): Promise<boolean | null> {
+  const paths = [
+    { path: "/capi/v3/openOrders", query: { symbol } as Record<string, string> },
+    { path: "/capi/v3/openOrders", query: { symbol, productType: "USDT-FUTURES" } },
+    { path: "/capi/v2/openOrders", query: { symbol } },
+  ];
+  let sawOk = false;
+  const oid = (clientOid ?? "").slice(0, 36);
+  for (const p of paths) {
+    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
+    if (!res.ok) continue;
+    sawOk = true;
+    const rows = rowsFrom(res.data);
+    if (!rows.length) return false;
+    if (!oid) return true;
+    const hit = rows.some((r) => {
+      const o = r as Record<string, unknown>;
+      const id = String(o.clientOid ?? o.clientOrderId ?? o.origClientOrderId ?? "");
+      return id === oid || id.startsWith("vela");
+    });
+    return hit;
+  }
+  return sawOk ? false : null;
+}

@@ -432,6 +432,31 @@ async function closeFlatOnWeex(
       notes.push(`${row.weex_symbol} leftover limit cancelled`);
     }
   }
+
+  if (creds) {
+    const hanging = await sql<SignalRow>`
+      select * from auto_signals
+      where user_id = ${userId} and status in ('proposed','working')
+    `;
+    const { getWeexPositionQty, hasWeexWorkingOrder } = await import("@/lib/weex.server");
+    for (const row of hanging) {
+      const q = await getWeexPositionQty(creds, row.weex_symbol);
+      if (q != null && q > 0) continue;
+      const open = await hasWeexWorkingOrder(creds, row.weex_symbol, row.client_oid);
+      if (open === true) continue;
+      if (open === false || q === 0) {
+        await sql`
+          update auto_signals
+          set status = 'skipped',
+              close_reason = ${"Cancelled — you flattened WEEX"},
+              pnl = 0,
+              updated_at = now()
+          where id = ${row.id} and user_id = ${userId}
+        `;
+        notes.push(`${row.weex_symbol} cancelled on WEEX`);
+      }
+    }
+  }
 }
 
 async function trimToTwoPct(
@@ -552,24 +577,29 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       const creds = await credsFrom(settings);
       if (creds) {
         const { listWeexPositions } = await import("@/lib/weex.server");
-        const livePos = (await listWeexPositions(creds).catch(() => null)) ?? [];
-        for (const p of livePos) {
+        const livePos = await listWeexPositions(creds).catch(() => null);
+        const bookOk = livePos != null;
+        for (const p of livePos ?? []) {
           leftBy.set(p.symbol, p.qty);
           leftBy.set(p.symbol.replace(/_/g, "").toUpperCase(), p.qty);
+        }
+        for (const t of mapped) {
+          const key = t.weexSymbol.replace(/_/g, "").toUpperCase();
+          const left = leftBy.get(t.weexSymbol) ?? leftBy.get(key);
+          if (left != null && left > 0) {
+            t.liveOnWeex = true;
+            if (t.status !== "working" && t.status !== "filled" && t.status !== "proposed") t.status = "filled";
+          } else if (bookOk) {
+            t.liveOnWeex = false;
+          } else {
+            t.liveOnWeex = t.status === "filled";
+          }
         }
       }
     }
     for (const t of mapped) {
       const key = t.weexSymbol.replace(/_/g, "").toUpperCase();
       const left = leftBy.get(t.weexSymbol) ?? leftBy.get(key);
-      if (left != null && left > 0) {
-        t.liveOnWeex = true;
-        if (t.status !== "working" && t.status !== "filled" && t.status !== "proposed") {
-          t.status = "filled";
-        }
-      } else {
-        t.liveOnWeex = false;
-      }
       if (t.status === "working" && !t.liveOnWeex) {
         t.pnl = null;
         continue;
