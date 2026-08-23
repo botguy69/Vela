@@ -190,8 +190,9 @@ async function closedStats(
     stop: string | number | null;
     qty: string | number | null;
     fill_px: string | number | null;
+    risk_usd: string | number | null;
   }>`
-    select pnl, entry, stop, qty, fill_px from auto_signals
+    select pnl, entry, stop, qty, fill_px, risk_usd from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
       and (close_reason is null or (
         close_reason not like 'Duplicate%'
@@ -205,10 +206,15 @@ async function closedStats(
   const wins = rows.filter((r) => n(r.pnl) > 0).length;
   const rs = rows
     .map((r) => {
+      const pnl = n(r.pnl);
+      const riskUsd = n(r.risk_usd);
+      if (riskUsd > 0.01) return pnl / riskUsd;
       const entry = n(r.fill_px) || n(r.entry);
-      const risk = Math.abs(entry - n(r.stop)) * n(r.qty);
+      const stopDist = Math.abs(entry - n(r.stop));
+      if (entry > 0 && stopDist / entry < 0.002) return null;
+      const risk = stopDist * n(r.qty);
       if (!(risk > 0)) return null;
-      return n(r.pnl) / risk;
+      return pnl / risk;
     })
     .filter((x): x is number => x != null);
   const winRs = rs.filter((x) => x > 0);
