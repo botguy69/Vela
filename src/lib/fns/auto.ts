@@ -1462,7 +1462,15 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             : rawAll;
           const busy = new Set(stillOpen.map((s) => s.weex_symbol));
           const betaBook = (weexBook ?? [])
-            .filter((p) => p.qty > 0 && !flattened.has(p.symbol) && !flattened.has(p.symbol.replace(/_/g, "").toUpperCase()))
+            .filter((p) => {
+              const sym = p.symbol.replace(/_/g, "").toUpperCase();
+              return (
+                p.qty > 0 &&
+                !flattened.has(p.symbol) &&
+                !flattened.has(sym) &&
+                !beNames.has(sym)
+              );
+            })
             .map((p) => ({
               weex: p.symbol.replace(/_/g, "").toUpperCase(),
               side: ((p as { side?: string }).side === "short" ? "short" : "long") as "long" | "short",
