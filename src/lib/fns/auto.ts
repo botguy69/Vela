@@ -1432,12 +1432,15 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     const riskL = countAtRisk("long");
     const riskS = countAtRisk("short");
 
-    if (riskL >= 1 && riskS >= 1) {
+    if (riskL + riskS >= 1) {
       const names = [
         ...liveN.map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
         ...dbFilled.map((s) => s.weex_symbol),
       ];
-      notes.push(`${[...new Set(names)].join(" ")} live. Next after TP1/BE.`);
+      const beN = liveN.filter((p) => beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
+      notes.push(
+        `${[...new Set(names)].join(" ")} at-risk. Next after TP1/BE. ${beN} leftover(s) at BE · cap 6.`,
+      );
     } else if (settings.armed && liveN.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
         notes.push("Armed with no keys. Store keys on this page.");
@@ -1491,23 +1494,12 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
               continue;
             }
             if (busy.has(pick.weexSymbol)) continue;
-            if (pick.side === "long" && riskL >= 1) {
-              veto = "Already long at-risk. Next long after TP1/BE.";
-              continue;
-            }
-            if (pick.side === "short" && riskS >= 1) {
-              veto = "Already short at-risk. Next short after TP1/BE.";
-              continue;
-            }
             if (riskL + riskS >= 1) {
-              const confOpp = pick.confidence ?? scoreToConf(pick.score);
-              if (pick.bypassHtf || confOpp < Math.max(bar.minConf, 78)) {
-                veto =
-                  riskS >= 1
-                    ? "Short live. Not adding a long unless HTF + high conf."
-                    : "Long live. Not adding a short unless HTF + high conf.";
-                continue;
-              }
+              veto =
+                riskS >= 1
+                  ? "Short at-risk. Next name only after TP1/BE (max 6, leftovers at BE)."
+                  : "Long at-risk. Next name only after TP1/BE (max 6, leftovers at BE).";
+              continue;
             }
             if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side })) {
               const held = stillOpen[0];
@@ -1652,14 +1644,12 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
     } else if (!settings.armed) {
       notes.push("Disarmed. No new orders.");
-    } else if (riskL >= 1 && riskS >= 1) {
-      notes.push("Long and short both live, none at BE. No new tickets.");
+    } else if (riskL + riskS >= 1) {
+      notes.push("One at-risk. Next after TP1/BE. Max 6 if five are locked at BE.");
     } else if (stillOpen.length >= LIVE_CAP) {
       notes.push("Live cap (6 names). Waiting on an exit.");
     } else {
-      notes.push(
-        `${riskL} long / ${riskS} short at-risk. Opposite side can still open.`,
-      );
+      notes.push("Flat / BE leftovers only. Hunting long or short — not both at-risk.");
     }
 
     const learned = [corrected.note, bar.note, ledger.note].filter(Boolean).join(" · ");
