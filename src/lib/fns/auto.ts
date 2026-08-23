@@ -389,11 +389,21 @@ async function closeFlatOnWeex(
     const entry = n(pos.fill_px ?? pos.entry);
     const px = await getWeexLast(pos.weex_symbol).catch(() => entry);
     const side = pos.side === "short" ? "short" : "long";
-    const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
-    const why = "Closed on WEEX";
+    const { ticketPnl } = await import("@/lib/ta");
+    const pnl = ticketPnl({
+      side,
+      entry,
+      last: px,
+      qty: n(pos.qty),
+      leftover: 0,
+      targets: parseNums(pos.targets),
+      beMoved: Boolean(pos.be_moved),
+    });
+    const why = pos.be_moved ? (pnl >= 0 ? "TP1 then BE" : "TP1 then leftover stopped") : "Closed on WEEX";
+    const st = pos.be_moved && pnl >= 0 ? "targeted" : pos.be_moved ? "stopped" : "skipped";
     await sql`
       update auto_signals
-      set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
+      set status = ${st}, closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
       where id = ${pos.id} and user_id = ${userId}
     `;
     if (creds) {
@@ -824,7 +834,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       getWeexFourHour,
       getWeexKlines,
     } = await import("@/lib/weex-market.server");
-    const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf } = await import("@/lib/ta");
+    const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, ticketPnl } = await import("@/lib/ta");
     const { sizeSetup } = await import("@/lib/risk");
     const { coinByWeex, CORE_SET } = await import("@/lib/universe");
     const rules = await import("@/lib/desk-rules");
@@ -854,6 +864,40 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     }
 
     const notes: string[] = [];
+    const botched = await sql<SignalRow>`
+      select * from auto_signals
+      where user_id = ${userId}
+        and be_moved = true
+        and status in ('skipped','stopped')
+        and (
+          close_reason = 'Closed on WEEX'
+          or close_reason = 'Hit stop'
+        )
+    `;
+    for (const row of botched) {
+      const entry = n(row.fill_px ?? row.entry);
+      const last = n(row.closed_px) || entry;
+      const side = row.side === "short" ? "short" : "long";
+      const pnl = ticketPnl({
+        side,
+        entry,
+        last,
+        qty: n(row.qty),
+        leftover: 0,
+        targets: parseNums(row.targets),
+        beMoved: true,
+      });
+      if (pnl <= 0) continue;
+      await sql`
+        update auto_signals
+        set status = 'targeted',
+            pnl = ${pnl},
+            close_reason = ${"TP1 then BE"},
+            updated_at = now()
+        where id = ${row.id} and user_id = ${userId}
+      `;
+      notes.push(`${row.weex_symbol} restated: TP1 then BE +${pnl.toFixed(2)}`);
+    }
     await collapseOpenDupes(sql, userId, settings, notes);
     await sql`
       update auto_signals
@@ -1130,11 +1174,27 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           continue;
         }
         const exit = hitStop ? stop : target;
-        const pnl = side === "long" ? (exit - entry) * n(pos.qty) : (entry - exit) * n(pos.qty);
-        const why = hitStop ? "Hit stop" : "Took profit";
+        const { ticketPnl } = await import("@/lib/ta");
+        const pnl = ticketPnl({
+          side,
+          entry,
+          last: exit,
+          qty: n(pos.qty),
+          leftover: 0,
+          targets: tps,
+          beMoved: Boolean(pos.be_moved),
+        });
+        const why = pos.be_moved
+          ? pnl >= 0
+            ? "TP1 then BE"
+            : "TP1 then leftover stopped"
+          : hitStop
+            ? "Hit stop"
+            : "Took profit";
+        const st = pos.be_moved && pnl >= 0 ? "targeted" : hitStop ? "stopped" : "targeted";
         await sql`
           update auto_signals
-          set status = ${hitStop ? "stopped" : "targeted"},
+          set status = ${st},
               closed_px = ${exit}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
           where id = ${pos.id} and user_id = ${userId}
         `;

@@ -416,15 +416,22 @@ export function ticketPnl(opts: {
   if (!(orig > 0) || !(opts.entry > 0)) return 0;
   const favor = (px: number, q: number) =>
     opts.side === "short" ? (opts.entry - px) * q : (px - opts.entry) * q;
-  const assumedLeft = opts.beMoved ? orig * 0.5 : orig;
+  const tp1 = opts.targets[0];
+  if (opts.beMoved && tp1 != null) {
+    const half = orig * 0.5;
+    const left =
+      opts.leftover != null && Number.isFinite(opts.leftover) && opts.leftover >= 0
+        ? opts.leftover
+        : half;
+    return favor(tp1, half) + favor(opts.last, left);
+  }
+  const assumedLeft = orig;
   const left =
     opts.leftover != null && Number.isFinite(opts.leftover) && opts.leftover >= 0
       ? opts.leftover
       : assumedLeft;
-  const tp1 = opts.targets[0];
   const closed = Math.max(0, orig - left);
   let realized = 0;
   if (closed > 0 && tp1 != null) realized += favor(tp1, closed);
-  else if (opts.beMoved && tp1 != null) realized += favor(tp1, orig * 0.5);
   return realized + favor(opts.last, left);
 }
