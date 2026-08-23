@@ -371,9 +371,10 @@ async function closeFlatOnWeex(
       return (s === key || p.symbol === pos.weex_symbol) && p.qty > 0;
     });
     if (onList) continue;
-    if (livePos == null && creds) {
+    if (livePos == null) {
+      if (!creds) continue;
       const q = await getWeexPositionQty(creds, pos.weex_symbol);
-      if (q != null && q > 0) continue;
+      if (q == null || q > 0) continue;
     }
     const entry = n(pos.fill_px ?? pos.entry);
     const px = await getWeexLast(pos.weex_symbol).catch(() => entry);
@@ -1113,6 +1114,33 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           where id = ${row.id} and user_id = ${userId}
         `;
         notes.push(`Reopened ${lp.symbol} — still live on WEEX`);
+      }
+
+      const ghosts = await sql<SignalRow>`
+        select * from auto_signals
+        where user_id = ${userId}
+          and close_reason = 'Closed on WEEX'
+          and updated_at > now() - interval '6 hours'
+      `;
+      const { getWeexPositionQty } = await import("@/lib/weex.server");
+      for (const row of ghosts) {
+        if (row.status === "filled" || row.status === "working") continue;
+        const q = await getWeexPositionQty(credsLive, row.weex_symbol);
+        if (q == null || q <= 0) continue;
+        const fill = n(row.fill_px) || n(row.entry);
+        await sql`
+          update auto_signals
+          set status = 'filled',
+              qty = ${q},
+              fill_px = ${fill},
+              closed_px = null,
+              pnl = null,
+              close_reason = null,
+              filled_at = ${row.filled_at ?? new Date().toISOString()},
+              updated_at = now()
+          where id = ${row.id} and user_id = ${userId}
+        `;
+        notes.push(`Reopened ${row.weex_symbol} — still live on WEEX`);
       }
     }
 
