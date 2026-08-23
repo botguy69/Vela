@@ -271,8 +271,15 @@ function TicketsTable({
                       .join(" · ")
                   : t.closeReason || t.status;
                 return (
-                <tr key={t.id} className={cn("border-b border-line/70 last:border-0", !live && "opacity-55")}>
-                  <td className="px-4 py-2.5 font-medium">
+                <tr
+                  key={t.id}
+                  className={cn(
+                    "border-b border-line/70 last:border-0",
+                    live && "bg-up/10",
+                    !live && "opacity-45",
+                  )}
+                >
+                  <td className={cn("px-4 py-2.5 font-medium", live && "text-up")}>
                     {t.weexSymbol}
                     <div className="text-[11px] text-subtle">{why || "cross"}</div>
                   </td>

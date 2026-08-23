@@ -243,6 +243,8 @@ export async function listWeexPositions(
 ): Promise<{ symbol: string; side: "long" | "short"; qty: number; entry: number }[] | null> {
   const paths = [
     { path: "/capi/v3/account/positions", query: undefined as Record<string, string> | undefined },
+    { path: "/capi/v3/account/positions", query: { productType: "USDT-FUTURES" } },
+    { path: "/capi/v3/account/positions", query: { marginCoin: "USDT" } },
     { path: "/capi/v3/positionRisk", query: undefined },
     { path: "/capi/v3/position/open", query: undefined },
     { path: "/capi/v2/position", query: undefined },

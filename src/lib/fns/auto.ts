@@ -193,7 +193,12 @@ async function closedStats(
   }>`
     select pnl, entry, stop, qty, fill_px from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
-      and (close_reason is null or close_reason not like 'Duplicate%')
+      and (close_reason is null or (
+        close_reason not like 'Duplicate%'
+        and close_reason not like 'Closed on WEEX%'
+        and close_reason not like 'Cancelled%'
+        and close_reason not like 'Stale claim%'
+      ))
       and created_at >= ${from}
   `;
   const closed = rows.length;
@@ -290,7 +295,12 @@ async function ticketLedger(
   }>`
     select plan, side, weex_symbol, pnl from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
-      and (close_reason is null or close_reason not like 'Duplicate%')
+      and (close_reason is null or (
+        close_reason not like 'Duplicate%'
+        and close_reason not like 'Closed on WEEX%'
+        and close_reason not like 'Cancelled%'
+        and close_reason not like 'Stale claim%'
+      ))
       and created_at >= ${from}
   `;
   const { buildLedger } = await import("@/lib/desk-rules");
@@ -1224,7 +1234,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     const liveAtRisk =
       liveN.filter((p) => !beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length + hiddenLive;
 
-    if (weexBook == null) {
+    if (weexBook == null && (hiddenLive > 0 || stillOpenRaw.some((s) => s.status === "filled"))) {
       notes.push("WEEX positions unread. No new orders.");
     } else if (settings.armed && liveAtRisk < 1 && liveN.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
