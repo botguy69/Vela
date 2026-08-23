@@ -586,9 +586,8 @@ export const getAutoDesk = createServerFn({ method: "GET" })
         for (const t of mapped) {
           const key = t.weexSymbol.replace(/_/g, "").toUpperCase();
           const left = leftBy.get(t.weexSymbol) ?? leftBy.get(key);
-          if (left != null && left > 0) {
+          if (left != null && left > 0 && (t.status === "working" || t.status === "filled" || t.status === "proposed")) {
             t.liveOnWeex = true;
-            if (t.status !== "working" && t.status !== "filled" && t.status !== "proposed") t.status = "filled";
           } else if (bookOk) {
             t.liveOnWeex = false;
           } else {
@@ -1287,10 +1286,32 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     const dbFilled = stillOpenRaw.filter(
       (s) => s.status === "filled" && !s.be_moved && !flattened.has(s.weex_symbol),
     );
+    const credsGate2 = await credsFrom(settings);
+    if (credsGate2 && (liveN.length > 0 || dbFilled.length > 0)) {
+      const extras = stillOpenRaw.filter((s) => s.status === "working" || s.status === "proposed");
+      const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
+      for (const row of extras) {
+        if (row.client_oid) {
+          await cancelWeexOrder(credsGate2, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
+        }
+        await cancelWeexProtective(credsGate2, row.weex_symbol).catch(() => null);
+        await sql`
+          update auto_signals
+          set status = 'skipped',
+              close_reason = ${"Cancelled — one live ticket only"},
+              pnl = 0,
+              updated_at = now()
+          where id = ${row.id} and user_id = ${userId}
+        `;
+        notes.push(`${row.weex_symbol} limit cancelled — ${dbFilled[0]?.weex_symbol ?? "live"} is the ticket`);
+      }
+    }
+    const pending = stillOpenRaw.filter((s) => s.status === "working" || s.status === "proposed").length;
     const liveAtRisk =
       liveN.filter((p) => !beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length +
       hiddenLive +
-      (weexBook == null ? dbFilled.length : 0);
+      (weexBook == null ? dbFilled.length : 0) +
+      (liveN.length || dbFilled.length ? 0 : pending ? 1 : 0);
 
     if (liveAtRisk >= 1) {
       const names = [
