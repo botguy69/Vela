@@ -1379,19 +1379,21 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
                 : "Same-way beta is full.";
               continue;
             }
-            const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
-            if (!rules.htfAllows(pick.side, h4)) {
-              veto = `HTF veto ${pick.weexSymbol}`;
-              continue;
-            }
-            if (pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
-              veto = `BTC 15m against ${pick.side} ${pick.weexSymbol}`;
-              continue;
-            }
-            const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
-            if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
-              veto = `Daily veto ${pick.weexSymbol}`;
-              continue;
+            if (!pick.bypassHtf) {
+              const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
+              if (!rules.htfAllows(pick.side, h4)) {
+                veto = `HTF veto ${pick.weexSymbol}`;
+                continue;
+              }
+              if (pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
+                veto = `BTC 15m against ${pick.side} ${pick.weexSymbol}`;
+                continue;
+              }
+              const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
+              if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
+                veto = `Daily veto ${pick.weexSymbol}`;
+                continue;
+              }
             }
             const book = await getBookTicker(pick.weexSymbol);
             if (book && rules.spreadTooWide(pick.weexSymbol, book.bid, book.ask)) {

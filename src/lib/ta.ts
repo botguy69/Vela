@@ -25,6 +25,7 @@ export type RawSetup = {
   scale: number[];
   plan: "single" | "scale2" | "scale3";
   confidence: number;
+  bypassHtf?: boolean;
 };
 
 function sma(values: number[], period: number): number | null {
@@ -105,6 +106,7 @@ export function analyzeMarket(
     thesis: string;
     invalidation: string;
     plan: "single" | "scale2" | "scale3";
+    bypassHtf?: boolean;
   };
 
   const ideas: Idea[] = [];
@@ -193,10 +195,11 @@ export function analyzeMarket(
       entry,
       stop,
       entryType: "market",
-      score: 60 + (r - 72),
-      thesis: `Stretched high, RSI ${r.toFixed(0)}`,
+      score: 68 + (r - 72),
+      thesis: `Overbought RSI ${r.toFixed(0)}`,
       invalidation: `Break of the local swing high.`,
-      plan: "single",
+      plan: "scale2",
+      bypassHtf: true,
     });
   }
 
@@ -206,6 +209,24 @@ export function analyzeMarket(
   const vols = hourly.slice(-20).map((c) => c.volume).filter((v) => v > 0).sort((x, y) => x - y);
   const medVol = vols.length ? vols[Math.floor(vols.length / 2)]! : 0;
   const thinBreak = medVol > 0 && lastBar.volume < 0.75 * medVol;
+
+  const rAgo = rsi(closes.slice(0, -4), 14);
+  if (rAgo != null && r >= 64 && r <= rAgo + 0.5 && last > mid * 0.997) {
+    const bearBar = lastBar.close <= lastBar.open;
+    if (bearBar || r >= 70) {
+      ideas.push({
+        side: "short",
+        entry: last,
+        stop: Math.max(hi, last) + stopPad * a * 0.35,
+        entryType: "market",
+        score: 73 + Math.min(6, r - 64),
+        thesis: `Trend cooling, RSI ${r.toFixed(0)} off ${rAgo.toFixed(0)}`,
+        invalidation: `Hourly close makes a new high.`,
+        plan: "scale2",
+        bypassHtf: true,
+      });
+    }
+  }
 
   const brokeHigh = !exhausted && !thinBreak && last > hi && fast > mid && r > 50 && r < 72;
   if (brokeHigh) {
@@ -255,6 +276,7 @@ export function analyzeMarket(
         thesis: `Failed range high, RSI ${r.toFixed(0)}`,
         invalidation: `Hourly close back above the failed high.`,
         plan: "scale2",
+        bypassHtf: true,
       });
     }
     const failedLow =
@@ -319,6 +341,7 @@ export function analyzeMarket(
     atr: a,
     rsi: r,
     last,
+    bypassHtf: Boolean(best.bypassHtf),
   };
 }
 
