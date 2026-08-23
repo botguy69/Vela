@@ -226,7 +226,14 @@ function parsePosition(row: unknown): { symbol: string; side: "long" | "short"; 
   const amt = Number(r.positionAmt);
   const side: "long" | "short" =
     sideRaw.includes("short") || amt < 0 ? "short" : "long";
-  const entry = Number(r.entryPrice ?? r.openPriceAvg ?? r.averagePrice ?? 0);
+  const entry = Number(
+    r.entryPrice ??
+      r.openPriceAvg ??
+      r.averagePrice ??
+      ((r as { openValue?: string | number }).openValue != null && q > 0
+        ? Number((r as { openValue?: string | number }).openValue) / q
+        : 0),
+  );
   return { symbol, side, qty: q, entry: Number.isFinite(entry) ? entry : 0 };
 }
 
@@ -242,7 +249,9 @@ export async function listWeexPositions(
   creds: WeexCreds,
 ): Promise<{ symbol: string; side: "long" | "short"; qty: number; entry: number }[] | null> {
   const paths = [
-    { path: "/capi/v3/account/positions", query: undefined as Record<string, string> | undefined },
+    { path: "/capi/v3/account/position/allPosition", query: undefined as Record<string, string> | undefined },
+    { path: "/capi/v3/account/position/singlePosition", query: undefined },
+    { path: "/capi/v3/account/positions", query: undefined },
     { path: "/capi/v3/account/positions", query: { productType: "USDT-FUTURES" } },
     { path: "/capi/v3/account/positions", query: { marginCoin: "USDT" } },
     { path: "/capi/v3/positionRisk", query: undefined },
@@ -266,6 +275,8 @@ export async function getWeexPositionQty(
   symbol: string,
 ): Promise<number | null> {
   const paths = [
+    { path: "/capi/v3/account/position/allPosition", query: { symbol } },
+    { path: "/capi/v3/account/position/singlePosition", query: { symbol } },
     { path: "/capi/v3/account/positions", query: { symbol } },
     { path: "/capi/v3/positionRisk", query: { symbol } },
     { path: "/capi/v2/position", query: { symbol } },

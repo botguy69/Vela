@@ -1298,8 +1298,6 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         ...dbFilled.map((s) => s.weex_symbol),
       ];
       notes.push(`${[...new Set(names)].join(" ")} live. No new tickets until TP1/BE.`);
-    } else if (weexBook == null) {
-      notes.push("WEEX positions unread. No new orders.");
     } else if (settings.armed && liveAtRisk < 1 && liveN.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
         notes.push("Armed with no keys. Store keys on this page.");
