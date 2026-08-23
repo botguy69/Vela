@@ -428,8 +428,11 @@ async function closeFlatOnWeex(
       if (q == null || q > 0) continue;
     }
     const entry = n(pos.fill_px ?? pos.entry);
-    const px = await getWeexLast(pos.weex_symbol).catch(() => entry);
     const side = pos.side === "short" ? "short" : "long";
+    const last = await getWeexLast(pos.weex_symbol).catch(() => entry);
+    const stopPx = n(pos.stop);
+    const hitSl = throughStop(side, last, stopPx);
+    const px = hitSl ? stopPx : last;
     const { ticketPnl } = await import("@/lib/ta");
     const pnl = ticketPnl({
       side,
@@ -444,7 +447,7 @@ async function closeFlatOnWeex(
       ? pnl >= 0
         ? "TP1 then BE"
         : "TP1 then leftover stopped"
-      : throughStop(side, px, n(pos.stop))
+      : hitSl
         ? "Hit stop"
         : "Closed on WEEX";
     const st = pos.be_moved && pnl >= 0 ? "targeted" : why === "Hit stop" || (pos.be_moved && pnl < 0) ? "stopped" : "skipped";
@@ -969,6 +972,32 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       `;
       notes.push(`${row.weex_symbol} restated: hit SL, not a flatten`);
     }
+    const fakeWins = await sql<SignalRow>`
+      select * from auto_signals
+      where user_id = ${userId}
+        and close_reason = 'Hit stop'
+        and updated_at > now() - interval '12 hours'
+    `;
+    for (const row of fakeWins) {
+      const side = row.side === "short" ? "short" : "long";
+      const entry = n(row.fill_px ?? row.entry);
+      const stopPx = n(row.stop);
+      const q = origQty(row);
+      const fair = side === "short" ? (entry - stopPx) * q : (stopPx - entry) * q;
+      if (!(q > 0) || !(stopPx > 0)) continue;
+      if (fair >= 0) continue;
+      if (n(row.pnl) <= 0 && Math.abs(n(row.pnl) - fair) < 0.2) continue;
+      await sql`
+        update auto_signals
+        set status = 'stopped',
+            closed_px = ${stopPx},
+            pnl = ${fair},
+            close_reason = ${"Hit stop"},
+            updated_at = now()
+        where id = ${row.id} and user_id = ${userId}
+      `;
+      notes.push(`${row.weex_symbol} restated: SL ${fair.toFixed(2)} (was booked as a win)`);
+    }
     await collapseOpenDupes(sql, userId, settings, notes);
     await sql`
       update auto_signals
@@ -1150,7 +1179,8 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         left = await getWeexPositionQty(credsNow, pos.weex_symbol);
       }
       if (pos.status === "filled" && left === 0) {
-        const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
+        const exit = throughStop(side, px, stop) ? stop : px;
+        const pnl = side === "long" ? (exit - entry) * origQty(pos) : (entry - exit) * origQty(pos);
         const why = throughStop(side, px, stop) ? "Hit stop" : "Closed on WEEX";
         const st = why === "Hit stop" ? "stopped" : "skipped";
         await sql`

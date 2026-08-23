@@ -425,6 +425,9 @@ export function ticketPnl(opts: {
         : half;
     return favor(tp1, half) + favor(opts.last, left);
   }
+  if (opts.leftover === 0) {
+    return favor(opts.last, orig);
+  }
   const assumedLeft = orig;
   const left =
     opts.leftover != null && Number.isFinite(opts.leftover) && opts.leftover >= 0
