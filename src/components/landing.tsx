@@ -6,28 +6,26 @@ import { BotBreakdown, LegalDisclaimer } from "@/components/legal";
 import { MarketTape } from "@/components/market-tape";
 import { PriceChart } from "@/components/price-chart";
 import { Button } from "@/components/ui/button";
-import type { Candle } from "@/lib/engine";
 import { formatPct, formatPx, signedClass } from "@/lib/format";
-import { fetchCandles } from "@/lib/fns/market";
+import { fetchCandles, fetchTickers } from "@/lib/fns/market";
 import type { MarketId } from "@/lib/markets";
-import type { TapeQuote } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export function Landing({
-  tickers,
-  candles: initialCandles,
-}: {
-  tickers: TapeQuote[];
-  candles: Candle[];
-}) {
+export function Landing() {
   const [symbol, setSymbol] = useState<MarketId>("BTC-USD");
+  const tickersQuery = useQuery({
+    queryKey: ["tickers"],
+    queryFn: () => fetchTickers(),
+    staleTime: 30_000,
+  });
   const candlesQuery = useQuery({
     queryKey: ["candles", symbol, "1h"],
-    queryFn: () => fetchCandles({ data: { symbol, gran: "1h", limit: 120 } }),
-    initialData: symbol === "BTC-USD" ? initialCandles : undefined,
+    queryFn: () => fetchCandles({ data: { symbol, gran: "1h", limit: 80 } }),
+    staleTime: 30_000,
   });
+  const tickers = tickersQuery.data ?? [];
   const active = tickers.find((t) => t.id === symbol) ?? tickers[0];
-  const candles = candlesQuery.data ?? (symbol === "BTC-USD" ? initialCandles : []);
+  const candles = candlesQuery.data ?? [];
 
   return (
     <div className="min-h-dvh bg-bg">
@@ -49,7 +47,7 @@ export function Landing({
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg">
-                <a href="/login">
+                <a href="/w">
                   Open the bot
                   <ArrowRight className="size-4" />
                 </a>

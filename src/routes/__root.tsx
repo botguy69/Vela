@@ -25,6 +25,7 @@ export const Route = createRootRoute({
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "theme-color", content: "#0a0a0b" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
       { name: "twitter:card", content: "summary_large_image" },
       { property: "og:type", content: "website" },
       { property: "og:title", content: APP_NAME },
@@ -70,12 +71,11 @@ function RootDocument() {
         <HeadContent />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{if(window.caches)caches.keys().then(function(k){k.forEach(function(x){caches.delete(x)})});}catch(e){}})();`,
+            __html: `(function(){try{document.documentElement.style.background="#0a0a0b";if(window.caches)caches.keys().then(function(k){k.forEach(function(x){caches.delete(x)})});var s=window.matchMedia("(display-mode: standalone)").matches||!!navigator.standalone;var p=location.pathname;if(s&&(p==="/"||p==="/auto"||p==="/live"))location.replace("/w");}catch(e){}})();`,
           }}
         />
       </head>
       <body className="min-h-dvh bg-bg text-fg">
-        <PreviewHostBridge />
         <PreviewHostBridge />
         <PwaRefresh />
         <QueryClientProvider client={queryClient}>

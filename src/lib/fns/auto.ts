@@ -764,13 +764,12 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     `;
     const pulled = settings ? await pullWeexBook(settings) : { live: null, error: null };
     const live = pulled.live;
-    if (settings) await collapseOpenDupes(sql, context.userId, settings, []);
+    let livePos: Awaited<ReturnType<typeof import("@/lib/weex.server").listWeexPositions>> | null = null;
     if (settings) {
       const creds = await credsFrom(settings);
       if (creds) {
         const { listWeexPositions } = await import("@/lib/weex.server");
-        const livePos = await listWeexPositions(creds);
-        await closeFlatOnWeex(sql, context.userId, livePos, [], creds);
+        livePos = await listWeexPositions(creds).catch(() => null);
       }
     }
     if (settings && live) {
@@ -796,25 +795,20 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     const lastBy = new Map<string, number>();
     const leftBy = new Map<string, number>();
     if (settings) {
-      const creds = await credsFrom(settings);
-      if (creds) {
-        const { listWeexPositions } = await import("@/lib/weex.server");
-        const livePos = await listWeexPositions(creds).catch(() => null);
-        const bookOk = livePos != null;
-        for (const p of livePos ?? []) {
-          leftBy.set(p.symbol, p.qty);
-          leftBy.set(p.symbol.replace(/_/g, "").toUpperCase(), p.qty);
-        }
-        for (const t of mapped) {
-          const key = t.weexSymbol.replace(/_/g, "").toUpperCase();
-          const left = leftBy.get(t.weexSymbol) ?? leftBy.get(key);
-          if (left != null && left > 0 && (t.status === "working" || t.status === "filled" || t.status === "proposed")) {
-            t.liveOnWeex = true;
-          } else if (bookOk) {
-            t.liveOnWeex = false;
-          } else {
-            t.liveOnWeex = t.status === "filled";
-          }
+      const bookOk = livePos != null;
+      for (const p of livePos ?? []) {
+        leftBy.set(p.symbol, p.qty);
+        leftBy.set(p.symbol.replace(/_/g, "").toUpperCase(), p.qty);
+      }
+      for (const t of mapped) {
+        const key = t.weexSymbol.replace(/_/g, "").toUpperCase();
+        const left = leftBy.get(t.weexSymbol) ?? leftBy.get(key);
+        if (left != null && left > 0 && (t.status === "working" || t.status === "filled" || t.status === "proposed")) {
+          t.liveOnWeex = true;
+        } else if (bookOk) {
+          t.liveOnWeex = false;
+        } else {
+          t.liveOnWeex = t.status === "filled";
         }
       }
     }
@@ -850,7 +844,12 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     return {
       settings: publicSettings(settings!, stats, live, pulled.error),
       signals: mapped,
-      universe: await (await import("@/lib/weex-market.server")).universeCard(),
+      universe: (await import("@/lib/universe")).TOP25.map((c) => ({
+        id: c.id,
+        weex: c.weex,
+        name: c.name,
+        maxLeverage: c.fallbackMax,
+      })),
     };
   });
 

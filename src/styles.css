@@ -34,8 +34,12 @@
 
 @layer base {
   html {
+    background: #0a0a0b;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    background: #0a0a0b;
   }
 
   html,

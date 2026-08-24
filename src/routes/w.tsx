@@ -10,13 +10,7 @@ export const Route = createFileRoute("/w")({
 function WPage() {
   const { user, isPending } = useCurrentUserState();
   if (isPending) {
-    return (
-      <div className="min-h-dvh bg-bg px-5 py-8">
-        <div className="mx-auto max-w-6xl">
-          <div className="h-64 animate-pulse rounded-xl bg-surface" />
-        </div>
-      </div>
-    );
+    return <div className="min-h-dvh bg-bg" />;
   }
   if (!user) return <RedirectToSignIn />;
   return <AutoDesk />;

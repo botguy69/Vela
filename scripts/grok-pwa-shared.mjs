@@ -164,11 +164,11 @@ export function renderWebManifest(hostHeader) {
       name,
       short_name: name,
       id: "/",
-      start_url: "/",
+      start_url: "/w",
       scope: "/",
       display: "standalone",
-      background_color: "#000000",
-      theme_color: "#000000",
+      background_color: "#0a0a0b",
+      theme_color: "#0a0a0b",
       icons: [
         {
           src: "/__grok/icon-180.png",

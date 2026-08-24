@@ -23,7 +23,30 @@ import { cn } from "@/lib/utils";
 
 export function AutoDesk() {
   const qc = useQueryClient();
-  const desk = useQuery({ queryKey: ["auto"], queryFn: () => getAutoDesk(), refetchInterval: 12_000 });
+  const [snap] = useState(() => {
+    if (typeof window === "undefined") return undefined;
+    try {
+      const raw = localStorage.getItem("vela-desk-snap");
+      return raw ? (JSON.parse(raw) as Awaited<ReturnType<typeof getAutoDesk>>) : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  const desk = useQuery({
+    queryKey: ["auto"],
+    queryFn: async () => {
+      const d = await getAutoDesk();
+      try {
+        localStorage.setItem("vela-desk-snap", JSON.stringify(d));
+      } catch {
+        /* quota */
+      }
+      return d;
+    },
+    placeholderData: snap,
+    refetchInterval: 12_000,
+    staleTime: 6_000,
+  });
   const s = desk.data?.settings;
   const refresh = () => void qc.invalidateQueries({ queryKey: ["auto"] });
   const hosted =
