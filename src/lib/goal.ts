@@ -79,7 +79,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1: 2% until three losses (then 1.2%). 2L+2S. One working limit. 78%+. Volume tape: thrust / climax / dry-up / coil / dead. Fade shorts only vs BTC.",
+      note: "Stage 1: 2% until three losses (then 1.2%). Two wins in a row restore 2% even if still off peak. 2L+2S. One working limit. 78%+.",
     };
   }
   return {
@@ -153,12 +153,14 @@ export function adaptMethod(opts: {
 
   next = { ...next, marginPct: 2 };
 
-  if (opts.drawdownPct >= 30) {
+  // Size cuts lift on wins, not on waiting for equity to climb back.
+  const restored = opts.winStreak >= 2;
+  if (opts.drawdownPct >= 30 && !restored) {
     next = {
       ...next,
       marginPct: 1,
       minConf: Math.min(82, next.minConf + 4),
-      note: `${next.note} ~30% off peak. 1% size until two wins.`,
+      note: `${next.note} ~30% off peak. 1% until two wins in a row — then back to 2%.`,
     };
   } else if (opts.lossStreak >= 5) {
     next = {
