@@ -431,8 +431,9 @@ async function closeFlatOnWeex(
   livePos: { symbol: string; qty: number }[] | null,
   notes: string[],
   creds: { apiKey: string; apiSecret: string; passphrase: string } | null,
-): Promise<number[]> {
+): Promise<{ booked: number[]; flattened: string[] }> {
   const booked: number[] = [];
+  const flattenedNow: string[] = [];
   const filled = await sql<SignalRow>`
     select * from auto_signals
     where user_id = ${userId} and status = 'filled'
@@ -446,11 +447,9 @@ async function closeFlatOnWeex(
       return (s === key || p.symbol === pos.weex_symbol) && p.qty > 0;
     });
     if (onList) continue;
-    if (livePos == null) {
-      if (!creds) continue;
-      const q = await getWeexPositionQty(creds, pos.weex_symbol);
-      if (q == null || q > 0) continue;
-    }
+    if (!creds) continue;
+    const q = await getWeexPositionQty(creds, pos.weex_symbol);
+    if (q == null || q > 0) continue;
     const entry = n(pos.fill_px ?? pos.entry);
     const side = pos.side === "short" ? "short" : "long";
     const last = await getWeexLast(pos.weex_symbol).catch(() => entry);
@@ -490,6 +489,7 @@ async function closeFlatOnWeex(
     }
     notes.push(`${pos.weex_symbol} ${why}${scratch ? "" : ` ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`}`);
     if (!scratch) booked.push(pnl);
+    if (why === "Closed on WEEX" || why === "Closed in green") flattenedNow.push(pos.weex_symbol);
   }
 
   const recent = await sql<{ weex_symbol: string }>`
@@ -513,7 +513,7 @@ async function closeFlatOnWeex(
       await sql`
         update auto_signals
         set status = 'skipped',
-            close_reason = ${"Cancelled — you flattened WEEX"},
+            close_reason = ${"Limit cancelled after flatten"},
             pnl = 0,
             updated_at = now()
         where id = ${row.id} and user_id = ${userId}
@@ -537,16 +537,16 @@ async function closeFlatOnWeex(
         await sql`
           update auto_signals
           set status = 'skipped',
-              close_reason = ${"Cancelled — you flattened WEEX"},
+              close_reason = ${"Limit gone on WEEX"},
               pnl = 0,
               updated_at = now()
           where id = ${row.id} and user_id = ${userId}
         `;
-        notes.push(`${row.weex_symbol} cancelled on WEEX`);
+        notes.push(`${row.weex_symbol} limit gone on WEEX`);
       }
     }
   }
-  return booked;
+  return { booked, flattened: flattenedNow };
 }
 
 async function trimToTwoPct(
@@ -1153,12 +1153,15 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     `;
     let weexBook: { symbol: string; qty: number; side?: string }[] | null = null;
     let bookedFlat: number[] = [];
+    let flattenedTick: string[] = [];
     {
       const creds = await credsFrom(settings);
       if (creds) {
         const { listWeexPositions } = await import("@/lib/weex.server");
         weexBook = await listWeexPositions(creds);
-        bookedFlat = await closeFlatOnWeex(sql, userId, weexBook, notes, creds);
+        const flat = await closeFlatOnWeex(sql, userId, weexBook, notes, creds);
+        bookedFlat = flat.booked;
+        flattenedTick = flat.flattened;
       }
     }
 
@@ -1566,16 +1569,17 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       wins: stats.wins,
     });
 
-    const flattened = new Set(
-      (
-        await sql<{ weex_symbol: string }>`
-          select distinct weex_symbol from auto_signals
-          where user_id = ${userId}
-            and close_reason = 'Closed on WEEX'
-            and updated_at > now() - interval '2 hours'
-        `
-      ).map((r) => r.weex_symbol),
-    );
+    const flattened = new Set(flattenedTick);
+    for (const row of await sql<{ weex_symbol: string }>`
+      select distinct weex_symbol from auto_signals
+      where user_id = ${userId}
+        and close_reason in ('Closed on WEEX', 'Closed in green')
+        and filled_at is not null
+        and abs(coalesce(pnl, 0)) > 0.4
+        and updated_at > now() - interval '2 hours'
+    `) {
+      flattened.add(row.weex_symbol);
+    }
 
     const stillOpenRaw = await sql<SignalRow>`
       select * from auto_signals
