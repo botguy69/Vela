@@ -239,7 +239,6 @@ async function closedStats(
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
       and (close_reason is null or (
         close_reason not like 'Duplicate%'
-        and close_reason not like 'Closed on WEEX%'
         and close_reason not like 'Cancelled%'
         and close_reason not like 'Stale claim%'
         and close_reason not like 'BE scratch%'
@@ -359,7 +358,6 @@ async function ticketLedger(
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
       and (close_reason is null or (
         close_reason not like 'Duplicate%'
-        and close_reason not like 'Closed on WEEX%'
         and close_reason not like 'Cancelled%'
         and close_reason not like 'Stale claim%'
         and close_reason not like 'BE scratch%'
@@ -430,7 +428,8 @@ async function closeFlatOnWeex(
   livePos: { symbol: string; qty: number }[] | null,
   notes: string[],
   creds: { apiKey: string; apiSecret: string; passphrase: string } | null,
-) {
+): Promise<number[]> {
+  const booked: number[] = [];
   const filled = await sql<SignalRow>`
     select * from auto_signals
     where user_id = ${userId} and status = 'filled'
@@ -469,11 +468,12 @@ async function closeFlatOnWeex(
     });
     const why = closeLabel(Boolean(pos.be_moved), printed, pnl, hitSl);
     const scratch = why.startsWith("BE scratch");
+    const manual = why === "Closed on WEEX";
     const st = scratch
       ? "skipped"
-      : why === "Hit stop" || why === "TP1 then leftover stopped"
+      : why === "Hit stop" || why === "TP1 then leftover stopped" || (manual && pnl < 0)
         ? "stopped"
-        : why === "TP1 then BE"
+        : why === "TP1 then BE" || (manual && pnl >= 0)
           ? "targeted"
           : "skipped";
     await sql`
@@ -486,6 +486,7 @@ async function closeFlatOnWeex(
       await cancelWeexProtective(creds, pos.weex_symbol).catch(() => null);
     }
     notes.push(`${pos.weex_symbol} ${why}${scratch ? "" : ` ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`}`);
+    if (!scratch) booked.push(pnl);
   }
 
   const recent = await sql<{ weex_symbol: string }>`
@@ -542,6 +543,7 @@ async function closeFlatOnWeex(
       }
     }
   }
+  return booked;
 }
 
 async function trimToTwoPct(
@@ -1020,6 +1022,41 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       `;
       notes.push(`${row.weex_symbol} restated: hit SL, not a flatten`);
     }
+    const manuals = await sql<SignalRow>`
+      select * from auto_signals
+      where user_id = ${userId}
+        and close_reason = 'Closed on WEEX'
+        and status in ('skipped','stopped','targeted')
+    `;
+    for (const row of manuals) {
+      const entry = n(row.fill_px ?? row.entry);
+      const last = n(row.closed_px) || n(row.stop) || entry;
+      const side = row.side === "short" ? "short" : "long";
+      const pnl = ticketPnl({
+        side,
+        entry,
+        last,
+        qty: origQty(row),
+        leftover: 0,
+        targets: parseNums(row.targets),
+        beMoved: Boolean(row.be_moved),
+        tp1Hit: Boolean(row.tp1_hit),
+      });
+      const st = pnl >= 0 ? "targeted" : "stopped";
+      if (Math.abs(n(row.pnl) - pnl) < 0.05 && row.status === st) continue;
+      const r = oneRUsd(row);
+      await sql`
+        update auto_signals
+        set status = ${st},
+            pnl = ${pnl},
+            closed_px = ${last},
+            updated_at = now()
+        where id = ${row.id} and user_id = ${userId}
+      `;
+      notes.push(
+        `${row.weex_symbol} manual close ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}${r > 0.01 ? ` (${(pnl / r).toFixed(2)}R)` : ""}`,
+      );
+    }
     const fakeWins = await sql<SignalRow>`
       select * from auto_signals
       where user_id = ${userId}
@@ -1057,12 +1094,13 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         and created_at < now() - interval '3 minutes'
     `;
     let weexBook: { symbol: string; qty: number; side?: string }[] | null = null;
+    let bookedFlat: number[] = [];
     {
       const creds = await credsFrom(settings);
       if (creds) {
         const { listWeexPositions } = await import("@/lib/weex.server");
         weexBook = await listWeexPositions(creds);
-        await closeFlatOnWeex(sql, userId, weexBook, notes, creds);
+        bookedFlat = await closeFlatOnWeex(sql, userId, weexBook, notes, creds);
       }
     }
 
@@ -1077,6 +1115,11 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     let streak = pub.lossStreak;
     let winStreak = n((settings as SettingsRow).win_streak) || 0;
     let peak = clampPeak(equity, pub.peakUsd);
+    for (const pnl of bookedFlat) {
+      closed += 1;
+      streak = pnl >= 0 ? 0 : streak + 1;
+      winStreak = pnl >= 0 ? winStreak + 1 : 0;
+    }
     {
       const creds = await credsFrom(settings);
       if (creds) await trimToTwoPct(sql, userId, settings, weexBook, notes, creds, equity);

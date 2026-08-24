@@ -134,17 +134,37 @@ function pickUsdt(rows: unknown[]): { equity: number; available: number; asset: 
     available?: string;
     unrealizePnl?: string;
     unrealizedPnl?: string;
+    crossedMargin?: string;
+    marginBalance?: string;
   }[];
   const usdt = list.find((r) => (r.asset ?? r.coinName) === "USDT") ?? list[0];
   if (!usdt) return null;
-  const balance = Number(usdt.equity ?? usdt.balance ?? 0);
+  const rawEq = Number(usdt.equity);
+  const rawBal = Number(usdt.balance);
+  const rawMar = Number(usdt.marginBalance ?? usdt.crossedMargin);
   const pnl = Number(usdt.unrealizePnl ?? usdt.unrealizedPnl ?? 0);
   const available = Number(usdt.availableBalance ?? usdt.available ?? 0);
-  const equity = Number.isFinite(Number(usdt.equity))
-    ? Number(usdt.equity)
-    : (Number.isFinite(balance) ? balance : 0) + (Number.isFinite(pnl) ? pnl : 0);
+  const has = (x: number) => Number.isFinite(x);
+  const wallet = has(rawBal) ? rawBal : 0;
+  const marked = has(rawMar) && rawMar > 0 ? rawMar : NaN;
+
+  let equity = 0;
+  if (has(rawEq) && has(wallet) && Math.abs(rawEq - wallet) < 0.05) {
+    equity = wallet + (has(pnl) ? pnl : 0);
+  } else if (has(rawEq) && has(wallet) && has(pnl) && Math.abs(rawEq - (wallet + pnl)) < 1) {
+    equity = rawEq;
+  } else if (has(marked) && marked > 0) {
+    equity = marked;
+  } else if (has(rawEq) && rawEq > 0) {
+    equity = rawEq;
+  } else if (has(wallet)) {
+    equity = wallet + (has(pnl) ? pnl : 0);
+  }
+  if (has(wallet) && has(pnl) && equity > wallet + Math.abs(pnl) + 1) {
+    equity = wallet + pnl;
+  }
   return {
-    equity: Math.max(0, equity),
+    equity: Math.max(0, Number.isFinite(equity) ? equity : 0),
     available: Number.isFinite(available) ? available : 0,
     asset: usdt.asset ?? usdt.coinName ?? "USDT",
   };
