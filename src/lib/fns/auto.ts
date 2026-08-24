@@ -88,6 +88,27 @@ function origQty(row: {
   return Math.max(n(row.qty), fromNotional);
 }
 
+function takeQtys(
+  total: number,
+  nTakes: number,
+  precision: number,
+  fmt: (q: number, p: number) => string,
+): string[] {
+  const count = Math.max(1, nTakes);
+  const slices: string[] = [];
+  let used = 0;
+  for (let i = 0; i < count; i += 1) {
+    if (i === count - 1) {
+      slices.push(fmt(Math.max(0, total - used), precision));
+    } else {
+      const s = fmt(total / count, precision);
+      used += Number(s);
+      slices.push(s);
+    }
+  }
+  return slices;
+}
+
 function throughStop(side: string, last: number, stop: number): boolean {
   if (!(stop > 0) || !(last > 0)) return false;
   return side === "short" ? last >= stop * 0.997 : last <= stop * 1.003;
@@ -513,8 +534,9 @@ async function ensureTakes(
     });
   }
   let ok = 0;
+  const slices = takeQtys(liveQty, tps.length, spec.quantityPrecision, formatWeexQty);
   for (let i = 0; i < tps.length; i += 1) {
-    const slice = formatWeexQty(liveQty / Math.max(1, tps.length), spec.quantityPrecision);
+    const slice = slices[i]!;
     if (Number(slice) <= 0) continue;
     const sent = await placeWeexTake(creds, {
       symbol: pos.weex_symbol,
@@ -713,10 +735,10 @@ async function trimToTwoPct(
       clientOid: `velasl${pos.id}${Date.now().toString(36)}`.slice(0, 36),
     });
     const tps = parseNums(pos.targets);
-    const weights = tps.length ? tps.map(() => 1 / tps.length) : [1];
     const left = Math.min(live, wantQty);
+    const slices = takeQtys(left, tps.length, spec.quantityPrecision, formatWeexQty);
     for (let i = 0; i < tps.length; i += 1) {
-      const q = formatWeexQty(left * (weights[i] ?? 0), spec.quantityPrecision);
+      const q = slices[i]!;
       if (Number(q) <= 0) continue;
       await placeWeexTake(creds, {
         symbol: pos.weex_symbol,
@@ -1336,9 +1358,9 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             `;
             const spec = await specFor(coinByWeex(pos.weex_symbol));
             const tps = parseNums(pos.targets);
-            const weights = tps.length ? tps.map(() => 1 / tps.length) : [1];
+            const slices = takeQtys(q, tps.length, spec.quantityPrecision, formatWeexQty);
             for (let i = 0; i < tps.length; i += 1) {
-              const slice = formatWeexQty(q * (weights[i] ?? 0), spec.quantityPrecision);
+              const slice = slices[i]!;
               if (Number(slice) <= 0) continue;
               await placeWeexTake(credsFill, {
                 symbol: pos.weex_symbol,
@@ -1412,8 +1434,9 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           if (moved) {
             const { getWeexPositionQty } = await import("@/lib/weex.server");
             const left = (await getWeexPositionQty(creds, pos.weex_symbol)) ?? origQty(pos);
+            const slices = takeQtys(left, tps.length, spec.quantityPrecision, formatWeexQty);
             for (let i = 0; i < tps.length; i += 1) {
-              const q = formatWeexQty(left / Math.max(1, tps.length), spec.quantityPrecision);
+              const q = slices[i]!;
               if (Number(q) <= 0) continue;
               await placeWeexTake(creds, {
                 symbol: pos.weex_symbol,
@@ -1462,8 +1485,9 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             });
             const { getWeexPositionQty } = await import("@/lib/weex.server");
             const left = (await getWeexPositionQty(creds, pos.weex_symbol)) ?? origQty(pos);
+            const slices = takeQtys(left, tps.length, spec.quantityPrecision, formatWeexQty);
             for (let i = 0; i < tps.length; i += 1) {
-              const q = formatWeexQty(left / Math.max(1, tps.length), spec.quantityPrecision);
+              const q = slices[i]!;
               if (Number(q) <= 0) continue;
               await placeWeexTake(creds, {
                 symbol: pos.weex_symbol,
@@ -1488,6 +1512,26 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       if (credsNow) {
         const { getWeexPositionQty } = await import("@/lib/weex.server");
         left = await getWeexPositionQty(credsNow, pos.weex_symbol);
+      }
+      if (pos.status === "filled" && credsNow && left != null && left > 0) {
+        const orig = origQty(pos);
+        const dust = orig > 0 && left <= orig * 0.18;
+        if (dust && !hitTp) {
+          const spec = await specFor(coinByWeex(pos.weex_symbol));
+          const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
+          await cancelWeexProtective(credsNow, pos.weex_symbol).catch(() => null);
+          const sent = await flattenWeex(credsNow, {
+            symbol: pos.weex_symbol,
+            side: side === "short" ? "BUY" : "SELL",
+            positionSide: side === "short" ? "SHORT" : "LONG",
+            quantity: formatWeexQty(left, spec.quantityPrecision),
+            clientOid: `veladust${pos.id}${Date.now().toString(36)}`.slice(0, 36),
+          });
+          if (sent.ok) {
+            notes.push(`${pos.weex_symbol} flattened dust ${left} (SL/TP leftover)`);
+            left = 0;
+          }
+        }
       }
       if (pos.status === "filled" && left === 0) {
         const exit = throughStop(side, px, stop) ? stop : px;
@@ -1595,6 +1639,26 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
 
       if (hitStop || hitTp) {
+        const orig = origQty(pos);
+        const dust = left != null && left > 0 && orig > 0 && left <= orig * 0.18;
+        if (credsNow && left != null && left > 0 && (hitStop || hitTp || dust)) {
+          const spec = await specFor(coinByWeex(pos.weex_symbol));
+          const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
+          await cancelWeexProtective(credsNow, pos.weex_symbol).catch(() => null);
+          const sent = await flattenWeex(credsNow, {
+            symbol: pos.weex_symbol,
+            side: side === "short" ? "BUY" : "SELL",
+            positionSide: side === "short" ? "SHORT" : "LONG",
+            quantity: formatWeexQty(left, spec.quantityPrecision),
+            clientOid: `veladust${pos.id}${Date.now().toString(36)}`.slice(0, 36),
+          });
+          if (!sent.ok) {
+            notes.push(`${pos.weex_symbol} leftover ${left} still live after ${hitStop ? "SL" : "TP"} — flatten failed: ${sent.error.slice(0, 80)}`);
+            continue;
+          }
+          notes.push(`${pos.weex_symbol} flattened leftover ${left} after ${hitStop ? "SL" : "final TP"}`);
+          left = 0;
+        }
         if (left != null && left > 0) {
           notes.push(
             `${pos.weex_symbol} last tagged ${hitStop ? "SL" : "TP"} but WEEX still holds ${left}`,
@@ -2020,8 +2084,9 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             });
             const replies = [sent.ok ? JSON.stringify(sent.data).slice(0, 180) : sent.error.slice(0, 180)];
             if (sent.ok && sized.entryType === "market") {
+              const slices = takeQtys(sized.qty, tps.length, spec.quantityPrecision, formatWeexQty);
               for (let i = 0; i < tps.length; i += 1) {
-                const q = formatWeexQty(sized.qty * (weights[i] ?? 0), spec.quantityPrecision);
+                const q = slices[i]!;
                 if (Number(q) <= 0) continue;
                 await placeWeexTake(creds, {
                   symbol: sized.weexSymbol,
