@@ -470,7 +470,7 @@ export async function placeWeexTake(
       executePrice: "0",
       quantity: order.quantity,
       positionSide: order.positionSide,
-      triggerPriceType: "CONTRACT_PRICE",
+      triggerPriceType: "MARK_PRICE",
     },
   });
 }

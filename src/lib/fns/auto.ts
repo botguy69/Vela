@@ -108,8 +108,8 @@ function oneRUsd(row: {
   if (!(e > 0) || !(q > 0)) return 0;
   let dist = Math.abs(e - n(row.stop));
   const tp1 = parseNums(row.targets)[0];
-  if ((row.be_moved || (e > 0 && dist / e < 0.003)) && tp1 != null) {
-    dist = Math.abs(tp1 - e) / 1.2;
+  if ((row.be_moved || (e > 0 && dist / e < 0.004)) && tp1 != null) {
+    dist = Math.abs(tp1 - e);
   }
   return dist * q;
 }
@@ -237,11 +237,14 @@ async function closedStats(
   }>`
     select pnl, entry, stop, qty, fill_px, risk_usd, notional, targets, be_moved from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
+      and filled_at is not null
+      and abs(coalesce(pnl, 0)) > 0.15
       and (close_reason is null or (
         close_reason not like 'Duplicate%'
         and close_reason not like 'Cancelled%'
         and close_reason not like 'Stale claim%'
         and close_reason not like 'BE scratch%'
+        and close_reason not like 'Limit%'
       ))
       and created_at >= ${from}
   `;
@@ -359,11 +362,14 @@ async function ticketLedger(
   }>`
     select plan, side, weex_symbol, pnl from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted','skipped')
+      and filled_at is not null
+      and abs(coalesce(pnl, 0)) > 0.15
       and (close_reason is null or (
         close_reason not like 'Duplicate%'
         and close_reason not like 'Cancelled%'
         and close_reason not like 'Stale claim%'
         and close_reason not like 'BE scratch%'
+        and close_reason not like 'Limit%'
       ))
       and created_at >= ${from}
   `;
@@ -422,6 +428,50 @@ async function collapseOpenDupes(
       }
     }
     notes.push(`Merged ${rows.length} ${keep.weex_symbol} into one ticket. Full WEEX size kept.`);
+  }
+}
+
+async function ensureTakes(
+  pos: SignalRow,
+  notes: string[],
+  creds: { apiKey: string; apiSecret: string; passphrase: string },
+) {
+  if (pos.status !== "filled") return;
+  if (pos.weex_resp && /tps:ok/.test(pos.weex_resp)) return;
+  const tps = parseNums(pos.targets);
+  if (!tps.length) return;
+  const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
+  const { placeWeexTake } = await import("@/lib/weex.server");
+  const { coinByWeex } = await import("@/lib/universe");
+  const spec = await specFor(coinByWeex(pos.weex_symbol));
+  const q = origQty(pos);
+  if (!(q > 0)) return;
+  const side = pos.side === "short" ? "SHORT" : "LONG";
+  let ok = 0;
+  for (let i = 0; i < tps.length; i += 1) {
+    const slice = formatWeexQty(q / tps.length, spec.quantityPrecision);
+    if (Number(slice) <= 0) continue;
+    const sent = await placeWeexTake(creds, {
+      symbol: pos.weex_symbol,
+      positionSide: side,
+      tp: formatWeexPx(tps[i]!, spec.pricePrecision),
+      quantity: slice,
+      clientOid: `velatp${pos.id}${i}${Date.now().toString(36)}`.slice(0, 36),
+    });
+    if (sent.ok) ok += 1;
+    else notes.push(`${pos.weex_symbol} TP${i + 1} failed: ${sent.error.slice(0, 80)}`);
+  }
+  if (ok) {
+    notes.push(`${pos.weex_symbol} posted ${ok}/${tps.length} take(s)`);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await sql`
+      update auto_signals
+      set weex_resp = ${`${pos.weex_resp ?? ""} tps:${ok === tps.length ? "ok" : "partial"}`.slice(0, 500)},
+          updated_at = now()
+      where id = ${pos.id}
+    `;
+    pos.weex_resp = `${pos.weex_resp ?? ""} tps:${ok === tps.length ? "ok" : "partial"}`;
   }
 }
 
@@ -1238,11 +1288,19 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
                 clientOid: `velatp${pos.id}${i}${Date.now().toString(36)}`.slice(0, 36),
               });
             }
+            await sql`
+              update auto_signals
+              set weex_resp = ${`${pos.weex_resp ?? ""} tps:ok`.slice(0, 500)}, updated_at = now()
+              where id = ${pos.id}
+            `;
             notes.push(`Filled ${pos.weex_symbol} limit`);
           }
         }
         continue;
       }
+
+      const credsTp = await credsFrom(settings);
+      if (pos.status === "filled" && credsTp) await ensureTakes(pos, notes, credsTp);
 
       const tps = parseNums(pos.targets);
       let mark = px;
@@ -1894,7 +1952,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
               }
             }
 
-            const weexResp = replies.join(" | ").slice(0, 500);
+            const weexResp = `${replies.join(" | ")}${sent.ok && sized.entryType === "market" ? " tps:ok" : ""}`.slice(0, 500);
             const status = sent.ok ? (sized.entryType === "market" ? "filled" : "working") : "error";
             const fillPx = status === "filled" ? sized.entry : null;
             if (!sent.ok) notes.push(`WEEX reject ${sized.weexSymbol}: ${replies[0]?.slice(0, 80) ?? "empty"}`);
