@@ -12,12 +12,36 @@ export function signedBeta(weex: string, side: Side): number {
   return betaWeight(weex) * (side === "long" ? 1 : -1);
 }
 
+export function ema(values: number[], period: number): number | null {
+  if (values.length < period) return null;
+  const k = 2 / (period + 1);
+  let e = 0;
+  for (let i = 0; i < period; i += 1) e += values[i]!;
+  e /= period;
+  for (let i = period; i < values.length; i += 1) e = values[i]! * k + e * (1 - k);
+  return e;
+}
+
+/** Soft cap: two 0.9-beta clones same way is one BTC bet twice. TON-weight or a real diverge still allowed. */
+export const BETA_SOFT = 1.25;
+
+export function sameSideBeta(open: { weex: string; side: Side }[], side: Side): number {
+  return open.filter((p) => p.side === side).reduce((s, p) => s + betaWeight(p.weex), 0);
+}
+
 export function blocksBeta(
   open: { weex: string; side: Side }[],
   next: { weex: string; side: Side },
+  opts?: { diverges?: boolean },
 ): boolean {
-  const same = open.filter((p) => p.side === next.side).length;
-  return same >= 2;
+  const same = open.filter((p) => p.side === next.side);
+  if (same.length >= 2) return true;
+  if (same.length === 0) return false;
+  const sum = sameSideBeta(open, next.side) + betaWeight(next.weex);
+  if (sum <= BETA_SOFT) return false;
+  if (opts?.diverges) return false;
+  if (betaWeight(next.weex) <= 0.3) return false;
+  return true;
 }
 
 export function sma(values: number[], period: number): number | null {
@@ -58,6 +82,58 @@ export function ltfAllows(side: Side, fifteen: Candle[]): boolean {
   if (mid == null || last == null) return true;
   if (side === "long") return last >= mid * 0.992;
   return last <= mid * 1.008;
+}
+
+/**
+ * 1h already picked the side. Fill only on a 15m pullback to EMA 9/21 — not the spike of the hour.
+ * Does not move the stop.
+ */
+export function ltfTrigger(
+  side: Side,
+  fifteen: Candle[],
+): { ok: boolean; reason: string; pullback: number | null } {
+  if (fifteen.length < 24) return { ok: true, reason: "thin 15m", pullback: null };
+  const closes = fifteen.map((c) => c.close);
+  const e9 = ema(closes, 9);
+  const e21 = ema(closes, 21);
+  const a = atr(fifteen, 14);
+  const last = closes[closes.length - 1];
+  if (e9 == null || e21 == null || a == null || a <= 0 || last == null) {
+    return { ok: true, reason: "thin 15m", pullback: null };
+  }
+  if (side === "long") {
+    if (last > e21 + 0.85 * a) return { ok: false, reason: "extended — wait 15m dip", pullback: null };
+    if (last < e21 - 0.7 * a) return { ok: false, reason: "15m still dumping", pullback: null };
+    if (last > e21 + 0.35 * a) return { ok: false, reason: "not at 15m mean yet", pullback: null };
+    return { ok: true, reason: "15m pullback", pullback: (e9 + e21) / 2 };
+  }
+  if (last < e21 - 0.85 * a) return { ok: false, reason: "extended — wait 15m bounce", pullback: null };
+  if (last > e21 + 0.7 * a) return { ok: false, reason: "15m still ripping", pullback: null };
+  if (last < e21 - 0.35 * a) return { ok: false, reason: "not at 15m mean yet", pullback: null };
+  return { ok: true, reason: "15m bounce", pullback: (e9 + e21) / 2 };
+}
+
+/** Coin 15m is doing the side while BTC 15m is not — 2nd same-side name is allowed. */
+export function divergesFromBtc(side: Side, coin15: Candle[], btc15: Candle[]): boolean {
+  if (coin15.length < 24 || btc15.length < 24) return false;
+  const coinWith = ltfAllows(side, coin15);
+  const btcWith = ltfAllows(side, btc15);
+  return coinWith && !btcWith;
+}
+
+/** Snap limit to the 15m mean. Stop / targets stay — breathing room is unchanged. */
+export function withLtfEntry(setup: RawSetup, pullback: number | null): RawSetup {
+  if (pullback == null || !(pullback > 0)) return setup;
+  if (setup.side === "long") {
+    if (pullback <= setup.stop) return setup;
+    const entry = Math.min(setup.entry, pullback);
+    const near = Math.abs(setup.last - entry) < 0.2 * setup.atr;
+    return { ...setup, entry, entryType: near ? "market" : "limit" };
+  }
+  if (pullback >= setup.stop) return setup;
+  const entry = Math.max(setup.entry, pullback);
+  const near = Math.abs(setup.last - entry) < 0.2 * setup.atr;
+  return { ...setup, entry, entryType: near ? "market" : "limit" };
 }
 
 export function spreadBps(bid: number, ask: number): number {
@@ -321,7 +397,7 @@ export function writeDeskNote(opts: {
     `${opts.phase}. Equity $${eq.toFixed(2)}. Margin cap ${opts.marginPct.toFixed(1)}% of the WEEX wallet, coin-max lev, cross. The stop is the SL — not isolated-style “liq in 0.25%.” Unused wallet backs the ticket. Residual risk is a gap through the SL, not liquidation before it.`,
   );
   if (!opts.tickets.length) {
-    lines.push("Nothing on. Waiting for a setup that clears 4h + 15m + spread + one-beta.");
+    lines.push("Nothing on. Waiting for a 1h idea that tags the 15m mean, clears spread, and fits 2L+2S.");
     if (opts.correction) lines.push(opts.correction);
     return lines.join(" ");
   }

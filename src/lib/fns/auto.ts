@@ -1592,10 +1592,17 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             if (pick.side === "long" && riskL >= SIDE_CAP) continue;
             if (pick.side === "short" && riskS >= SIDE_CAP) continue;
             const opposite = (riskS > 0 && pick.side === "long") || (riskL > 0 && pick.side === "short");
-            if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side })) {
-              const held = stillOpen[0];
+            const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
+            const trig = rules.ltfTrigger(pick.side, coin15);
+            if (!trig.ok) {
+              veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
+              continue;
+            }
+            const diverges = rules.divergesFromBtc(pick.side, coin15, btc15);
+            if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side }, { diverges })) {
+              const held = betaBook.find((p) => p.side === pick.side);
               veto = held
-                ? `Already ${held.side} ${held.weex_symbol}. Not adding another ${pick.side} on the same beta.`
+                ? `${held.weex} already ${held.side} (beta ${rules.sameSideBeta(betaBook, pick.side).toFixed(2)}). ${pick.weexSymbol} tracking BTC — 2nd ${pick.side} needs a diverge or TP1/BE.`
                 : "Same-way beta is full.";
               continue;
             }
@@ -1605,7 +1612,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
                 veto = `HTF veto ${pick.weexSymbol} ${pick.side}`;
                 continue;
               }
-              if (pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
+              if (!diverges && pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
                 veto = `BTC 15m against ${pick.side} ${pick.weexSymbol}`;
                 continue;
               }
@@ -1631,7 +1638,8 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
               veto = `${pick.weexSymbol} ${pick.side} conf ${conf}% below ${bar.minConf}% bar`;
               continue;
             }
-            sized = sizeSetup(pick, equity, corrected.marginPct, spec.maxLeverage);
+            const timed = rules.withLtfEntry(pick, trig.pullback);
+            sized = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
             if (sized) break;
           }
 
@@ -1740,7 +1748,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     } else if (stillOpen.length >= LIVE_CAP) {
       notes.push("Live cap (6 names). Waiting on an exit.");
     } else {
-      notes.push("Hunting up to 2L + 2S at-risk. 4h/daily/conf must print. Cap 6.");
+      notes.push("Hunting 2L+2S. 1h bias, 15m trigger. 2nd same-side if it diverges from BTC. Cap 6.");
     }
 
     const learned = [corrected.note, bar.note, ledger.note].filter(Boolean).join(" · ");
