@@ -218,6 +218,27 @@ async function pullWeexBook(row: SettingsRow) {
   return { live: bal.data, error: null };
 }
 
+function uniqueFills<T extends {
+  weex_symbol?: string | null;
+  side?: string | null;
+  filled_at?: string | Date | null;
+  updated_at?: string | Date | null;
+  created_at?: string | Date | null;
+  id?: number;
+}>(rows: T[]): T[] {
+  const best = new Map<string, T>();
+  for (const r of rows) {
+    const t = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
+    const hour = Number.isFinite(t) ? Math.floor(t / 3_600_000) : 0;
+    const key = `${r.weex_symbol ?? "?"}|${r.side ?? "?"}|${hour}`;
+    const prev = best.get(key);
+    const ru = new Date(r.updated_at ?? r.filled_at ?? 0).getTime();
+    const pu = prev ? new Date(prev.updated_at ?? prev.filled_at ?? 0).getTime() : 0;
+    if (!prev || ru >= pu) best.set(key, r);
+  }
+  return [...best.values()];
+}
+
 async function closedStats(
   sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
   userId: string,
@@ -225,6 +246,7 @@ async function closedStats(
 ) {
   const from = statsFrom ?? new Date(0).toISOString();
   const rows = await sql<{
+    id: number;
     pnl: string | number | null;
     entry: string | number | null;
     stop: string | number | null;
@@ -234,9 +256,16 @@ async function closedStats(
     notional: string | number | null;
     targets: string | null;
     be_moved: boolean | null;
+    weex_symbol: string | null;
+    side: string | null;
+    filled_at: string | null;
+    updated_at: string | null;
+    created_at: string | null;
   }>`
-    select pnl, entry, stop, qty, fill_px, risk_usd, notional, targets, be_moved from auto_signals
-    where user_id = ${userId} and status in ('stopped','targeted','skipped')
+    select id, pnl, entry, stop, qty, fill_px, risk_usd, notional, targets, be_moved,
+           weex_symbol, side, filled_at, updated_at, created_at
+    from auto_signals
+    where user_id = ${userId} and status in ('stopped','targeted')
       and filled_at is not null
       and abs(coalesce(pnl, 0)) > 0.15
       and (close_reason is null or (
@@ -248,9 +277,10 @@ async function closedStats(
       ))
       and created_at >= ${from}
   `;
-  const closed = rows.length;
-  const wins = rows.filter((r) => n(r.pnl) > 0).length;
-  const rs = rows
+  const uniq = uniqueFills(rows);
+  const closed = uniq.length;
+  const wins = uniq.filter((r) => n(r.pnl) > 0).length;
+  const rs = uniq
     .map((r) => {
       const risk = oneRUsd(r);
       if (!(risk > 0.01)) return null;
@@ -359,9 +389,13 @@ async function ticketLedger(
     side: string | null;
     weex_symbol: string | null;
     pnl: string | number | null;
+    filled_at: string | null;
+    updated_at: string | null;
+    created_at: string | null;
+    id: number;
   }>`
-    select plan, side, weex_symbol, pnl from auto_signals
-    where user_id = ${userId} and status in ('stopped','targeted','skipped')
+    select id, plan, side, weex_symbol, pnl, filled_at, updated_at, created_at from auto_signals
+    where user_id = ${userId} and status in ('stopped','targeted')
       and filled_at is not null
       and abs(coalesce(pnl, 0)) > 0.15
       and (close_reason is null or (
@@ -375,7 +409,7 @@ async function ticketLedger(
   `;
   const { buildLedger } = await import("@/lib/desk-rules");
   return buildLedger(
-    rows.map((r) => ({
+    uniqueFills(rows).map((r) => ({
       plan: r.plan,
       side: r.side,
       weex: r.weex_symbol,
