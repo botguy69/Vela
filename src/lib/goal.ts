@@ -73,7 +73,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: 2% (1.2% after 3 losses). 2L+2S at-risk. 1h bias / 15m fill. 2nd same-side if it diverges from BTC. TP1/BE before a 3rd of that side. Cap 6.",
+      note: "Stage 1: 2% (1.2% after 3 losses). 2L+2S. 1h/15m fill. TP1 at 1R then BE. Dead scalp <0.3R in 5h is sold to move on. Cap 6.",
     };
   }
   return {

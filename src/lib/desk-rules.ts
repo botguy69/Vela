@@ -153,11 +153,11 @@ export function limitMaxAgeMs(style: Style): number {
 }
 
 export function fillMaxAgeMs(style: Style): number {
-  return style === "scalp" ? 8 * 3600_000 : 20 * 3600_000;
+  return style === "scalp" ? 5 * 3600_000 : 12 * 3600_000;
 }
 
 export function chopTakeMs(style: Style): number {
-  return style === "scalp" ? 16 * 3600_000 : 40 * 3600_000;
+  return style === "scalp" ? 12 * 3600_000 : 28 * 3600_000;
 }
 
 export function shouldCancelStaleLimit(createdAt: string | Date, style: Style): boolean {
@@ -166,7 +166,7 @@ export function shouldCancelStaleLimit(createdAt: string | Date, style: Style): 
   return Date.now() - t > limitMaxAgeMs(style);
 }
 
-/** Red/dead → flatten. Small green → lock fee-BE. Runners and BE leftovers → hold. */
+/** Dead scalp (<0.3R in 5h) → flatten. Small green → lock fee-BE. BE leftovers → hold. */
 export function chopAction(opts: {
   since: string | Date;
   style: Style;
@@ -184,7 +184,7 @@ export function chopAction(opts: {
   const risk = Math.abs(opts.entry - opts.stop);
   const favor = opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last;
   const r = risk > 0 ? favor / risk : 0;
-  if (r <= 0) return "flatten";
+  if (r < 0.3) return "flatten";
   if (age >= chopTakeMs(opts.style)) return "flatten";
   return "lockBe";
 }

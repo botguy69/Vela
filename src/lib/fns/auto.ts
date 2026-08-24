@@ -1253,10 +1253,11 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           }
         }
         const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
+        const hours = style === "scalp" ? "5h" : "12h";
         const why =
           pnl < 0
-            ? "Sold at a loss to move on — went nowhere"
-            : "Took the chop — 16h, no TP1";
+            ? `Sold at a loss to move on — no 0.3R in ${hours}`
+            : `Sold to move on — no 0.3R in ${hours}`;
         await sql`
           update auto_signals
           set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()

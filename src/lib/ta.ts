@@ -316,7 +316,7 @@ export function analyzeMarket(
       best.plan === "scale3"
         ? [push(1), push(2), push(3.2)]
         : best.plan === "scale2"
-          ? [push(1.2), push(2.5)]
+          ? [push(1), push(2.5)]
           : [push(style === "scalp" ? 1.8 : 2.2)];
     const scale =
       best.plan === "scale3" ? [0.34, 0.33, 0.33] : best.plan === "scale2" ? [0.5, 0.5] : [1];
