@@ -146,7 +146,7 @@ function livePhase(
 
 function publicSettings(
   row: SettingsRow,
-  stats: { closed: number; wins: number; winRate?: number; avgWinR?: number; avgLossR?: number } = { closed: 0, wins: 0 },
+  stats: { closed: number; wins: number; winRate?: number; avgWinR?: number; avgLossR?: number; names?: string[] } = { closed: 0, wins: 0 },
   live?: { equity: number; available: number } | null,
   weexError?: string | null,
 ) {
@@ -193,6 +193,7 @@ function publicSettings(
     winRate: stats.winRate ?? 0,
     avgWinR: stats.avgWinR ?? 0,
     avgLossR: stats.avgLossR ?? 0,
+    recordNames: stats.names ?? [],
     keepAlive: Boolean(row.keep_alive),
     lastCronAt: row.last_cron_at,
     publicOrigin: row.public_origin,
@@ -228,9 +229,7 @@ function uniqueFills<T extends {
 }>(rows: T[]): T[] {
   const best = new Map<string, T>();
   for (const r of rows) {
-    const t = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
-    const hour = Number.isFinite(t) ? Math.floor(t / 3_600_000) : 0;
-    const key = `${r.weex_symbol ?? "?"}|${r.side ?? "?"}|${hour}`;
+    const key = `${r.weex_symbol ?? "?"}|${r.side ?? "?"}`;
     const prev = best.get(key);
     const ru = new Date(r.updated_at ?? r.filled_at ?? 0).getTime();
     const pu = prev ? new Date(prev.updated_at ?? prev.filled_at ?? 0).getTime() : 0;
@@ -296,6 +295,13 @@ async function closedStats(
     winRate: closed > 0 ? (wins / closed) * 100 : 0,
     avgWinR: avg(winRs),
     avgLossR: avg(lossRs),
+    names: uniq
+      .map((r) => {
+        const p = n(r.pnl);
+        const pair = (r.weex_symbol ?? "").replace("USDT", "");
+        return `${pair} ${p >= 0 ? "+" : ""}${p.toFixed(2)}`;
+      })
+      .slice(0, 20),
   };
 }
 
@@ -738,7 +744,7 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     const stats = await closedStats(sql, context.userId, settings?.stats_from);
     const signals = await sql<SignalRow>`
       select * from auto_signals where user_id = ${context.userId}
-      order by created_at desc limit 40
+      order by created_at desc limit 80
     `;
     const mapped = signals
       .filter((r) => !(r.close_reason ?? "").startsWith("Duplicate"))

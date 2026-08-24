@@ -121,6 +121,9 @@ export function AutoDesk() {
             <Stat label="Avg loss" value={s.avgLossR ? `${s.avgLossR.toFixed(2)}R` : "—"} />
           </div>
         )}
+        {s?.weexLive && s.recordNames?.length ? (
+          <p className="mt-2 text-xs text-subtle">{s.recordNames.join(" · ")}</p>
+        ) : null}
 
         {s && (
           <div className="mt-4 rounded-xl bg-surface p-4 shadow-border">
@@ -229,7 +232,11 @@ function TicketsTable({
   const open = signals.filter(
     (t) => Boolean(t.liveOnWeex) || t.status === "working",
   );
-  const closed = signals.filter((t) => !open.includes(t)).slice(0, 8);
+  const closed = signals.filter((t) => {
+    if (open.includes(t)) return false;
+    if (t.status !== "stopped" && t.status !== "targeted") return false;
+    return Math.abs(t.pnl ?? 0) > 0.15;
+  });
   const rows = [...open, ...closed];
   return (
     <section>
