@@ -301,9 +301,12 @@ function tp1Printed(
 }
 
 function closeLabel(beMoved: boolean, printed: boolean, pnl: number, hitStop: boolean): string {
+  if (beMoved && !printed && Math.abs(pnl) < 0.4) return "BE scratch — not a win or loss";
+  if (beMoved && printed) return pnl >= 0 ? "TP1 then BE" : "TP1 then leftover stopped";
+  if (hitStop && pnl <= 0) return "Hit stop";
+  if (pnl > 0.4) return beMoved && !printed ? "Closed in green" : "Closed on WEEX";
+  if (pnl < -0.4) return "Closed on WEEX";
   if (beMoved && !printed) return "BE scratch — not a win or loss";
-  if (beMoved) return pnl >= 0 ? "TP1 then BE" : "TP1 then leftover stopped";
-  if (hitStop) return "Hit stop";
   return "Closed on WEEX";
 }
 
@@ -468,12 +471,12 @@ async function closeFlatOnWeex(
     });
     const why = closeLabel(Boolean(pos.be_moved), printed, pnl, hitSl);
     const scratch = why.startsWith("BE scratch");
-    const manual = why === "Closed on WEEX";
+    const winClose = why === "TP1 then BE" || why === "Closed in green" || (why === "Closed on WEEX" && pnl >= 0);
     const st = scratch
       ? "skipped"
-      : why === "Hit stop" || why === "TP1 then leftover stopped" || (manual && pnl < 0)
+      : why === "Hit stop" || why === "TP1 then leftover stopped" || (why === "Closed on WEEX" && pnl < 0)
         ? "stopped"
-        : why === "TP1 then BE" || (manual && pnl >= 0)
+        : winClose
           ? "targeted"
           : "skipped";
     await sql`
@@ -1055,6 +1058,61 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       `;
       notes.push(
         `${row.weex_symbol} manual close ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}${r > 0.01 ? ` (${(pnl / r).toFixed(2)}R)` : ""}`,
+      );
+    }
+    const misbooked = await sql<SignalRow>`
+      select * from auto_signals
+      where user_id = ${userId}
+        and status in ('skipped','stopped','targeted')
+        and (
+          close_reason like 'BE scratch%'
+          or close_reason = 'TP1 then BE'
+          or close_reason = 'Closed in green'
+        )
+    `;
+    for (const row of misbooked) {
+      const entry = n(row.fill_px ?? row.entry);
+      let last = n(row.closed_px) || entry;
+      const side = row.side === "short" ? "short" : "long";
+      if (entry > 0 && Math.abs(last - entry) / entry < 0.004) {
+        const minutes = await getWeexKlines(row.weex_symbol, "1m", 180).catch(() => []);
+        const until = new Date(row.updated_at ?? row.created_at).getTime();
+        const bars = minutes.filter((c) => {
+          const t = c.time > 1e12 ? c.time : c.time * 1000;
+          return t <= until + 120_000 && t >= until - 20 * 60_000;
+        });
+        const px = bars.length ? bars[bars.length - 1]!.close : 0;
+        if (px > 0) last = px;
+      }
+      const printed = Boolean(row.tp1_hit) || tp1Printed({ ...row, tp1_hit: false }, last);
+      const pnl = ticketPnl({
+        side,
+        entry,
+        last,
+        qty: origQty(row),
+        leftover: 0,
+        targets: parseNums(row.targets),
+        beMoved: Boolean(row.be_moved),
+        tp1Hit: printed || Boolean(row.tp1_hit),
+      });
+      const why = closeLabel(Boolean(row.be_moved), printed || Boolean(row.tp1_hit), pnl, false);
+      const scratch = why.startsWith("BE scratch");
+      const st = scratch ? "skipped" : pnl >= 0 ? "targeted" : "stopped";
+      if (row.close_reason === why && row.status === st && Math.abs(n(row.pnl) - (scratch ? 0 : pnl)) < 0.08) {
+        continue;
+      }
+      const r = oneRUsd(row);
+      await sql`
+        update auto_signals
+        set status = ${st},
+            pnl = ${scratch ? 0 : pnl},
+            closed_px = ${last},
+            close_reason = ${why},
+            updated_at = now()
+        where id = ${row.id} and user_id = ${userId}
+      `;
+      notes.push(
+        `${row.weex_symbol} restated ${why} ${scratch ? "$0" : `${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`}${!scratch && r > 0.01 ? ` (${(pnl / r).toFixed(2)}R)` : ""}`,
       );
     }
     const fakeWins = await sql<SignalRow>`

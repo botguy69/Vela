@@ -423,7 +423,7 @@ export function shouldLockBreakeven(opts: {
   return hitFirst || r >= 1;
 }
 
-/** Realized takes + mark on leftover. After TP1 the last print sits near entry — that is not the whole ticket. */
+/** Realized takes + mark on leftover. Full flatten at last prints the whole ticket at that price. */
 export function ticketPnl(opts: {
   side: Side;
   entry: number;
@@ -443,24 +443,25 @@ export function ticketPnl(opts: {
     opts.leftover != null && Number.isFinite(opts.leftover) && orig > 0 && opts.leftover < orig * 0.72;
   const tagged = tp1 != null && taggedTake(opts.side, opts.last, tp1);
   const tp1Hit = Boolean(opts.tp1Hit) || reduced || tagged;
+  const half = orig * 0.5;
+  const atBe = Math.abs(opts.last - opts.entry) / opts.entry < 0.004;
+  if (opts.leftover === 0) {
+    if (opts.beMoved && tp1Hit && tp1 != null && atBe && !tagged) {
+      return favor(tp1, half) + favor(opts.last, half);
+    }
+    return favor(opts.last, orig);
+  }
   if (opts.beMoved && tp1Hit && tp1 != null) {
-    const half = orig * 0.5;
     const left =
       opts.leftover != null && Number.isFinite(opts.leftover) && opts.leftover >= 0
         ? opts.leftover
-        : opts.leftover === 0
-          ? 0
-          : half;
+        : half;
     return favor(tp1, half) + favor(opts.last, left);
   }
-  if (opts.leftover === 0) {
-    return favor(opts.last, orig);
-  }
-  const assumedLeft = orig;
   const left =
     opts.leftover != null && Number.isFinite(opts.leftover) && opts.leftover >= 0
       ? opts.leftover
-      : assumedLeft;
+      : orig;
   const closed = Math.max(0, orig - left);
   let realized = 0;
   if (closed > 0 && tp1 != null) realized += favor(tp1, closed);
