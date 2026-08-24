@@ -220,6 +220,7 @@ function parsePosition(row: unknown): { symbol: string; side: "long" | "short"; 
     positionSize?: string | number;
     positionSide?: string;
     holdSide?: string;
+    posSide?: string;
     side?: string;
     entryPrice?: string | number;
     openPriceAvg?: string | number;
