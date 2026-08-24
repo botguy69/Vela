@@ -152,6 +152,9 @@ export function limitMaxAgeMs(style: Style): number {
   return style === "scalp" ? 4 * 3600_000 : 10 * 3600_000;
 }
 
+/** Fills before this keep the old clock — live TON/IMX/JUP play out. New fills use 5h / 0.3R. */
+export const CHOP_V2_SINCE = Date.parse("2026-08-24T02:00:00.000Z");
+
 export function fillMaxAgeMs(style: Style): number {
   return style === "scalp" ? 5 * 3600_000 : 12 * 3600_000;
 }
@@ -179,6 +182,7 @@ export function chopAction(opts: {
   if (opts.beMoved) return "hold";
   const t = new Date(opts.since).getTime();
   if (!Number.isFinite(t)) return "hold";
+  if (t < CHOP_V2_SINCE) return "hold";
   const age = Date.now() - t;
   if (age < fillMaxAgeMs(opts.style)) return "hold";
   const risk = Math.abs(opts.entry - opts.stop);

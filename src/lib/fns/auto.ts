@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { adaptMethod, GOAL_USD, STAGE2_USD, multipleToGoal, phaseForRun, progressPct, stageTarget } from "@/lib/goal";
+import { adaptMethod, clampPeak, GOAL_USD, STAGE2_USD, multipleToGoal, phaseForRun, progressPct, stageTarget } from "@/lib/goal";
 
 type SettingsRow = {
   user_id: string;
@@ -130,7 +130,7 @@ function livePhase(
   stats: { closed: number; wins: number } = { closed: 0, wins: 0 },
 ) {
   const equity = Math.max(0.01, n(row.account_usd) || 0);
-  const peak = Math.max(n(row.peak_usd) || equity, equity);
+  const peak = clampPeak(equity, n(row.peak_usd) || equity);
   const dd = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
   return adaptMethod({
     phase: phaseForRun(equity, Boolean(row.continue_to_goal)),
@@ -152,7 +152,7 @@ function publicSettings(
   const liveEq = live?.equity;
   const equity = liveEq != null ? liveEq : 0;
   let peak = liveEq != null ? Math.max(n(row.peak_usd) || liveEq, liveEq) : 0;
-  if (equity > 50 && peak > equity * 1.42) peak = equity / 0.82;
+  if (liveEq != null) peak = clampPeak(liveEq, peak);
   const dd = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
   const phase = livePhase({ ...row, account_usd: Math.max(equity, liveEq != null ? equity : 0) }, stats);
   return {
@@ -1029,8 +1029,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     let equity = pub.accountUsd;
     let streak = pub.lossStreak;
     let winStreak = n((settings as SettingsRow).win_streak) || 0;
-    let peak = pub.peakUsd;
-    if (equity > 50 && peak > equity * 1.42) peak = equity / 0.82;
+    let peak = clampPeak(equity, pub.peakUsd);
     {
       const creds = await credsFrom(settings);
       if (creds) await trimToTwoPct(sql, userId, settings, weexBook, notes, creds, equity);
@@ -1374,10 +1373,10 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     const refreshed = await pullWeexBook(settings);
     if (refreshed.live) {
       equity = refreshed.live.equity;
-      peak = Math.max(peak, equity);
+      peak = clampPeak(equity, Math.max(peak, equity));
     } else {
       equity = Math.max(0.01, equity);
-      peak = Math.max(peak, equity);
+      peak = clampPeak(equity, Math.max(peak, equity));
       if (refreshed.error) notes.push(refreshed.error);
     }
     const afterStats = { closed: stats.closed + closed, wins: stats.wins };
@@ -1386,7 +1385,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       lossStreak: streak,
       winStreak,
       lastMargin: n(settings.risk_pct) || 2,
-      drawdownPct: peak > 0 ? ((peak - equity) / peak) * 100 : 0,
+      drawdownPct: peak > 0 ? ((clampPeak(equity, peak) - equity) / clampPeak(equity, peak)) * 100 : 0,
       closed: afterStats.closed,
       wins: stats.wins,
     });

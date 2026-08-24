@@ -23,6 +23,12 @@ export function stageTarget(equity: number, continueToGoal: boolean): number {
   return STAGE2_USD;
 }
 
+export function clampPeak(equity: number, peak: number): number {
+  const p = Math.max(Number.isFinite(peak) ? peak : 0, equity);
+  if (equity > 50 && p > equity * 1.42) return equity / 0.82;
+  return p;
+}
+
 export function phaseFor(equity: number, continueToGoal = false): Phase {
   if (equity >= GOAL_USD) {
     return {
@@ -73,7 +79,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 70,
       method: "trend",
-      note: "Stage 1: 2% (1.2% after 3 losses). 2L+2S. 1h/15m fill. TP1 at 1R then BE. Dead scalp <0.3R in 5h is sold to move on. Cap 6.",
+      note: "Stage 1: 2% until three losses (then 1.2%). 2L+2S. 1h/15m fill. TP1 at 1R. New fills: no 0.3R in 5h → sold to move on. Cap 6.",
     };
   }
   return {
@@ -147,7 +153,6 @@ export function adaptMethod(opts: {
 
   next = { ...next, marginPct: 2 };
 
-  const recovering = opts.winStreak < 2 && opts.lastMargin < 1.95 && (opts.lossStreak >= 3 || opts.winStreak >= 1);
   if (opts.drawdownPct >= 30) {
     next = {
       ...next,
@@ -160,13 +165,13 @@ export function adaptMethod(opts: {
       ...next,
       marginPct: 1,
       minConf: Math.min(82, next.minConf + 3),
-      note: `${next.note} Five losses. 1% size. Two wins to get back to 2%.`,
+      note: `${next.note} Five losses. 1% size. A win restores 2%.`,
     };
-  } else if (opts.lossStreak >= 3 || recovering) {
+  } else if (opts.lossStreak >= 3) {
     next = {
       ...next,
       marginPct: 1.2,
-      note: `${next.note} Risk cut to 1.2% after three losses. Two wins restores 2%.`,
+      note: `${next.note} Risk cut to 1.2% after three losses. A win restores 2%.`,
     };
   }
   return next;
