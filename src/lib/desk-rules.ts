@@ -90,26 +90,29 @@ export function ltfAllows(side: Side, fifteen: Candle[]): boolean {
 export function ltfTrigger(
   side: Side,
   fifteen: Candle[],
-): { ok: boolean; reason: string; pullback: number | null } {
-  if (fifteen.length < 24) return { ok: true, reason: "thin 15m", pullback: null };
+): { ok: boolean; wait: boolean; reason: string; pullback: number | null } {
+  if (fifteen.length < 24) return { ok: true, wait: false, reason: "thin 15m", pullback: null };
   const closes = fifteen.map((c) => c.close);
   const e9 = ema(closes, 9);
   const e21 = ema(closes, 21);
   const a = atr(fifteen, 14);
   const last = closes[closes.length - 1];
   if (e9 == null || e21 == null || a == null || a <= 0 || last == null) {
-    return { ok: true, reason: "thin 15m", pullback: null };
+    return { ok: true, wait: false, reason: "thin 15m", pullback: null };
   }
+  const mean = (e9 + e21) / 2;
   if (side === "long") {
-    if (last > e21 + 0.85 * a) return { ok: false, reason: "extended — wait 15m dip", pullback: null };
-    if (last < e21 - 0.7 * a) return { ok: false, reason: "15m still dumping", pullback: null };
-    if (last > e21 + 0.35 * a) return { ok: false, reason: "not at 15m mean yet", pullback: null };
-    return { ok: true, reason: "15m pullback", pullback: (e9 + e21) / 2 };
+    if (last < e21 - 0.7 * a) return { ok: false, wait: false, reason: "15m still dumping", pullback: null };
+    if (last > e21 + 0.35 * a) {
+      return { ok: false, wait: true, reason: "limit at 15m mean", pullback: mean };
+    }
+    return { ok: true, wait: false, reason: "15m pullback", pullback: mean };
   }
-  if (last < e21 - 0.85 * a) return { ok: false, reason: "extended — wait 15m bounce", pullback: null };
-  if (last > e21 + 0.7 * a) return { ok: false, reason: "15m still ripping", pullback: null };
-  if (last < e21 - 0.35 * a) return { ok: false, reason: "not at 15m mean yet", pullback: null };
-  return { ok: true, reason: "15m bounce", pullback: (e9 + e21) / 2 };
+  if (last > e21 + 0.7 * a) return { ok: false, wait: false, reason: "15m still ripping", pullback: null };
+  if (last < e21 - 0.35 * a) {
+    return { ok: false, wait: true, reason: "limit at 15m mean", pullback: mean };
+  }
+  return { ok: true, wait: false, reason: "15m bounce", pullback: mean };
 }
 
 /** Coin 15m is doing the side while BTC 15m is not — 2nd same-side name is allowed. */

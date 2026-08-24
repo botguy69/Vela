@@ -1978,7 +1978,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             if (pick.side === "short" && riskS >= SIDE_CAP) continue;
             const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
             const trig = rules.ltfTrigger(pick.side, coin15);
-            if (!trig.ok) {
+            if (!trig.ok && !trig.wait) {
               veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
               continue;
             }
@@ -1990,19 +1990,30 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
                 : "Same-way beta is full.";
               continue;
             }
-            const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
-            if (!rules.htfAllows(pick.side, h4)) {
-              veto = `HTF veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
+            const marketLong = rules.btcLeads("long", btc15) || riskL > 0;
+            const marketShort = rules.btcLeads("short", btc15) || riskS > 0;
+            const fadeVsBook =
+              (pick.side === "short" && marketLong && !marketShort) ||
+              (pick.side === "long" && marketShort && !marketLong);
+            if (fadeVsBook && !diverges) {
+              veto = `${pick.weexSymbol} ${pick.side} skipped — BTC/book is the other way, coin 15m not fading`;
               continue;
             }
-            if (!diverges && pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
-              veto = `BTC 15m against ${pick.side} ${pick.weexSymbol} — not filling the slot`;
-              continue;
-            }
-            const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
-            if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
-              veto = `Daily veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
-              continue;
+            if (!fadeVsBook) {
+              const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
+              if (!rules.htfAllows(pick.side, h4)) {
+                veto = `HTF veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
+                continue;
+              }
+              if (!diverges && pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
+                veto = `BTC 15m against ${pick.side} ${pick.weexSymbol} — not filling the slot`;
+                continue;
+              }
+              const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
+              if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
+                veto = `Daily veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
+                continue;
+              }
             }
             const book = await getBookTicker(pick.weexSymbol);
             if (book && rules.spreadTooWide(pick.weexSymbol, book.bid, book.ask)) {
@@ -2020,7 +2031,8 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
               veto = `${pick.weexSymbol} ${pick.side} conf ${conf}% below ${bar.minConf}% bar`;
               continue;
             }
-            const timed = rules.withLtfEntry(pick, trig.pullback);
+            const timed0 = rules.withLtfEntry(pick, trig.pullback);
+            const timed = trig.wait ? { ...timed0, entryType: "limit" as const } : timed0;
             sized = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
             if (sized) break;
           }

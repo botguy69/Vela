@@ -79,7 +79,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 74,
       method: "trend",
-      note: "Stage 1: 2% until three losses (then 1.2%). 2L+2S. Empty slots OK. Only A+ (74%+ conf, HTF+15m). TP1 at 1R.",
+      note: "Stage 1: 2% until three losses (then 1.2%). 2L+2S. Empty slots OK. 74%+. Shorts vs a long book only if that coin’s 15m fades BTC. Limits at the 15m mean cancel if unfilled.",
     };
   }
   return {
