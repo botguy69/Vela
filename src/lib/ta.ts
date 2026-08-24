@@ -66,6 +66,17 @@ function swing(candles: Candle[], lookback: number, kind: "high" | "low"): numbe
     : Math.min(...slice.map((c) => c.low));
 }
 
+function swingBar(candles: Candle[], lookback: number, kind: "high" | "low"): Candle | null {
+  const slice = candles.slice(-lookback);
+  if (!slice.length) return null;
+  let best = slice[0]!;
+  for (const c of slice) {
+    if (kind === "high" && c.high >= best.high) best = c;
+    if (kind === "low" && c.low <= best.low) best = c;
+  }
+  return best;
+}
+
 export function scoreToConf(score: number): number {
   return Math.round(Math.min(86, Math.max(58, score)));
 }
@@ -347,6 +358,48 @@ export function analyzeMarket(
         invalidation: `Hourly close back below the failed low.`,
         plan: "scale2",
       });
+    }
+  }
+
+  const firstSlice = hourly.slice(0, -2);
+  if (firstSlice.length >= 24 && tape !== "thrust") {
+    const firstHighBar = swingBar(firstSlice, 22, "high");
+    const firstLowBar = swingBar(firstSlice, 22, "low");
+    if (firstHighBar) {
+      const dist = lastBar.high - firstHighBar.high;
+      const tagged = dist >= -0.2 * a && dist <= 0.35 * a;
+      const fading = firstHighBar.volume > 0 && lastBar.volume <= 0.85 * firstHighBar.volume;
+      const rejected = lastBar.close <= lastBar.open && lastBar.close <= firstHighBar.high + 0.05 * a;
+      if (tagged && fading && r >= 50 && r <= 72) {
+        ideas.push({
+          side: "short",
+          entry: rejected ? last : firstHighBar.high,
+          stop: Math.max(lastBar.high, firstHighBar.high) + stopPad * a * 0.35,
+          entryType: rejected ? "market" : "limit",
+          score: 82,
+          thesis: `Double top / high retest, vol fade ${lastBar.volume > 0 && firstHighBar.volume > 0 ? (lastBar.volume / firstHighBar.volume).toFixed(2) : "?"}× vs first peak, RSI ${r.toFixed(0)}`,
+          invalidation: `Hourly close through the double top.`,
+          plan: "scale2",
+        });
+      }
+    }
+    if (firstLowBar) {
+      const dist = firstLowBar.low - lastBar.low;
+      const tagged = dist >= -0.2 * a && dist <= 0.35 * a;
+      const fading = firstLowBar.volume > 0 && lastBar.volume <= 0.85 * firstLowBar.volume;
+      const rejected = lastBar.close >= lastBar.open && lastBar.close >= firstLowBar.low - 0.05 * a;
+      if (tagged && fading && r <= 50 && r >= 28) {
+        ideas.push({
+          side: "long",
+          entry: rejected ? last : firstLowBar.low,
+          stop: Math.min(lastBar.low, firstLowBar.low) - stopPad * a * 0.35,
+          entryType: rejected ? "market" : "limit",
+          score: 82,
+          thesis: `Double bottom / low retest, vol fade ${lastBar.volume > 0 && firstLowBar.volume > 0 ? (lastBar.volume / firstLowBar.volume).toFixed(2) : "?"}× vs first trough, RSI ${r.toFixed(0)}`,
+          invalidation: `Hourly close through the double bottom.`,
+          plan: "scale2",
+        });
+      }
     }
   }
 
