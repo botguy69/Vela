@@ -362,43 +362,55 @@ export function analyzeMarket(
   }
 
   const firstSlice = hourly.slice(0, -2);
-  if (firstSlice.length >= 24 && tape !== "thrust") {
+  if (firstSlice.length >= 24) {
     const firstHighBar = swingBar(firstSlice, 22, "high");
     const firstLowBar = swingBar(firstSlice, 22, "low");
     if (firstHighBar) {
       const dist = lastBar.high - firstHighBar.high;
       const tagged = dist >= -0.2 * a && dist <= 0.35 * a;
       const fading = firstHighBar.volume > 0 && lastBar.volume <= 0.85 * firstHighBar.volume;
+      const expanding = firstHighBar.volume > 0 && lastBar.volume >= 1.15 * firstHighBar.volume;
       const rejected = lastBar.close <= lastBar.open && lastBar.close <= firstHighBar.high + 0.05 * a;
-      if (tagged && fading && r >= 50 && r <= 72) {
-        ideas.push({
-          side: "short",
-          entry: rejected ? last : firstHighBar.high,
-          stop: Math.max(lastBar.high, firstHighBar.high) + stopPad * a * 0.35,
-          entryType: rejected ? "market" : "limit",
-          score: 82,
-          thesis: `Double top / high retest, vol fade ${lastBar.volume > 0 && firstHighBar.volume > 0 ? (lastBar.volume / firstHighBar.volume).toFixed(2) : "?"}× vs first peak, RSI ${r.toFixed(0)}`,
-          invalidation: `Hourly close through the double top.`,
-          plan: "scale2",
-        });
+      const broke = lastBar.close > firstHighBar.high + 0.1 * a;
+      if (tagged && r >= 50 && r <= 72 && !broke) {
+        if (fading || (expanding && rejected)) {
+          ideas.push({
+            side: "short",
+            entry: rejected ? last : firstHighBar.high,
+            stop: Math.max(lastBar.high, firstHighBar.high) + stopPad * a * 0.35,
+            entryType: rejected ? "market" : "limit",
+            score: 82,
+            thesis: fading
+              ? `Double top, vol fade ${firstHighBar.volume > 0 ? (lastBar.volume / firstHighBar.volume).toFixed(2) : "?"}× vs first peak, RSI ${r.toFixed(0)}`
+              : `Double top, supply on 2nd test ${volRatio.toFixed(1)}× + reject, RSI ${r.toFixed(0)}`,
+            invalidation: `Hourly close through the double top.`,
+            plan: "scale2",
+          });
+        }
       }
     }
     if (firstLowBar) {
       const dist = firstLowBar.low - lastBar.low;
       const tagged = dist >= -0.2 * a && dist <= 0.35 * a;
       const fading = firstLowBar.volume > 0 && lastBar.volume <= 0.85 * firstLowBar.volume;
+      const expanding = firstLowBar.volume > 0 && lastBar.volume >= 1.15 * firstLowBar.volume;
       const rejected = lastBar.close >= lastBar.open && lastBar.close >= firstLowBar.low - 0.05 * a;
-      if (tagged && fading && r <= 50 && r >= 28) {
-        ideas.push({
-          side: "long",
-          entry: rejected ? last : firstLowBar.low,
-          stop: Math.min(lastBar.low, firstLowBar.low) - stopPad * a * 0.35,
-          entryType: rejected ? "market" : "limit",
-          score: 82,
-          thesis: `Double bottom / low retest, vol fade ${lastBar.volume > 0 && firstLowBar.volume > 0 ? (lastBar.volume / firstLowBar.volume).toFixed(2) : "?"}× vs first trough, RSI ${r.toFixed(0)}`,
-          invalidation: `Hourly close through the double bottom.`,
-          plan: "scale2",
-        });
+      const broke = lastBar.close < firstLowBar.low - 0.1 * a;
+      if (tagged && r <= 50 && r >= 28 && !broke) {
+        if (fading || (expanding && rejected)) {
+          ideas.push({
+            side: "long",
+            entry: rejected ? last : firstLowBar.low,
+            stop: Math.min(lastBar.low, firstLowBar.low) - stopPad * a * 0.35,
+            entryType: rejected ? "market" : "limit",
+            score: 82,
+            thesis: fading
+              ? `Double bottom, vol fade ${firstLowBar.volume > 0 ? (lastBar.volume / firstLowBar.volume).toFixed(2) : "?"}× vs first trough, RSI ${r.toFixed(0)}`
+              : `Double bottom, buyers on 2nd test ${volRatio.toFixed(1)}× + reject, RSI ${r.toFixed(0)}`,
+            invalidation: `Hourly close through the double bottom.`,
+            plan: "scale2",
+          });
+        }
       }
     }
   }
