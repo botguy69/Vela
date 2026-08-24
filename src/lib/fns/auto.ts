@@ -1898,27 +1898,12 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             btcRsi = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
           }
           const btc15 = await getWeexKlines("BTCUSDT", "15m", 48).catch(() => []);
-          const ordered =
-            riskL < SIDE_CAP && riskS >= SIDE_CAP
-              ? [...raw.filter((s) => s.side === "long"), ...raw.filter((s) => s.side !== "long")]
-              : riskS < SIDE_CAP && riskL >= SIDE_CAP
-                ? [...raw.filter((s) => s.side === "short"), ...raw.filter((s) => s.side !== "short")]
-                : riskL < riskS
-                  ? [...raw.filter((s) => s.side === "long"), ...raw.filter((s) => s.side !== "long")]
-                  : riskS < riskL
-                    ? [...raw.filter((s) => s.side === "short"), ...raw.filter((s) => s.side !== "short")]
-                    : raw;
+          const ordered = [...raw].sort(
+            (a, b) => (b.confidence ?? b.score) - (a.confidence ?? a.score),
+          );
           let veto = ordered.length
-            ? `${ordered.length} setups this tick, none cleared HTF/15m/spread. BTC RSI ${btcRsi.toFixed(0)} ATR ${regime.ratio.toFixed(1)}×.`
-            : `No setup. BTC RSI ${btcRsi.toFixed(0)} last ${btcLast?.toFixed(0) ?? "?"} ATR ${regime.ratio.toFixed(1)}×.`;
-          if (riskL < SIDE_CAP) {
-            const longIdeas = ordered.filter((s) => s.side === "long" && !busy.has(s.weexSymbol));
-            veto = longIdeas.length
-              ? `At-risk ${riskL}L/${riskS}S (cap 2). ${longIdeas.length} 1h long(s) — none cleared conf/spread.`
-              : `At-risk ${riskL}L/${riskS}S (cap 2). No 1h long this tick. Not forcing one.`;
-          } else if (riskS < SIDE_CAP) {
-            veto = `At-risk ${riskL}L/${riskS}S (cap 2). No extra short cleared.`;
-          }
+            ? `Empty slots OK. ${ordered.length} idea(s) ranked — none cleared HTF/15m/conf. BTC RSI ${btcRsi.toFixed(0)} ATR ${regime.ratio.toFixed(1)}×.`
+            : `Empty slots OK. No A+ this tick. BTC RSI ${btcRsi.toFixed(0)} last ${btcLast?.toFixed(0) ?? "?"} ATR ${regime.ratio.toFixed(1)}×.`;
 
           for (const pick of ordered) {
             if (flattened.has(pick.weexSymbol)) {
@@ -1928,7 +1913,6 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             if (busy.has(pick.weexSymbol)) continue;
             if (pick.side === "long" && riskL >= SIDE_CAP) continue;
             if (pick.side === "short" && riskS >= SIDE_CAP) continue;
-            const opposite = (riskS > 0 && pick.side === "long") || (riskL > 0 && pick.side === "short");
             const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
             const trig = rules.ltfTrigger(pick.side, coin15);
             if (!trig.ok) {
@@ -1943,21 +1927,19 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
                 : "Same-way beta is full.";
               continue;
             }
-            if (!pick.bypassHtf && !opposite) {
-              const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
-              if (!rules.htfAllows(pick.side, h4)) {
-                veto = `HTF veto ${pick.weexSymbol} ${pick.side}`;
-                continue;
-              }
-              if (!diverges && pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
-                veto = `BTC 15m against ${pick.side} ${pick.weexSymbol}`;
-                continue;
-              }
-              const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
-              if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
-                veto = `Daily veto ${pick.weexSymbol} ${pick.side}`;
-                continue;
-              }
+            const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
+            if (!rules.htfAllows(pick.side, h4)) {
+              veto = `HTF veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
+              continue;
+            }
+            if (!diverges && pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
+              veto = `BTC 15m against ${pick.side} ${pick.weexSymbol} — not filling the slot`;
+              continue;
+            }
+            const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
+            if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
+              veto = `Daily veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
+              continue;
             }
             const book = await getBookTicker(pick.weexSymbol);
             if (book && rules.spreadTooWide(pick.weexSymbol, book.bid, book.ask)) {

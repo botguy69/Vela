@@ -211,7 +211,6 @@ export function analyzeMarket(
       thesis: `Overbought RSI ${r.toFixed(0)}`,
       invalidation: `Break of the local swing high.`,
       plan: "scale2",
-      bypassHtf: true,
     });
   }
 
@@ -235,7 +234,6 @@ export function analyzeMarket(
         thesis: `Trend cooling, RSI ${r.toFixed(0)} off ${rAgo.toFixed(0)}`,
         invalidation: `Hourly close makes a new high.`,
         plan: "scale2",
-        bypassHtf: true,
       });
     }
   }
@@ -288,7 +286,6 @@ export function analyzeMarket(
         thesis: `Failed range high, RSI ${r.toFixed(0)}`,
         invalidation: `Hourly close back above the failed high.`,
         plan: "scale2",
-        bypassHtf: true,
       });
     }
     const failedLow =

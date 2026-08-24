@@ -64,7 +64,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       style: "scalp",
       maxOpen: 4,
       minRr: 1.9,
-      minConf: 70,
+      minConf: 74,
       method: "trend",
       note: "Stage 1: full list. 2% margin. After TP1/BE, next ticket can open — up to 6 live.",
     };
@@ -77,9 +77,9 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       style: "scalp",
       maxOpen: 4,
       minRr: 1.9,
-      minConf: 70,
+      minConf: 74,
       method: "trend",
-      note: "Stage 1: 2% until three losses (then 1.2%). 2L+2S. 1h/15m fill. TP1 at 1R. New fills: no 0.3R in 5h → sold to move on. Cap 6.",
+      note: "Stage 1: 2% until three losses (then 1.2%). 2L+2S. Empty slots OK. Only A+ (74%+ conf, HTF+15m). TP1 at 1R.",
     };
   }
   return {
