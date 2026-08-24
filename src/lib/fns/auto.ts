@@ -477,19 +477,44 @@ async function ensureTakes(
   creds: { apiKey: string; apiSecret: string; passphrase: string },
 ) {
   if (pos.status !== "filled") return;
-  if (pos.weex_resp && /tps:ok/.test(pos.weex_resp)) return;
-  const tps = parseNums(pos.targets);
-  if (!tps.length) return;
+  const resp = pos.weex_resp ?? "";
   const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
-  const { placeWeexTake } = await import("@/lib/weex.server");
+  const { placeWeexTake, moveWeexStop, cancelWeexProtective, getWeexPositionQty, listWeexAlgos } = await import("@/lib/weex.server");
+  const stacked = (await listWeexAlgos(creds, pos.weex_symbol)).length;
+  if (stacked <= 4 && /tps:(ok|swept|lock)/.test(resp)) return;
   const { coinByWeex } = await import("@/lib/universe");
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  const [lock] = await sql<{ id: number }>`
+    update auto_signals
+    set weex_resp = ${`${resp.replace(/tps:(lock|ok|swept|partial)/g, "").trim()} tps:lock`.slice(0, 500)}, updated_at = now()
+    where id = ${pos.id}
+      and (${stacked} > 4 or (
+        coalesce(weex_resp, '') not like '%tps:lock%'
+        and coalesce(weex_resp, '') not like '%tps:swept%'
+        and coalesce(weex_resp, '') not like '%tps:ok%'
+      ))
+    returning id
+  `;
+  if (!lock) return;
   const spec = await specFor(coinByWeex(pos.weex_symbol));
-  const q = origQty(pos);
-  if (!(q > 0)) return;
+  const liveQty = (await getWeexPositionQty(creds, pos.weex_symbol)) ?? origQty(pos);
+  if (!(liveQty > 0)) return;
+  const tps = parseNums(pos.targets);
   const side = pos.side === "short" ? "SHORT" : "LONG";
+  await cancelWeexProtective(creds, pos.weex_symbol);
+  const stopPx = n(pos.stop);
+  if (stopPx > 0) {
+    await moveWeexStop(creds, {
+      symbol: pos.weex_symbol,
+      positionSide: side,
+      stop: formatWeexPx(stopPx, spec.pricePrecision),
+      clientOid: `velasl${pos.id}${Date.now().toString(36)}`.slice(0, 36),
+    });
+  }
   let ok = 0;
   for (let i = 0; i < tps.length; i += 1) {
-    const slice = formatWeexQty(q / tps.length, spec.quantityPrecision);
+    const slice = formatWeexQty(liveQty / Math.max(1, tps.length), spec.quantityPrecision);
     if (Number(slice) <= 0) continue;
     const sent = await placeWeexTake(creds, {
       symbol: pos.weex_symbol,
@@ -501,18 +526,13 @@ async function ensureTakes(
     if (sent.ok) ok += 1;
     else notes.push(`${pos.weex_symbol} TP${i + 1} failed: ${sent.error.slice(0, 80)}`);
   }
-  if (ok) {
-    notes.push(`${pos.weex_symbol} posted ${ok}/${tps.length} take(s)`);
-    const { getSql } = await import("@/lib/db");
-    const sql = await getSql();
-    await sql`
-      update auto_signals
-      set weex_resp = ${`${pos.weex_resp ?? ""} tps:${ok === tps.length ? "ok" : "partial"}`.slice(0, 500)},
-          updated_at = now()
-      where id = ${pos.id}
-    `;
-    pos.weex_resp = `${pos.weex_resp ?? ""} tps:${ok === tps.length ? "ok" : "partial"}`;
-  }
+  notes.push(`${pos.weex_symbol} swept TP/SL — ${ok}/${tps.length || 0} take(s), 1 stop`);
+  await sql`
+    update auto_signals
+    set weex_resp = ${`${resp} tps:ok tps:swept`.slice(0, 500)}, updated_at = now()
+    where id = ${pos.id}
+  `;
+  pos.weex_resp = `${resp} tps:ok tps:swept`;
 }
 
 async function closeFlatOnWeex(
@@ -1380,7 +1400,8 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         const creds = await credsFrom(settings);
         let moved = false;
         if (creds) {
-          const { moveWeexStop } = await import("@/lib/weex.server");
+          const { moveWeexStop, cancelWeexProtective, placeWeexTake } = await import("@/lib/weex.server");
+          await cancelWeexProtective(creds, pos.weex_symbol);
           const sent = await moveWeexStop(creds, {
             symbol: pos.weex_symbol,
             positionSide: side === "short" ? "SHORT" : "LONG",
@@ -1388,6 +1409,21 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             clientOid: `velabe${pos.id}${Date.now().toString(36)}`.slice(0, 36),
           });
           moved = sent.ok;
+          if (moved) {
+            const { getWeexPositionQty } = await import("@/lib/weex.server");
+            const left = (await getWeexPositionQty(creds, pos.weex_symbol)) ?? origQty(pos);
+            for (let i = 0; i < tps.length; i += 1) {
+              const q = formatWeexQty(left / Math.max(1, tps.length), spec.quantityPrecision);
+              if (Number(q) <= 0) continue;
+              await placeWeexTake(creds, {
+                symbol: pos.weex_symbol,
+                positionSide: side === "short" ? "SHORT" : "LONG",
+                tp: formatWeexPx(tps[i]!, spec.pricePrecision),
+                quantity: q,
+                clientOid: `velatp${pos.id}${i}${Date.now().toString(36)}`.slice(0, 36),
+              });
+            }
+          }
           if (!sent.ok) notes.push(`${pos.weex_symbol} BE on WEEX failed: ${sent.error.slice(0, 80)}`);
         }
         const hitFirst = tps[0] != null && taggedTake(side, mark, tps[0]!);
@@ -1416,13 +1452,27 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           const spec = await specFor(coinByWeex(pos.weex_symbol));
           const creds = await credsFrom(settings);
           if (creds) {
-            const { moveWeexStop } = await import("@/lib/weex.server");
+            const { moveWeexStop, cancelWeexProtective, placeWeexTake } = await import("@/lib/weex.server");
+            await cancelWeexProtective(creds, pos.weex_symbol);
             await moveWeexStop(creds, {
               symbol: pos.weex_symbol,
               positionSide: side === "short" ? "SHORT" : "LONG",
               stop: formatWeexPx(next, spec.pricePrecision),
               clientOid: `velatr${pos.id}${Date.now().toString(36)}`.slice(0, 36),
             });
+            const { getWeexPositionQty } = await import("@/lib/weex.server");
+            const left = (await getWeexPositionQty(creds, pos.weex_symbol)) ?? origQty(pos);
+            for (let i = 0; i < tps.length; i += 1) {
+              const q = formatWeexQty(left / Math.max(1, tps.length), spec.quantityPrecision);
+              if (Number(q) <= 0) continue;
+              await placeWeexTake(creds, {
+                symbol: pos.weex_symbol,
+                positionSide: side === "short" ? "SHORT" : "LONG",
+                tp: formatWeexPx(tps[i]!, spec.pricePrecision),
+                quantity: q,
+                clientOid: `velatp${pos.id}${i}${Date.now().toString(36)}`.slice(0, 36),
+              });
+            }
           }
           await sql`
             update auto_signals set stop = ${next}, updated_at = now()

@@ -455,8 +455,44 @@ export async function cancelWeexProtective(creds: WeexCreds, symbol: string) {
     () => weexRequest({ creds, method: "POST", path: "/capi/v3/algoOrder/cancelAll", body: { symbol } }),
     () => weexRequest({ creds, method: "DELETE", path: "/capi/v3/tpslOrder", query: { symbol } }),
     () => weexRequest({ creds, method: "POST", path: "/capi/v3/cancelAllTpSl", body: { symbol } }),
+    () => weexRequest({ creds, method: "POST", path: "/capi/v3/plan/cancelAll", body: { symbol, productType: "USDT-FUTURES" } }),
   ];
   for (const t of tries) await t().catch(() => null);
+  const listed = await listWeexAlgos(creds, symbol);
+  for (const id of listed) {
+    await weexRequest({
+      creds,
+      method: "POST",
+      path: "/capi/v3/algoOrder/cancel",
+      body: { symbol, algoId: id },
+    }).catch(() => null);
+    await weexRequest({
+      creds,
+      method: "DELETE",
+      path: "/capi/v3/tpslOrder",
+      query: { symbol, algoId: id },
+    }).catch(() => null);
+  }
+}
+
+export async function listWeexAlgos(creds: WeexCreds, symbol: string): Promise<string[]> {
+  const paths = [
+    { path: "/capi/v3/algoOrder/open", query: { symbol } as Record<string, string> },
+    { path: "/capi/v3/tpslOrder", query: { symbol } },
+    { path: "/capi/v3/planOrder/current", query: { symbol } },
+    { path: "/capi/v3/ordersPlan", query: { symbol, planType: "profit_loss" } },
+  ];
+  const ids = new Set<string>();
+  for (const p of paths) {
+    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
+    if (!res.ok) continue;
+    for (const row of rowsFrom(res.data)) {
+      const o = row as Record<string, unknown>;
+      const id = String(o.algoId ?? o.orderId ?? o.id ?? o.clientAlgoId ?? "");
+      if (id && id !== "undefined") ids.add(id);
+    }
+  }
+  return [...ids];
 }
 
 export async function placeWeexTake(
