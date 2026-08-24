@@ -79,7 +79,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1: 2% until three losses (then 1.2%). 2L+2S. One working limit. Replace it if a higher-conf setup is ready. 78%+ with volume/BB. Fade shorts only vs BTC.",
+      note: "Stage 1: 2% until three losses (then 1.2%). 2L+2S. One working limit. 78%+. Volume tape: thrust / climax / dry-up / coil / dead. Fade shorts only vs BTC.",
     };
   }
   return {

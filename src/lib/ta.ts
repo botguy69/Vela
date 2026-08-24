@@ -77,6 +77,33 @@ function stdev(values: number[]): number {
   return Math.sqrt(v);
 }
 
+export type VolTape = "thrust" | "climax" | "dry_extreme" | "coil" | "dead" | "normal";
+
+/** Volume is a signal, not a mute button. */
+export function volumeTape(opts: {
+  lastBar: Candle;
+  medVol: number;
+  last: number;
+  mid: number;
+  atr: number;
+  bbUpper: number;
+  bbLower: number;
+}): { tape: VolTape; ratio: number } {
+  const { lastBar, medVol, last, mid, atr: a, bbUpper, bbLower } = opts;
+  const ratio = medVol > 0 ? lastBar.volume / medVol : 1;
+  const atHigh = last >= Math.max(bbUpper * 0.995, mid + 1.05 * a);
+  const atLow = last <= Math.min(bbLower * 1.005, mid - 1.05 * a);
+  const atMean = Math.abs(last - mid) <= 0.5 * a;
+  const bodyUp = lastBar.close >= lastBar.open;
+  if (ratio >= 2 && (atHigh || atLow)) return { tape: "climax", ratio };
+  if (ratio >= 1.25 && ((atHigh && !bodyUp) || (atLow && bodyUp))) return { tape: "climax", ratio };
+  if (ratio >= 1.15) return { tape: "thrust", ratio };
+  if (ratio < 0.55 && !atHigh && !atLow && !atMean) return { tape: "dead", ratio };
+  if (ratio < 0.75 && (atHigh || atLow)) return { tape: "dry_extreme", ratio };
+  if (ratio < 0.8 && atMean) return { tape: "coil", ratio };
+  return { tape: "normal", ratio };
+}
+
 export function weexSymbol(id: MarketId | string): string {
   return String(id).includes("USDT") ? String(id) : String(id).replace("-USD", "USDT").replace("-", "");
 }
@@ -105,10 +132,18 @@ export function analyzeMarket(
   const lastBar = hourly[hourly.length - 1]!;
   const vols = hourly.slice(-20).map((c) => c.volume).filter((v) => v > 0).sort((x, y) => x - y);
   const medVol = vols.length ? vols[Math.floor(vols.length / 2)]! : 0;
-  const volRatio = medVol > 0 ? lastBar.volume / medVol : 1;
   const sd = stdev(closes.slice(-20));
   const bbUpper = mid + 2 * sd;
   const bbLower = mid - 2 * sd;
+  const { tape, ratio: volRatio } = volumeTape({
+    lastBar,
+    medVol,
+    last,
+    mid,
+    atr: a,
+    bbUpper,
+    bbLower,
+  });
 
   type Idea = {
     side: Side;
@@ -315,6 +350,55 @@ export function analyzeMarket(
     }
   }
 
+  if (tape === "dry_extreme" && last >= Math.max(bbUpper * 0.997, hi) * 0.999 && r >= 58) {
+    ideas.push({
+      side: "short",
+      entry: last,
+      stop: Math.max(hi, lastBar.high) + stopPad * a * 0.35,
+      entryType: "limit",
+      score: 79,
+      thesis: `Dry-up at high, vol ${volRatio.toFixed(1)}× RSI ${r.toFixed(0)}`,
+      invalidation: `Hourly close makes a new high on volume.`,
+      plan: "scale2",
+    });
+  }
+  if (tape === "dry_extreme" && last <= Math.min(bbLower * 1.003, lo) * 1.001 && r <= 42) {
+    ideas.push({
+      side: "long",
+      entry: last,
+      stop: Math.min(lo, lastBar.low) - stopPad * a * 0.35,
+      entryType: "limit",
+      score: 79,
+      thesis: `Dry-up at low, vol ${volRatio.toFixed(1)}× RSI ${r.toFixed(0)}`,
+      invalidation: `Hourly close makes a new low on volume.`,
+      plan: "scale2",
+    });
+  }
+  if (tape === "climax" && last >= bbUpper * 0.998 && lastBar.close <= lastBar.open && r >= 60) {
+    ideas.push({
+      side: "short",
+      entry: last,
+      stop: lastBar.high + stopPad * a * 0.4,
+      entryType: lastBar.close < lastBar.open ? "market" : "limit",
+      score: 81,
+      thesis: `Volume climax rejection at highs, ${volRatio.toFixed(1)}× RSI ${r.toFixed(0)}`,
+      invalidation: `Hourly close back through the wick high.`,
+      plan: "scale2",
+    });
+  }
+  if (tape === "climax" && last <= bbLower * 1.002 && lastBar.close >= lastBar.open && r <= 40) {
+    ideas.push({
+      side: "long",
+      entry: last,
+      stop: lastBar.low - stopPad * a * 0.4,
+      entryType: lastBar.close > lastBar.open ? "market" : "limit",
+      score: 81,
+      thesis: `Volume climax rejection at lows, ${volRatio.toFixed(1)}× RSI ${r.toFixed(0)}`,
+      invalidation: `Hourly close back through the wick low.`,
+      plan: "scale2",
+    });
+  }
+
   const finish = (best: Idea): RawSetup | null => {
     const risk = Math.abs(best.entry - best.stop);
     if (risk <= 0) return null;
@@ -331,26 +415,41 @@ export function analyzeMarket(
     const target = targets[targets.length - 1]!;
     const rr = Math.abs(target - best.entry) / risk;
     if (rr < minRr) return null;
-    if (best.side === "long" && last > bbUpper * 1.001) return null;
-    if (best.side === "short" && last < bbLower * 0.999) return null;
-    if (volRatio < 0.7 && best.score < 82) return null;
-    const volThrust =
-      volRatio >= 1.15 &&
-      ((best.side === "long" && lastBar.close >= lastBar.open) ||
-        (best.side === "short" && lastBar.close <= lastBar.open));
+    if (best.side === "long" && last > bbUpper * 1.001 && tape !== "climax" && tape !== "dry_extreme") return null;
+    if (best.side === "short" && last < bbLower * 0.999 && tape !== "climax" && tape !== "dry_extreme") return null;
+    if (tape === "dead") return null;
     let score = best.score;
-    if (volThrust) score += 5;
-    if (volRatio < 0.9) score -= 4;
+    let entryType = best.entryType;
+    if (tape === "climax") {
+      if (best.side === "long" && last >= mid + 0.6 * a) return null;
+      if (best.side === "short" && last <= mid - 0.6 * a) return null;
+      score += 6;
+    } else if (tape === "dry_extreme") {
+      if (best.side === "long" && last > mid + 0.5 * a) return null;
+      if (best.side === "short" && last < mid - 0.5 * a) return null;
+      score += 5;
+      entryType = "limit";
+    } else if (tape === "coil") {
+      entryType = "limit";
+      score += 2;
+    } else if (tape === "thrust") {
+      const withTape =
+        (best.side === "long" && lastBar.close >= lastBar.open) ||
+        (best.side === "short" && lastBar.close <= lastBar.open);
+      score += withTape ? 5 : -6;
+    } else if (volRatio >= 1.15) {
+      score += 3;
+    }
     if (score < 76) return null;
     const conf = scoreToConf(score);
     const planTag = best.plan === "scale2" ? "hold" : best.plan === "scale3" ? "break" : "fade";
-    const thesis = `${best.side} ${planTag} · RSI ${r.toFixed(0)} · vol ${volRatio.toFixed(1)}× · ${rr.toFixed(1)}R · conf ${conf}% · ${best.thesis}`;
+    const thesis = `${best.side} ${planTag} · RSI ${r.toFixed(0)} · vol ${tape} ${volRatio.toFixed(1)}× · ${rr.toFixed(1)}R · conf ${conf}% · ${best.thesis}`;
     return {
       symbol,
       weexSymbol: weexSymbol(symbol),
       side: best.side,
       style,
-      entryType: best.entryType,
+      entryType,
       entry: best.entry,
       stop: best.stop,
       target,
