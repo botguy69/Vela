@@ -397,7 +397,10 @@ export function breakevenPrice(side: Side, entry: number): number {
   return side === "long" ? entry * (1 + roundTrip) : entry * (1 - roundTrip);
 }
 
-/** First take touched, or 1R in hand — then lock entry. */
+export function taggedTake(side: Side, last: number, target: number): boolean {
+  if (!(target > 0) || !(last > 0)) return false;
+  return side === "long" ? last >= target * 0.999 : last <= target * 1.001;
+}
 export function shouldLockBreakeven(opts: {
   side: Side;
   entry: number;
@@ -429,18 +432,25 @@ export function ticketPnl(opts: {
   leftover?: number | null;
   targets: number[];
   beMoved: boolean;
+  tp1Hit?: boolean;
 }): number {
   const orig = opts.qty;
   if (!(orig > 0) || !(opts.entry > 0)) return 0;
   const favor = (px: number, q: number) =>
     opts.side === "short" ? (opts.entry - px) * q : (px - opts.entry) * q;
   const tp1 = opts.targets[0];
-  if (opts.beMoved && tp1 != null) {
+  const reduced =
+    opts.leftover != null && Number.isFinite(opts.leftover) && orig > 0 && opts.leftover < orig * 0.72;
+  const tagged = tp1 != null && taggedTake(opts.side, opts.last, tp1);
+  const tp1Hit = Boolean(opts.tp1Hit) || reduced || tagged;
+  if (opts.beMoved && tp1Hit && tp1 != null) {
     const half = orig * 0.5;
     const left =
       opts.leftover != null && Number.isFinite(opts.leftover) && opts.leftover >= 0
         ? opts.leftover
-        : half;
+        : opts.leftover === 0
+          ? 0
+          : half;
     return favor(tp1, half) + favor(opts.last, left);
   }
   if (opts.leftover === 0) {

@@ -60,6 +60,7 @@ type SignalRow = {
   targets: string | null;
   scale: string | null;
   be_moved: boolean;
+  tp1_hit?: boolean;
   plan: string | null;
   filled_at: string | null;
   score: string | number | null;
@@ -241,6 +242,7 @@ async function closedStats(
         and close_reason not like 'Closed on WEEX%'
         and close_reason not like 'Cancelled%'
         and close_reason not like 'Stale claim%'
+        and close_reason not like 'BE scratch%'
       ))
       and created_at >= ${from}
   `;
@@ -286,6 +288,24 @@ function parseNums(raw: string | null | undefined): number[] {
   } catch {
     return [];
   }
+}
+
+/** True only if TP1 actually printed (qty cut or price tagged the take) — not just a 1R BE lock. */
+function tp1Printed(
+  row: { side: string; targets?: string | null; tp1_hit?: boolean | null },
+  last: number,
+): boolean {
+  if (row.tp1_hit) return true;
+  const tp1 = parseNums(row.targets)[0];
+  if (tp1 == null || !(last > 0)) return false;
+  return row.side === "short" ? last <= tp1 * 1.001 : last >= tp1 * 0.999;
+}
+
+function closeLabel(beMoved: boolean, printed: boolean, pnl: number, hitStop: boolean): string {
+  if (beMoved && !printed) return "BE scratch — not a win or loss";
+  if (beMoved) return pnl >= 0 ? "TP1 then BE" : "TP1 then leftover stopped";
+  if (hitStop) return "Hit stop";
+  return "Closed on WEEX";
 }
 
 function mapSignal(row: SignalRow) {
@@ -342,6 +362,7 @@ async function ticketLedger(
         and close_reason not like 'Closed on WEEX%'
         and close_reason not like 'Cancelled%'
         and close_reason not like 'Stale claim%'
+        and close_reason not like 'BE scratch%'
       ))
       and created_at >= ${from}
   `;
@@ -434,6 +455,7 @@ async function closeFlatOnWeex(
     const stopPx = n(pos.stop);
     const hitSl = throughStop(side, last, stopPx);
     const px = hitSl ? stopPx : last;
+    const printed = Boolean(pos.tp1_hit) || tp1Printed(pos, px);
     const { ticketPnl } = await import("@/lib/ta");
     const pnl = ticketPnl({
       side,
@@ -443,25 +465,27 @@ async function closeFlatOnWeex(
       leftover: 0,
       targets: parseNums(pos.targets),
       beMoved: Boolean(pos.be_moved),
+      tp1Hit: printed,
     });
-    const why = pos.be_moved
-      ? pnl >= 0
-        ? "TP1 then BE"
-        : "TP1 then leftover stopped"
-      : hitSl
-        ? "Hit stop"
-        : "Closed on WEEX";
-    const st = pos.be_moved && pnl >= 0 ? "targeted" : why === "Hit stop" || (pos.be_moved && pnl < 0) ? "stopped" : "skipped";
+    const why = closeLabel(Boolean(pos.be_moved), printed, pnl, hitSl);
+    const scratch = why.startsWith("BE scratch");
+    const st = scratch
+      ? "skipped"
+      : why === "Hit stop" || why === "TP1 then leftover stopped"
+        ? "stopped"
+        : why === "TP1 then BE"
+          ? "targeted"
+          : "skipped";
     await sql`
       update auto_signals
-      set status = ${st}, closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
+      set status = ${st}, closed_px = ${px}, pnl = ${scratch ? 0 : pnl}, close_reason = ${why}, updated_at = now()
       where id = ${pos.id} and user_id = ${userId}
     `;
     if (creds) {
       const { cancelWeexProtective } = await import("@/lib/weex.server");
       await cancelWeexProtective(creds, pos.weex_symbol).catch(() => null);
     }
-    notes.push(`${pos.weex_symbol} ${why} ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`);
+    notes.push(`${pos.weex_symbol} ${why}${scratch ? "" : ` ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`}`);
   }
 
   const recent = await sql<{ weex_symbol: string }>`
@@ -885,7 +909,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       getWeexFourHour,
       getWeexKlines,
     } = await import("@/lib/weex-market.server");
-    const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, ticketPnl } = await import("@/lib/ta");
+    const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, ticketPnl, taggedTake } = await import("@/lib/ta");
     const { sizeSetup } = await import("@/lib/risk");
     const { coinByWeex, CORE_SET } = await import("@/lib/universe");
     const rules = await import("@/lib/desk-rules");
@@ -920,16 +944,31 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       where user_id = ${userId}
         and be_moved = true
         and status in ('skipped','stopped','targeted')
-        and (
-          close_reason = 'Closed on WEEX'
-          or close_reason = 'Hit stop'
-          or close_reason = 'TP1 then BE'
-        )
+        and close_reason in ('Closed on WEEX', 'Hit stop', 'TP1 then BE')
     `;
     for (const row of botched) {
       const entry = n(row.fill_px ?? row.entry);
       const last = n(row.closed_px) || entry;
       const side = row.side === "short" ? "short" : "long";
+      const tp1 = parseNums(row.targets)[0];
+      let printed = Boolean(row.tp1_hit);
+      if (!printed && tp1 != null) {
+        const hours = await getWeexKlines(row.weex_symbol, "1h", 80).catch(() => []);
+        const since = new Date(row.filled_at ?? row.created_at).getTime();
+        const after = hours.filter((c) => {
+          const t = c.time > 1e12 ? c.time : c.time * 1000;
+          return Number.isFinite(since) ? t >= since - 3600_000 : true;
+        });
+        if (after.length) {
+          const ext =
+            side === "short"
+              ? Math.min(...after.map((c) => c.low))
+              : Math.max(...after.map((c) => c.high));
+          printed = tp1Printed({ ...row, tp1_hit: false }, ext);
+        } else if (row.close_reason === "TP1 then BE") {
+          printed = true;
+        }
+      }
       const pnl = ticketPnl({
         side,
         entry,
@@ -938,17 +977,25 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         leftover: 0,
         targets: parseNums(row.targets),
         beMoved: true,
+        tp1Hit: printed,
       });
-      if (pnl <= 0) continue;
+      const why = closeLabel(true, printed, pnl, false);
+      const already = row.close_reason === why && Math.abs(n(row.pnl) - pnl) < 0.02;
+      if (already) continue;
+      const st = why.startsWith("BE scratch") ? "skipped" : why === "TP1 then leftover stopped" ? "stopped" : "targeted";
       await sql`
         update auto_signals
-        set status = 'targeted',
-            pnl = ${pnl},
-            close_reason = ${"TP1 then BE"},
+        set status = ${st},
+            pnl = ${why.startsWith("BE scratch") ? 0 : pnl},
+            close_reason = ${why},
             updated_at = now()
         where id = ${row.id} and user_id = ${userId}
       `;
-      notes.push(`${row.weex_symbol} restated: TP1 then BE +${pnl.toFixed(2)}`);
+      if (why.startsWith("BE scratch")) {
+        notes.push(`${row.weex_symbol} reclassed: BE scratch (TP1 never printed)`);
+      } else if (row.close_reason !== "TP1 then BE") {
+        notes.push(`${row.weex_symbol} restated: ${why} ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`);
+      }
     }
     const fakeFlat = await sql<SignalRow>`
       select * from auto_signals
@@ -1141,15 +1188,26 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           moved = sent.ok;
           if (!sent.ok) notes.push(`${pos.weex_symbol} BE on WEEX failed: ${sent.error.slice(0, 80)}`);
         }
+        const hitFirst = tps[0] != null && taggedTake(side, mark, tps[0]!);
+        const printed = Boolean(reduced || hitFirst);
         if (moved || !creds) {
           await sql`
             update auto_signals
-            set stop = ${be}, be_moved = true, updated_at = now()
+            set stop = ${be}, be_moved = true, tp1_hit = ${printed}, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
-          if (moved) notes.push(`${pos.weex_symbol} stop to WEEX BE (fees covered)`);
+          if (moved) {
+            notes.push(
+              printed
+                ? `${pos.weex_symbol} TP1 printed · stop to WEEX BE (fees covered)`
+                : `${pos.weex_symbol} 1R · stop to WEEX BE (no TP1 yet — scratch if leftover dies)`,
+            );
+          }
         }
       } else if (pos.be_moved) {
+        if (reduced && !pos.tp1_hit) {
+          await sql`update auto_signals set tp1_hit = true, updated_at = now() where id = ${pos.id} and user_id = ${userId}`;
+        }
         const hourly = await getWeexKlines(pos.weex_symbol, "1h", 40).catch(() => []);
         const next = rules.trailStop({ side, entry, stop, hourly });
         if (next != null) {
@@ -1181,18 +1239,32 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
       if (pos.status === "filled" && left === 0) {
         const exit = throughStop(side, px, stop) ? stop : px;
-        const pnl = side === "long" ? (exit - entry) * origQty(pos) : (entry - exit) * origQty(pos);
-        const why = throughStop(side, px, stop) ? "Hit stop" : "Closed on WEEX";
-        const st = why === "Hit stop" ? "stopped" : "skipped";
+        const printed = tp1Printed(pos, exit) || Boolean(pos.tp1_hit);
+        const { ticketPnl } = await import("@/lib/ta");
+        const pnl = ticketPnl({
+          side,
+          entry,
+          last: exit,
+          qty: origQty(pos),
+          leftover: 0,
+          targets: tps,
+          beMoved: Boolean(pos.be_moved),
+          tp1Hit: printed,
+        });
+        const why = closeLabel(Boolean(pos.be_moved), printed, pnl, throughStop(side, px, stop));
+        const scratch = why.startsWith("BE scratch");
+        const st = scratch ? "skipped" : why === "Hit stop" || why === "TP1 then leftover stopped" ? "stopped" : "targeted";
         await sql`
           update auto_signals
-          set status = ${st}, closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
+          set status = ${st}, closed_px = ${exit}, pnl = ${scratch ? 0 : pnl}, close_reason = ${why}, updated_at = now()
           where id = ${pos.id} and user_id = ${userId}
         `;
-        streak = pnl >= 0 ? 0 : streak + 1;
-        winStreak = pnl >= 0 ? winStreak + 1 : 0;
-        closed += 1;
-        notes.push(`${pos.weex_symbol} ${why} ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`);
+        if (!scratch) {
+          streak = pnl >= 0 ? 0 : streak + 1;
+          winStreak = pnl >= 0 ? winStreak + 1 : 0;
+          closed += 1;
+        }
+        notes.push(`${pos.weex_symbol} ${why}${scratch ? "" : ` ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`}`);
         continue;
       }
       if (
@@ -1227,7 +1299,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           if (moved || !creds) {
             await sql`
               update auto_signals
-              set stop = ${be}, be_moved = true, updated_at = now()
+              set stop = ${be}, be_moved = true, tp1_hit = false, updated_at = now()
               where id = ${pos.id} and user_id = ${userId}
             `;
             if (moved) notes.push(`${pos.weex_symbol} chop → WEEX BE (fees covered). Slot free.`);
@@ -1278,6 +1350,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           continue;
         }
         const exit = hitStop ? stop : target;
+        const printed = Boolean(pos.tp1_hit) || tp1Printed(pos, exit) || (!hitStop && hitTp);
         const { ticketPnl } = await import("@/lib/ta");
         const pnl = ticketPnl({
           side,
@@ -1287,25 +1360,27 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           leftover: 0,
           targets: tps,
           beMoved: Boolean(pos.be_moved),
+          tp1Hit: printed,
         });
-        const why = pos.be_moved
-          ? pnl >= 0
-            ? "TP1 then BE"
-            : "TP1 then leftover stopped"
-          : hitStop
-            ? "Hit stop"
-            : "Took profit";
-        const st = pos.be_moved && pnl >= 0 ? "targeted" : hitStop ? "stopped" : "targeted";
+        const why = closeLabel(Boolean(pos.be_moved), printed, pnl, hitStop);
+        const scratch = why.startsWith("BE scratch");
+        const st = scratch
+          ? "skipped"
+          : why === "Hit stop" || why === "TP1 then leftover stopped"
+            ? "stopped"
+            : "targeted";
         await sql`
           update auto_signals
           set status = ${st},
-              closed_px = ${exit}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
+              closed_px = ${exit}, pnl = ${scratch ? 0 : pnl}, close_reason = ${why}, updated_at = now()
           where id = ${pos.id} and user_id = ${userId}
         `;
-        streak = pnl >= 0 ? 0 : streak + 1;
-        winStreak = pnl >= 0 ? winStreak + 1 : 0;
-        closed += 1;
-        notes.push(`${pos.weex_symbol} ${why} ${pnl.toFixed(2)}`);
+        if (!scratch) {
+          streak = pnl >= 0 ? 0 : streak + 1;
+          winStreak = pnl >= 0 ? winStreak + 1 : 0;
+          closed += 1;
+        }
+        notes.push(`${pos.weex_symbol} ${why}${scratch ? "" : ` ${pnl.toFixed(2)}`}`);
       }
     }
 
