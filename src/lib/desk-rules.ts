@@ -360,17 +360,17 @@ export function confidenceBar(
   base: number,
 ): { minConf: number; note: string } {
   const rows = closed.filter((c) => c.conf > 0);
-  if (rows.length < 4) return { minConf: Math.max(74, base), note: "" };
+  if (rows.length < 4) return { minConf: Math.max(78, base), note: "Bar 78%+. Volume + BB. One limit max." };
   const high = rows.filter((c) => c.conf >= base);
   const highLose = high.filter((c) => c.pnl < 0);
   if (high.length >= 3 && highLose.length / high.length >= 0.5) {
-    const minConf = Math.min(82, Math.max(74, base + 8));
+    const minConf = Math.min(84, Math.max(78, base + 4));
     return {
       minConf,
       note: `High-conf SLs ${highLose.length}/${high.length}. Bar now ${minConf}%. Empty slots OK.`,
     };
   }
-  return { minConf: Math.max(74, base), note: "Bar 74%+. Empty slots OK — no fill-the-book." };
+  return { minConf: Math.max(78, base), note: "Bar 78%+. Volume + BB. One limit at a time." };
 }
 
 export function writeDeskNote(opts: {

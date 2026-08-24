@@ -1864,6 +1864,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }.`,
     );
     const credsGate2 = await credsFrom(settings);
+    let parked: SignalRow | null = null;
     if (credsGate2) {
       const filledSym = new Set(
         liveN
@@ -1899,6 +1900,28 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         `;
         notes.push(`${row.weex_symbol} limit cancelled — duplicate or 2 already on that side`);
       }
+      const leftoverWorking = stillOpenRaw.filter(
+        (s) =>
+          (s.status === "working" || s.status === "proposed") &&
+          !extras.some((e) => e.id === s.id),
+      );
+      leftoverWorking.sort((a, b) => n(b.confidence) - n(a.confidence));
+      for (const row of leftoverWorking.slice(1)) {
+        if (row.client_oid) {
+          await cancelWeexOrder(credsGate2, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
+        }
+        await cancelWeexProtective(credsGate2, row.weex_symbol).catch(() => null);
+        await sql`
+          update auto_signals
+          set status = 'skipped',
+              close_reason = ${"Cancelled — one working limit at a time"},
+              pnl = 0,
+              updated_at = now()
+          where id = ${row.id} and user_id = ${userId}
+        `;
+        notes.push(`${row.weex_symbol} extra limit cancelled — one parked ticket only`);
+      }
+      parked = leftoverWorking[0] ?? null;
     }
 
     if (riskL >= SIDE_CAP && riskS >= SIDE_CAP) {
@@ -1929,7 +1952,9 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           const raw = corrected.id === "grow"
             ? rawAll.filter((s) => CORE_SET.has(s.weexSymbol))
             : rawAll;
-          const busy = new Set(stillOpen.map((s) => s.weex_symbol));
+          const busy = new Set(
+            stillOpen.filter((s) => s.status === "filled").map((s) => s.weex_symbol),
+          );
           const betaBook = (weexBook ?? [])
             .filter((p) => {
               const sym = p.symbol.replace(/_/g, "").toUpperCase();
@@ -2031,6 +2056,14 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
               veto = `${pick.weexSymbol} ${pick.side} conf ${conf}% below ${bar.minConf}% bar`;
               continue;
             }
+            if (
+              parked &&
+              (parked.weex_symbol !== pick.weexSymbol || parked.side !== pick.side) &&
+              conf < n(parked.confidence) + 2
+            ) {
+              veto = `Parked ${parked.weex_symbol} ${n(parked.confidence)}% limit. ${pick.weexSymbol} ${conf}% not enough to replace.`;
+              continue;
+            }
             const timed0 = rules.withLtfEntry(pick, trig.pullback);
             const timed = trig.wait ? { ...timed0, entryType: "limit" as const } : timed0;
             sized = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
@@ -2040,6 +2073,27 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
           if (!sized || !spec) {
             notes.push(veto);
           } else {
+            if (parked && credsGate2) {
+              const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
+              if (parked.client_oid) {
+                await cancelWeexOrder(credsGate2, {
+                  symbol: parked.weex_symbol,
+                  clientOid: parked.client_oid,
+                }).catch(() => null);
+              }
+              await cancelWeexProtective(credsGate2, parked.weex_symbol).catch(() => null);
+              await sql`
+                update auto_signals
+                set status = 'skipped',
+                    close_reason = ${`Replaced by ${sized.weexSymbol} ${sized.side} ${sized.confidence}% ${sized.entryType}`},
+                    pnl = 0,
+                    updated_at = now()
+                where id = ${parked.id} and user_id = ${userId}
+              `;
+              notes.push(
+                `Replaced ${parked.weex_symbol} ${n(parked.confidence)}% limit with ${sized.weexSymbol} ${sized.side} ${sized.confidence}% ${sized.entryType}`,
+              );
+            }
             const [taken] = await sql<{ id: number }>`
               select id from auto_signals
               where user_id = ${userId}

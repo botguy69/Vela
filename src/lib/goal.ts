@@ -38,7 +38,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       style: "swing",
       maxOpen: 0,
       minRr: 2.2,
-      minConf: 74,
+      minConf: 78,
       method: "trend",
       note: "Goal printed. Stand down unless you raise the target.",
     };
@@ -51,7 +51,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       style: "swing",
       maxOpen: 0,
       minRr: 2,
-      minConf: 74,
+      minConf: 78,
       method: "trend",
       note: "Stage 2 printed ($10k). No new tickets. Re-evaluate, then tap Continue to $1M.",
     };
@@ -64,7 +64,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       style: "scalp",
       maxOpen: 4,
       minRr: 1.9,
-      minConf: 74,
+      minConf: 78,
       method: "trend",
       note: "Stage 1: full list. 2% margin. After TP1/BE, next ticket can open — up to 6 live.",
     };
@@ -77,9 +77,9 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       style: "scalp",
       maxOpen: 4,
       minRr: 1.9,
-      minConf: 74,
+      minConf: 78,
       method: "trend",
-      note: "Stage 1: 2% until three losses (then 1.2%). 2L+2S. Empty slots OK. 74%+. Shorts vs a long book only if that coin’s 15m fades BTC. Limits at the 15m mean cancel if unfilled.",
+      note: "Stage 1: 2% until three losses (then 1.2%). 2L+2S. One working limit. Replace it if a higher-conf setup is ready. 78%+ with volume/BB. Fade shorts only vs BTC.",
     };
   }
   return {
@@ -89,7 +89,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
     style: "scalp",
     maxOpen: 2,
     minRr: 1.9,
-    minConf: 70,
+    minConf: 78,
     method: "trend",
     note: "Stage 2: $1k → $10k. Same 2% / 1.2% size rules. Majors only. Stop at $10k.",
   };

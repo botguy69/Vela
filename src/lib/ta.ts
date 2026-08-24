@@ -70,6 +70,13 @@ export function scoreToConf(score: number): number {
   return Math.round(Math.min(86, Math.max(58, score)));
 }
 
+function stdev(values: number[]): number {
+  if (values.length < 2) return 0;
+  const m = values.reduce((s, x) => s + x, 0) / values.length;
+  const v = values.reduce((s, x) => s + (x - m) ** 2, 0) / values.length;
+  return Math.sqrt(v);
+}
+
 export function weexSymbol(id: MarketId | string): string {
   return String(id).includes("USDT") ? String(id) : String(id).replace("-USD", "USDT").replace("-", "");
 }
@@ -95,6 +102,13 @@ export function analyzeMarket(
   const up = mid > (slow ?? mid) && last > mid;
   const down = mid < (slow ?? mid) && last < mid;
   const stopPad = style === "scalp" ? 1.15 : 2.1;
+  const lastBar = hourly[hourly.length - 1]!;
+  const vols = hourly.slice(-20).map((c) => c.volume).filter((v) => v > 0).sort((x, y) => x - y);
+  const medVol = vols.length ? vols[Math.floor(vols.length / 2)]! : 0;
+  const volRatio = medVol > 0 ? lastBar.volume / medVol : 1;
+  const sd = stdev(closes.slice(-20));
+  const bbUpper = mid + 2 * sd;
+  const bbLower = mid - 2 * sd;
 
   type Idea = {
     side: Side;
@@ -214,11 +228,8 @@ export function analyzeMarket(
     });
   }
 
-  const lastBar = hourly[hourly.length - 1]!;
   const lastRange = lastBar.high - lastBar.low;
   const exhausted = lastRange > 2.15 * a;
-  const vols = hourly.slice(-20).map((c) => c.volume).filter((v) => v > 0).sort((x, y) => x - y);
-  const medVol = vols.length ? vols[Math.floor(vols.length / 2)]! : 0;
   const thinBreak = medVol > 0 && lastBar.volume < 0.75 * medVol;
 
   const rAgo = rsi(closes.slice(0, -4), 14);
@@ -320,9 +331,20 @@ export function analyzeMarket(
     const target = targets[targets.length - 1]!;
     const rr = Math.abs(target - best.entry) / risk;
     if (rr < minRr) return null;
-    const conf = scoreToConf(best.score);
+    if (best.side === "long" && last > bbUpper * 1.001) return null;
+    if (best.side === "short" && last < bbLower * 0.999) return null;
+    if (volRatio < 0.7 && best.score < 82) return null;
+    const volThrust =
+      volRatio >= 1.15 &&
+      ((best.side === "long" && lastBar.close >= lastBar.open) ||
+        (best.side === "short" && lastBar.close <= lastBar.open));
+    let score = best.score;
+    if (volThrust) score += 5;
+    if (volRatio < 0.9) score -= 4;
+    if (score < 76) return null;
+    const conf = scoreToConf(score);
     const planTag = best.plan === "scale2" ? "hold" : best.plan === "scale3" ? "break" : "fade";
-    const thesis = `${best.side} ${planTag} · RSI ${r.toFixed(0)} · ${rr.toFixed(1)}R · conf ${conf}% · ${best.thesis}`;
+    const thesis = `${best.side} ${planTag} · RSI ${r.toFixed(0)} · vol ${volRatio.toFixed(1)}× · ${rr.toFixed(1)}R · conf ${conf}% · ${best.thesis}`;
     return {
       symbol,
       weexSymbol: weexSymbol(symbol),
@@ -336,7 +358,7 @@ export function analyzeMarket(
       scale,
       plan: best.plan,
       rr,
-      score: best.score,
+      score,
       confidence: conf,
       thesis,
       invalidation: best.invalidation,
