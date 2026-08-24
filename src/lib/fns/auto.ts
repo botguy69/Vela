@@ -1741,6 +1741,15 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     };
     const riskL = countAtRisk("long");
     const riskS = countAtRisk("short");
+    notes.push(
+      `WEEX ${riskL}L/${riskS}S: ${
+        liveN.length
+          ? liveN
+              .map((p) => `${p.symbol.replace(/_/g, "").toUpperCase()} ${(p.side === "short" ? "short" : "long")}${beNames.has(p.symbol.replace(/_/g, "").toUpperCase()) ? " BE" : ""}`)
+              .join(", ")
+          : "flat"
+      }.`,
+    );
     const credsGate2 = await credsFrom(settings);
     if (credsGate2) {
       const filledSym = new Set(
@@ -1880,7 +1889,7 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
             if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side }, { diverges })) {
               const held = betaBook.find((p) => p.side === pick.side);
               veto = held
-                ? `${held.weex} already ${held.side} (beta ${rules.sameSideBeta(betaBook, pick.side).toFixed(2)}). ${pick.weexSymbol} tracking BTC — 2nd ${pick.side} needs a diverge or TP1/BE.`
+                ? `WEEX ${riskL}L/${riskS}S (${held.weex} ${held.side}). ${pick.weexSymbol} is a 3rd same-way beta — need diverge or TP1/BE on one first.`
                 : "Same-way beta is full.";
               continue;
             }

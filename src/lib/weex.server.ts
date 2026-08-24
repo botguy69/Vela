@@ -242,10 +242,12 @@ function parsePosition(row: unknown): { symbol: string; side: "long" | "short"; 
     ),
   );
   if (!symbol || !Number.isFinite(q) || q <= 0) return null;
-  const sideRaw = String(r.positionSide ?? r.holdSide ?? r.side ?? "").toLowerCase();
+  const sideRaw = String(r.positionSide ?? r.holdSide ?? r.side ?? r.posSide ?? "").toLowerCase();
   const amt = Number(r.positionAmt);
   const side: "long" | "short" =
-    sideRaw.includes("short") || amt < 0 ? "short" : "long";
+    sideRaw.includes("short") || sideRaw === "sell" || sideRaw === "2" || amt < 0
+      ? "short"
+      : "long";
   const entry = Number(
     r.entryPrice ??
       r.openPriceAvg ??
@@ -285,7 +287,15 @@ export async function listWeexPositions(
     if (!res.ok) continue;
     sawOk = true;
     const parsed = rowsFrom(res.data).map(parsePosition).filter((x): x is NonNullable<typeof x> => x != null);
-    if (parsed.length) return parsed;
+    if (parsed.length) {
+      const uniq = new Map<string, (typeof parsed)[number]>();
+      for (const p of parsed) {
+        const k = `${p.symbol}|${p.side}`;
+        const prev = uniq.get(k);
+        if (!prev || p.qty > prev.qty) uniq.set(k, p);
+      }
+      return [...uniq.values()];
+    }
   }
   return sawOk ? [] : null;
 }

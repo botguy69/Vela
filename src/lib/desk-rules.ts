@@ -22,8 +22,8 @@ export function ema(values: number[], period: number): number | null {
   return e;
 }
 
-/** Soft cap: two 0.9-beta clones same way is one BTC bet twice. TON-weight or a real diverge still allowed. */
-export const BETA_SOFT = 1.25;
+/** Two same-side tickets is the cap. Don't treat a 2nd alt as a 3rd BTC clone. */
+export const BETA_SOFT = 2.05;
 
 export function sameSideBeta(open: { weex: string; side: Side }[], side: Side): number {
   return open.filter((p) => p.side === side).reduce((s, p) => s + betaWeight(p.weex), 0);
@@ -34,14 +34,13 @@ export function blocksBeta(
   next: { weex: string; side: Side },
   opts?: { diverges?: boolean },
 ): boolean {
-  const same = open.filter((p) => p.side === next.side);
+  const same = open.filter((p) => p.side === next.side && p.weex !== next.weex);
   if (same.length >= 2) return true;
   if (same.length === 0) return false;
-  const sum = sameSideBeta(open, next.side) + betaWeight(next.weex);
-  if (sum <= BETA_SOFT) return false;
   if (opts?.diverges) return false;
   if (betaWeight(next.weex) <= 0.3) return false;
-  return true;
+  const sum = sameSideBeta(same, next.side) + betaWeight(next.weex);
+  return sum > BETA_SOFT;
 }
 
 export function sma(values: number[], period: number): number | null {
