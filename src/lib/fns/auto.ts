@@ -1051,6 +1051,15 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     const rules = await import("@/lib/desk-rules");
     const sql = await getSql();
     await ensureSettings(sql, userId);
+    try {
+      await sql`
+        update auto_settings
+        set last_tick_at = now(), last_tick_note = ${"Tick running…"}, updated_at = now()
+        where user_id = ${userId}
+      `;
+    } catch {
+      /* ignore */
+    }
     const [settings] = await sql<SettingsRow>`select * from auto_settings where user_id = ${userId}`;
     if (!settings) throw new Error("No auto desk");
     const pulled = await pullWeexBook(settings);

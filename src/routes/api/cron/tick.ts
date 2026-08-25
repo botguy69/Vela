@@ -42,13 +42,51 @@ async function handle(request: Request) {
     const { executeAutoTick } = await import("@/lib/fns/auto");
     const sql = await getSql();
     const rows = await sql<{ user_id: string }>`select user_id from auto_settings where armed = true`;
-    void Promise.allSettled(rows.map((row) => executeAutoTick(row.user_id))).catch(() => null);
+    if (!rows.length) {
+      try {
+        await sql`
+          update auto_settings
+          set last_tick_note = ${"Cron awake. Disarmed — no hunt."},
+              last_tick_at = now(),
+              updated_at = now()
+          where keep_alive = true
+        `;
+      } catch {
+        /* ignore */
+      }
+      return cors({ ok: true, awake: true, ticked: 0, note: "disarmed" });
+    }
+    const notes: string[] = [];
+    for (const row of rows) {
+      try {
+        const ran = await Promise.race([
+          executeAutoTick(row.user_id),
+          new Promise<{ opened: number; closed: number; note: string }>((resolve) =>
+            setTimeout(() => resolve({ opened: 0, closed: 0, note: "tick timeout 50s" }), 50_000),
+          ),
+        ]);
+        notes.push(ran.note.slice(0, 80));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message.slice(0, 180) : "tick failed";
+        notes.push(msg);
+        try {
+          await sql`
+            update auto_settings
+            set last_tick_at = now(), last_tick_note = ${msg}, updated_at = now()
+            where user_id = ${row.user_id}
+          `;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
     return cors({
       ok: true,
       awake: true,
       ticked: rows.length,
       kicked: true,
       at: new Date().toISOString(),
+      note: notes[0] ?? "",
     });
   } catch (err) {
     return cors({
