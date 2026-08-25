@@ -1625,7 +1625,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           await sql`update auto_signals set tp1_hit = true, updated_at = now() where id = ${pos.id} and user_id = ${userId}`;
         }
         const hourly = await getWeexKlines(pos.weex_symbol, "1h", 40).catch(() => []);
-        const next = rules.trailStop({ side, entry, stop, hourly });
+        const fifteenTrail = await getWeexKlines(pos.weex_symbol, "15m", 48).catch(() => []);
+        const next = rules.trailStop({ side, entry, stop, hourly, fifteen: fifteenTrail });
         if (next != null) {
           const creds = await credsFrom(settings);
           if (creds) {
@@ -2156,6 +2157,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             btcRsi = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
           }
           const btc15 = await getWeexKlines("BTCUSDT", "15m", 48).catch(() => []);
+          const btc4 = await getWeexFourHour("BTCUSDT").catch(() => []);
+          const compass = rules.marketBias(btc4, btcBook, btc15);
           const ordered = [...raw].sort(
             (a, b) => (b.confidence ?? b.score) - (a.confidence ?? a.score),
           );
@@ -2193,6 +2196,17 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const diverges = rules.divergesFromBtc(pick.side, coin15, btc15);
+            if (compass.bias !== "chop") {
+              if (pick.side !== compass.bias && !diverges) {
+                veto = `${pick.weexSymbol} ${pick.side} vs BTC ${compass.bias} — not fading`;
+                whyNot.push(`${tag} vs BTC ${compass.bias}`);
+                continue;
+              }
+            } else if (!diverges) {
+              veto = `${pick.weexSymbol} ${pick.side} — BTC chop, coin not fading`;
+              whyNot.push(`${tag} BTC chop`);
+              continue;
+            }
             if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side }, { diverges })) {
               const same = betaBook.find((p) => p.side === pick.side);
               veto = same
@@ -2201,11 +2215,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} 2 already on that side`);
               continue;
             }
-            const marketLong = rules.btcLeads("long", btc15) || riskL > 0;
-            const marketShort = rules.btcLeads("short", btc15) || riskS > 0;
             const fadeVsBook =
-              (pick.side === "short" && marketLong && !marketShort) ||
-              (pick.side === "long" && marketShort && !marketLong);
+              (pick.side === "short" && compass.bias === "long") ||
+              (pick.side === "long" && compass.bias === "short");
             if (fadeVsBook && !diverges) {
               veto = `${pick.weexSymbol} ${pick.side} skipped — BTC/book is the other way, coin 15m not fading`;
               whyNot.push(`${tag} not fading BTC`);
@@ -2270,6 +2282,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
           huntTape = [
             huntStatus,
+            compass.note,
             sized
               ? `Took ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% ${sized.entryType}.`
               : "Stood down this pass — nothing cleared the bar.",

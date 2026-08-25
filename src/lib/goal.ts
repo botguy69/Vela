@@ -142,13 +142,12 @@ export function adaptMethod(opts: {
   const wr = opts.closed >= 5 ? opts.wins / opts.closed : 1;
 
   if (opts.closed >= 12 && wr < 0.35) {
-    if (next.method === "vela") {
-      next = { ...next, method: "trend", minRr: Math.max(next.minRr, 1.9), note: "First method missed. Rotating to trend-only, still 1–2% margin at coin max." };
-    } else if (next.method === "trend" && wr < 0.3 && opts.closed >= 18) {
-      next = { ...next, method: "fade", style: "scalp", note: "Trend wasn't paying. Trying mean-reversion fades. Same margin box." };
-    } else if (next.method === "fade" && wr < 0.3 && opts.closed >= 24) {
-      next = { ...next, method: "break", style: "scalp", note: "Fades missed. Trying range breaks only. Still 1–2% at max leverage." };
-    }
+    next = {
+      ...next,
+      minRr: Math.max(next.minRr, 2.1),
+      minConf: Math.min(84, next.minConf + 2),
+      note: `${next.note} WR weak — same trend playbook, higher bar. No method flip.`,
+    };
   }
 
   next = { ...next, marginPct: 2 };

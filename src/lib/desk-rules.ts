@@ -118,6 +118,37 @@ export function divergesFromBtc(side: Side, coin15: Candle[], btc15: Candle[]): 
   return coinWith && !btcWith;
 }
 
+/** Live tape, not last week's P&L. 4h+1h agree = bias. Mixed = chop. */
+export function marketBias(
+  fourHour: Candle[],
+  hourly: Candle[],
+  fifteen: Candle[],
+): { bias: "long" | "short" | "chop"; note: string } {
+  const h4L = htfAllows("long", fourHour);
+  const h4S = htfAllows("short", fourHour);
+  const h1L = htfAllows("long", hourly);
+  const h1S = htfAllows("short", hourly);
+  if (h4L && h1L) {
+    const ltf = ltfAllows("long", fifteen);
+    return {
+      bias: "long",
+      note: ltf
+        ? "BTC 4h+1h+15m bid — longs only unless a coin is fading."
+        : "BTC 4h+1h bid, 15m pausing — longs on pullback, shorts only if a coin fades.",
+    };
+  }
+  if (h4S && h1S) {
+    const ltf = ltfAllows("short", fifteen);
+    return {
+      bias: "short",
+      note: ltf
+        ? "BTC 4h+1h+15m offer — shorts only unless a coin is fading."
+        : "BTC 4h+1h offer, 15m pausing — shorts on bounce, longs only if a coin fades.",
+    };
+  }
+  return { bias: "chop", note: "BTC 4h/1h mixed — no new tickets unless a coin clearly fades BTC." };
+}
+
 /** Snap limit to the 15m mean. Stop / targets stay — breathing room is unchanged. */
 export function withLtfEntry(setup: RawSetup, pullback: number | null): RawSetup {
   if (pullback == null || !(pullback > 0)) return setup;
@@ -213,17 +244,19 @@ export function trailStop(opts: {
   entry: number;
   stop: number;
   hourly: Candle[];
+  fifteen?: Candle[];
 }): number | null {
-  const a = atr(opts.hourly, 14);
-  if (a == null || a <= 0 || opts.hourly.length < 8) return null;
-  const slice = opts.hourly.slice(-8);
+  const book =
+    opts.fifteen && opts.fifteen.length >= 12 ? opts.fifteen.slice(-12) : opts.hourly.slice(-8);
+  const a = atr(opts.fifteen && opts.fifteen.length >= 16 ? opts.fifteen : opts.hourly, 14);
+  if (a == null || a <= 0 || book.length < 6) return null;
   const be = breakevenPrice(opts.side, opts.entry);
   if (opts.side === "long") {
-    const floor = Math.min(...slice.map((c) => c.low)) - 0.15 * a;
+    const floor = Math.min(...book.map((c) => c.low)) - 0.12 * a;
     const next = Math.max(opts.stop, floor, be);
     return next > opts.stop * 1.0002 ? next : null;
   }
-  const ceil = Math.max(...slice.map((c) => c.high)) + 0.15 * a;
+  const ceil = Math.max(...book.map((c) => c.high)) + 0.12 * a;
   const next = Math.min(opts.stop, ceil, be);
   return next < opts.stop * 0.9998 ? next : null;
 }
@@ -289,11 +322,9 @@ function bucket(map: Map<string, PlanRecord>, key: string, pnl: number) {
 export function buildLedger(rows: ClosedTicket[]): Ledger {
   const plans = new Map<string, PlanRecord>();
   const symbols = new Map<string, PlanRecord>();
-  const sides = new Map<string, PlanRecord>();
   for (const r of rows) {
     bucket(plans, r.plan || "vela", r.pnl);
     if (r.weex) bucket(symbols, r.weex, r.pnl);
-    if (r.side) bucket(sides, r.side, r.pnl);
   }
   const skipPlans = new Set<string>();
   for (const p of plans.values()) {
@@ -309,17 +340,11 @@ export function buildLedger(rows: ClosedTicket[]): Ledger {
   if (best && best.pnl > 0 && best.closed >= 4) bits.push(`keeping ${best.plan} ($${best.pnl.toFixed(1)})`);
   if (worst && skipPlans.has(worst.plan)) bits.push(`killed ${worst.plan}`);
   if (skipSymbols.size) bits.push(`skip ${[...skipSymbols].slice(0, 3).join(", ")}`);
-  const long = sides.get("long");
-  const short = sides.get("short");
-  if (long && short && long.closed >= 4 && short.closed >= 4) {
-    if (long.pnl > short.pnl + 1) bits.push("favor longs");
-    if (short.pnl > long.pnl + 1) bits.push("favor shorts");
-  }
   return {
     plans: [...plans.values()],
     skipPlans,
     skipSymbols,
-    note: bits.length ? `Learned: ${bits.join("; ")}.` : "Learning: not enough closes yet (needs 6–8 per setup).",
+    note: bits.length ? `Setups: ${bits.join("; ")}.` : "Side is from BTC 4h+1h this tick, not last week's P&L.",
   };
 }
 
