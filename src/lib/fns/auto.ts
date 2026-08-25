@@ -794,15 +794,19 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     const { ticketPnl } = await import("@/lib/ta");
     const lastBy = new Map<string, number>();
     const leftBy = new Map<string, number>();
+    const posBy = new Map<string, { qty: number; entry: number; pnl: number | null; mark: number; side: "long" | "short" }>();
     if (settings) {
       const bookOk = livePos != null;
       for (const p of livePos ?? []) {
+        const key = p.symbol.replace(/_/g, "").toUpperCase();
         leftBy.set(p.symbol, p.qty);
-        leftBy.set(p.symbol.replace(/_/g, "").toUpperCase(), p.qty);
+        leftBy.set(key, p.qty);
+        posBy.set(`${key}|${p.side}`, p);
       }
       for (const t of mapped) {
         const key = t.weexSymbol.replace(/_/g, "").toUpperCase();
-        const left = leftBy.get(t.weexSymbol) ?? leftBy.get(key);
+        const pos = posBy.get(`${key}|${t.side}`);
+        const left = pos?.qty ?? leftBy.get(t.weexSymbol) ?? leftBy.get(key);
         if (left != null && left > 0 && (t.status === "working" || t.status === "filled" || t.status === "proposed")) {
           t.liveOnWeex = true;
         } else if (bookOk) {
@@ -814,27 +818,33 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     }
     for (const t of mapped) {
       const key = t.weexSymbol.replace(/_/g, "").toUpperCase();
-      const left = leftBy.get(t.weexSymbol) ?? leftBy.get(key);
+      const pos = posBy.get(`${key}|${t.side}`);
+      const left = pos?.qty ?? leftBy.get(t.weexSymbol) ?? leftBy.get(key);
       if (t.status === "working" && !t.liveOnWeex) {
         t.pnl = null;
         continue;
       }
       if (t.status !== "filled" && t.status !== "working") continue;
-      if (!lastBy.has(t.weexSymbol)) {
+      if (pos && pos.pnl != null && Number.isFinite(pos.pnl)) {
+        t.pnl = pos.pnl;
+        continue;
+      }
+      const mark = pos?.mark && pos.mark > 0 ? pos.mark : 0;
+      if (!mark && !lastBy.has(t.weexSymbol)) {
         try {
           lastBy.set(t.weexSymbol, await getWeexLast(t.weexSymbol));
         } catch {
           lastBy.set(t.weexSymbol, 0);
         }
       }
-      const last = lastBy.get(t.weexSymbol) ?? 0;
-      const entry = t.fillPx ?? t.entry;
+      const last = mark || lastBy.get(t.weexSymbol) || 0;
+      const entry = (pos?.entry && pos.entry > 0 ? pos.entry : 0) || t.fillPx || t.entry;
       if (last > 0 && entry > 0) {
         t.pnl = ticketPnl({
           side: t.side,
           entry,
           last,
-          qty: t.qty,
+          qty: pos?.qty || t.qty,
           leftover: left ?? null,
           targets: t.targets,
           beMoved: t.beMoved,
@@ -1033,6 +1043,29 @@ export const markCronHit = createServerFn({ method: "POST" }).handler(async () =
 });
 
 export async function executeAutoTick(userId: string): Promise<{ opened: number; closed: number; note: string }> {
+  try {
+    return await executeAutoTickBody(userId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const note = /auto_signals_one_open|unique/i.test(msg)
+      ? "Already one ticket on that pair — skipped duplicate."
+      : msg.slice(0, 180);
+    try {
+      const { getSql } = await import("@/lib/db");
+      const sql = await getSql();
+      await sql`
+        update auto_settings
+        set last_tick_at = now(), last_tick_note = ${note}, updated_at = now()
+        where user_id = ${userId}
+      `;
+    } catch {
+      /* ignore */
+    }
+    return { opened: 0, closed: 0, note };
+  }
+}
+
+async function executeAutoTickBody(userId: string): Promise<{ opened: number; closed: number; note: string }> {
     const { getSql } = await import("@/lib/db");
     const {
       getWeexLast,

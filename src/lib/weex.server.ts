@@ -207,7 +207,14 @@ export async function getWeexEquity(creds: WeexCreds): Promise<
   return { ok: false, error: "WEEX answered but no USDT futures row. Deposit USDT to futures, not spot.", status: 200 };
 }
 
-function parsePosition(row: unknown): { symbol: string; side: "long" | "short"; qty: number; entry: number } | null {
+function parsePosition(row: unknown): {
+  symbol: string;
+  side: "long" | "short";
+  qty: number;
+  entry: number;
+  pnl: number | null;
+  mark: number;
+} | null {
   if (!row || typeof row !== "object") return null;
   const r = row as {
     symbol?: string;
@@ -225,6 +232,12 @@ function parsePosition(row: unknown): { symbol: string; side: "long" | "short"; 
     entryPrice?: string | number;
     openPriceAvg?: string | number;
     averagePrice?: string | number;
+    unrealizedPnl?: string | number;
+    unrealizePnl?: string | number;
+    upl?: string | number;
+    profit?: string | number;
+    markPrice?: string | number;
+    marketPrice?: string | number;
   };
   const symbol = String(r.symbol ?? r.contract ?? "")
     .replace(/_/g, "")
@@ -257,7 +270,24 @@ function parsePosition(row: unknown): { symbol: string; side: "long" | "short"; 
         ? Number((r as { openValue?: string | number }).openValue) / q
         : 0),
   );
-  return { symbol, side, qty: q, entry: Number.isFinite(entry) ? entry : 0 };
+  const rawPnl = Number(
+    r.unrealizedPnl ??
+      r.unrealizePnl ??
+      r.upl ??
+      (r as { floatProfit?: string | number }).floatProfit ??
+      (r as { achievedProfits?: string | number }).achievedProfits ??
+      r.profit,
+  );
+  const mark = Number(r.markPrice ?? r.marketPrice ?? 0);
+  if (Number.isFinite(entry) && entry > 0 && q * entry < 0.2) return null;
+  return {
+    symbol,
+    side,
+    qty: q,
+    entry: Number.isFinite(entry) ? entry : 0,
+    pnl: Number.isFinite(rawPnl) ? rawPnl : null,
+    mark: Number.isFinite(mark) ? mark : 0,
+  };
 }
 
 function positionQtyFrom(raw: unknown, symbol: string): number | null {
@@ -270,7 +300,7 @@ function positionQtyFrom(raw: unknown, symbol: string): number | null {
 
 export async function listWeexPositions(
   creds: WeexCreds,
-): Promise<{ symbol: string; side: "long" | "short"; qty: number; entry: number }[] | null> {
+): Promise<{ symbol: string; side: "long" | "short"; qty: number; entry: number; pnl: number | null; mark: number }[] | null> {
   const paths = [
     { path: "/capi/v3/account/position/allPosition", query: undefined as Record<string, string> | undefined },
     { path: "/capi/v3/account/position/singlePosition", query: undefined },
@@ -283,21 +313,24 @@ export async function listWeexPositions(
     { path: "/capi/v2/account/positions", query: undefined },
   ];
   let sawOk = false;
+  const uniq = new Map<
+    string,
+    { symbol: string; side: "long" | "short"; qty: number; entry: number; pnl: number | null; mark: number }
+  >();
   for (const p of paths) {
     const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
     if (!res.ok) continue;
     sawOk = true;
     const parsed = rowsFrom(res.data).map(parsePosition).filter((x): x is NonNullable<typeof x> => x != null);
-    if (parsed.length) {
-      const uniq = new Map<string, (typeof parsed)[number]>();
-      for (const p of parsed) {
-        const k = `${p.symbol}|${p.side}`;
-        const prev = uniq.get(k);
-        if (!prev || p.qty > prev.qty) uniq.set(k, p);
+    for (const pos of parsed) {
+      const k = `${pos.symbol}|${pos.side}`;
+      const prev = uniq.get(k);
+      if (!prev || pos.qty > prev.qty || (pos.pnl != null && prev.pnl == null)) {
+        uniq.set(k, prev && pos.qty < prev.qty ? { ...prev, pnl: pos.pnl ?? prev.pnl, mark: pos.mark || prev.mark } : pos);
       }
-      return [...uniq.values()];
     }
   }
+  if (uniq.size) return [...uniq.values()];
   return sawOk ? [] : null;
 }
 
