@@ -783,10 +783,57 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       settings.peak_usd = peak;
     }
     const stats = await closedStats(sql, context.userId, settings?.stats_from);
-    const signals = await sql<SignalRow>`
-      select * from auto_signals where user_id = ${context.userId}
-      order by created_at desc limit 80
+    const byId = new Map<number, SignalRow>();
+    const openRows = await sql<SignalRow>`
+      select * from auto_signals
+      where user_id = ${context.userId} and status in ('proposed','working','filled')
+      order by created_at desc
     `;
+    for (const r of openRows) byId.set(r.id, r);
+    for (const p of livePos ?? []) {
+      const key = p.symbol.replace(/_/g, "").toUpperCase();
+      const side = p.side === "short" ? "short" : "long";
+      const hit = await sql<SignalRow>`
+        select * from auto_signals
+        where user_id = ${context.userId}
+          and weex_symbol = ${key}
+          and side = ${side}
+        order by updated_at desc
+        limit 1
+      `;
+      const row = hit[0] ?? (
+        await sql<SignalRow>`
+          select * from auto_signals
+          where user_id = ${context.userId}
+            and weex_symbol = ${key}
+          order by updated_at desc
+          limit 1
+        `
+      )[0];
+      if (row) byId.set(row.id, row);
+    }
+    const closedRows = await sql<SignalRow>`
+      select * from auto_signals
+      where user_id = ${context.userId}
+        and status in ('stopped','targeted','skipped')
+        and (
+          close_reason is null
+          or (
+            close_reason not like 'Replaced by%'
+            and close_reason not like 'Cancelled —%'
+            and close_reason not like 'Duplicate%'
+            and close_reason not like 'Stale claim%'
+          )
+        )
+      order by updated_at desc
+      limit 25
+    `;
+    for (const r of closedRows) if (!byId.has(r.id)) byId.set(r.id, r);
+    const signals = [...byId.values()].sort((a, b) => {
+      const ta = new Date(a.updated_at ?? a.created_at).getTime();
+      const tb = new Date(b.updated_at ?? b.created_at).getTime();
+      return tb - ta;
+    });
     const mapped = signals
       .filter((r) => !(r.close_reason ?? "").startsWith("Duplicate"))
       .map(mapSignal);
@@ -800,9 +847,10 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       const bookOk = livePos != null;
       for (const p of livePos ?? []) {
         const key = p.symbol.replace(/_/g, "").toUpperCase();
+        const side = p.side === "short" ? "short" : "long";
         leftBy.set(p.symbol, p.qty);
         leftBy.set(key, p.qty);
-        posBy.set(`${key}|${p.side}`, p);
+        posBy.set(`${key}|${side}`, { ...p, side });
       }
       for (const t of mapped) {
         const key = t.weexSymbol.replace(/_/g, "").toUpperCase();
