@@ -24,7 +24,7 @@ async function handle(request: Request) {
     }
 
     const src = new URL(request.url).searchParams.get("src") ?? "cron";
-    const { ensureAutoLoop } = await import("@/lib/auto-loop.server");
+    const { ensureAutoLoop, kickArmedTicks } = await import("@/lib/auto-loop.server");
     ensureAutoLoop();
 
     try {
@@ -38,56 +38,42 @@ async function handle(request: Request) {
       return cors({ ok: true, awake: true, ticked: 0, note: "awake" });
     }
 
-    const { getSql } = await import("@/lib/db");
-    const { executeAutoTick } = await import("@/lib/fns/auto");
-    const sql = await getSql();
-    const rows = await sql<{ user_id: string }>`select user_id from auto_settings where armed = true`;
-    if (!rows.length) {
-      try {
-        await sql`
-          update auto_settings
-          set last_tick_note = ${"Cron awake. Disarmed — no hunt."},
-              last_tick_at = now(),
-              updated_at = now()
-          where keep_alive = true
-        `;
-      } catch {
-        /* ignore */
-      }
-      return cors({ ok: true, awake: true, ticked: 0, note: "disarmed" });
-    }
-    const notes: string[] = [];
-    for (const row of rows) {
-      try {
-        const ran = await Promise.race([
-          executeAutoTick(row.user_id),
-          new Promise<{ opened: number; closed: number; note: string }>((resolve) =>
-            setTimeout(() => resolve({ opened: 0, closed: 0, note: "tick timeout 50s" }), 50_000),
-          ),
-        ]);
-        notes.push(ran.note.slice(0, 80));
-      } catch (err) {
-        const msg = err instanceof Error ? err.message.slice(0, 180) : "tick failed";
-        notes.push(msg);
+    try {
+      const { getSql } = await import("@/lib/db");
+      const sql = await getSql();
+      const rows = await sql<{ user_id: string }>`select user_id from auto_settings where armed = true`;
+      if (!rows.length) {
         try {
           await sql`
             update auto_settings
-            set last_tick_at = now(), last_tick_note = ${msg}, updated_at = now()
-            where user_id = ${row.user_id}
+            set last_tick_note = ${"Cron awake. Disarmed — no hunt."},
+                last_tick_at = now(),
+                updated_at = now()
+            where keep_alive = true
           `;
         } catch {
           /* ignore */
         }
+        return cors({ ok: true, awake: true, ticked: 0, note: "disarmed" });
       }
+      void kickArmedTicks();
+      return cors({
+        ok: true,
+        awake: true,
+        ticked: rows.length,
+        kicked: true,
+        at: new Date().toISOString(),
+      });
+    } catch (err) {
+      void kickArmedTicks();
+      return cors({
+        ok: true,
+        awake: true,
+        ticked: 0,
+        kicked: true,
+        note: err instanceof Error ? err.message.slice(0, 120) : "kicked",
+      });
     }
-    return cors({
-      ok: true,
-      awake: true,
-      ticked: rows.length,
-      kicked: true,
-      at: new Date().toISOString(),
-      note: notes[0] ?? "",
-    });
   } catch (err) {
     return cors({
       ok: true,

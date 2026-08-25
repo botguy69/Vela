@@ -1,13 +1,16 @@
 /**
- * Process-local loop. Ticks every armed book while this Node process is up.
- * On Oracle (VELA_WORKER=1) it starts at boot. Preview only runs while awake.
+ * Process-local loop. One hunt at a time. Cron returns 200 immediately and
+ * this keeps the tick alive after the HTTP response so cron-job.org does not
+ * time out and send “successfully started up” spam.
  */
-const globalRef = globalThis as typeof globalThis & { __velaAutoLoop__?: boolean };
+const globalRef = globalThis as typeof globalThis & {
+  __velaAutoLoop__?: boolean;
+  __velaTicking__?: Promise<unknown>;
+};
 
-export function ensureAutoLoop() {
-  if (globalRef.__velaAutoLoop__) return;
-  globalRef.__velaAutoLoop__ = true;
-  const beat = async () => {
+export function kickArmedTicks(): Promise<unknown> {
+  if (globalRef.__velaTicking__) return globalRef.__velaTicking__;
+  globalRef.__velaTicking__ = (async () => {
     try {
       const { getSql } = await import("@/lib/db");
       const { executeAutoTick } = await import("@/lib/fns/auto");
@@ -24,10 +27,18 @@ export function ensureAutoLoop() {
       }
     } catch (err) {
       console.warn("[auto-loop]", err);
+    } finally {
+      globalRef.__velaTicking__ = undefined;
     }
-  };
-  void beat();
-  setInterval(() => void beat(), 20_000);
+  })();
+  return globalRef.__velaTicking__;
+}
+
+export function ensureAutoLoop() {
+  if (globalRef.__velaAutoLoop__) return;
+  globalRef.__velaAutoLoop__ = true;
+  void kickArmedTicks();
+  setInterval(() => void kickArmedTicks(), 20_000);
 }
 
 if (typeof window === "undefined" && process.env.VELA_WORKER === "1") {
