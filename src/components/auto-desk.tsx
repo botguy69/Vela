@@ -264,7 +264,8 @@ function TicketsTable({
   );
   const history = signals.filter((t) => {
     if (open.includes(t)) return false;
-    if ((t.closeReason ?? "").startsWith("Duplicate")) return false;
+    const why = t.closeReason ?? "";
+    if (why.startsWith("Duplicate") || why.startsWith("Replaced by") || why.startsWith("Cancelled —")) return false;
     if (t.status === "proposed" || t.status === "error") return false;
     return t.status === "stopped" || t.status === "targeted" || t.status === "skipped" || Boolean(t.closeReason);
   });

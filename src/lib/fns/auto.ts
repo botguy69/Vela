@@ -1919,8 +1919,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           !beNames.has(p.symbol.replace(/_/g, "").toUpperCase()),
       ).length;
       const fromDb = dbFilled.filter((s) => (s.side === "short" ? "short" : "long") === side).length;
+      const fromWorking = stillOpenRaw.filter(
+        (s) =>
+          (s.status === "working" || s.status === "proposed") &&
+          (s.side === "short" ? "short" : "long") === side,
+      ).length;
       const filled = weexBook == null ? fromDb : fromLive;
-      return filled;
+      return filled + fromWorking;
     };
     const riskL = countAtRisk("long");
     const riskS = countAtRisk("short");
@@ -1999,6 +2004,22 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         notes.push(`${row.weex_symbol} extra limit cancelled — one parked ticket only`);
       }
       parked = leftoverWorking[0] ?? null;
+      if (parked) {
+        const stale = await sql<{ client_oid: string | null; weex_symbol: string }>`
+          select client_oid, weex_symbol from auto_signals
+          where user_id = ${userId}
+            and weex_symbol = ${parked.weex_symbol}
+            and status = 'skipped'
+            and client_oid is not null
+            and client_oid <> ${parked.client_oid ?? ""}
+            and close_reason like ${"Replaced by%"}
+            and updated_at > now() - interval '3 days'
+        `;
+        for (const row of stale) {
+          if (!row.client_oid) continue;
+          await cancelWeexOrder(credsGate2, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
+        }
+      }
     }
 
     if (riskL >= SIDE_CAP && riskS >= SIDE_CAP) {
@@ -2158,6 +2179,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} below ${bar.minConf}%`);
               continue;
             }
+            if (parked && parked.weex_symbol === pick.weexSymbol && parked.side === pick.side) {
+              whyNot.push(`${tag} already parked — leave the limit`);
+              continue;
+            }
             if (
               parked &&
               (parked.weex_symbol !== pick.weexSymbol || parked.side !== pick.side) &&
@@ -2192,6 +2217,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
           if (!sized || !spec) {
             notes.push(veto);
+          } else if (parked && parked.weex_symbol === sized.weexSymbol && parked.side === sized.side) {
+            notes.push(`Keep parked ${parked.weex_symbol} limit — not re-placing the same pair.`);
           } else {
             if (parked && credsGate2) {
               const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
