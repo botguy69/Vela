@@ -269,7 +269,7 @@ function TicketsTable({
     if (t.status === "proposed" || t.status === "error") return false;
     return t.status === "stopped" || t.status === "targeted" || t.status === "skipped" || Boolean(t.closeReason);
   });
-  const fill = Math.max(0, 10 - open.length);
+  const fill = 10;
   const recent = history.slice(0, fill);
   const older = history.slice(fill);
   const rows = [...open, ...recent];
@@ -282,6 +282,7 @@ function TicketsTable({
           : open.length
             ? `${open.length} working limit`
             : "No live tickets"}
+        {` · last ${Math.min(10, recent.length)} closed`}
         {older.length ? ` · ${older.length} older` : ""}
       </p>
       <div className="mt-3">

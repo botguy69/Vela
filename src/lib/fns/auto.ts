@@ -795,6 +795,7 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     const lastBy = new Map<string, number>();
     const leftBy = new Map<string, number>();
     const posBy = new Map<string, { qty: number; entry: number; pnl: number | null; mark: number; side: "long" | "short" }>();
+    const seenLive = new Set<string>();
     if (settings) {
       const bookOk = livePos != null;
       for (const p of livePos ?? []) {
@@ -806,9 +807,16 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       for (const t of mapped) {
         const key = t.weexSymbol.replace(/_/g, "").toUpperCase();
         const pos = posBy.get(`${key}|${t.side}`);
-        const left = pos?.qty ?? leftBy.get(t.weexSymbol) ?? leftBy.get(key);
-        if (left != null && left > 0 && (t.status === "working" || t.status === "filled" || t.status === "proposed")) {
-          t.liveOnWeex = true;
+        const left = pos?.qty ?? 0;
+        if (left > 0) {
+          const stamp = `${key}|${t.side}`;
+          if (!seenLive.has(stamp)) {
+            t.liveOnWeex = true;
+            if (t.status !== "working" && t.status !== "filled") t.status = "filled";
+            seenLive.add(stamp);
+          } else {
+            t.liveOnWeex = false;
+          }
         } else if (bookOk) {
           t.liveOnWeex = false;
         } else {
