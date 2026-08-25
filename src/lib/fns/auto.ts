@@ -2139,14 +2139,19 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
           huntTape = [
             sized
-              ? `Fired ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% ${sized.entryType}.`
-              : "No fire this tick.",
-            eyeing.length ? `On the board: ${eyeing.join(" · ")}` : "Board empty — nothing at 78%+.",
-            whyNot.length ? `Why not: ${[...new Set(whyNot)].slice(0, 4).join(" · ")}` : "",
-            `BTC RSI ${btcRsi.toFixed(0)} · ATR ${regime.ratio.toFixed(1)}× · ${riskL}L/${riskS}S · ${corrected.marginPct}% size.`,
+              ? `Took ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% ${sized.entryType}.`
+              : "Stood down — nothing cleared the 78% bar.",
+            (() => {
+              const rest = sized
+                ? eyeing.filter((e) => !e.toUpperCase().startsWith(sized.weexSymbol.replace("USDT", "").toUpperCase()))
+                : eyeing;
+              return rest.length ? `Watch  ${rest.join("  ·  ")}` : "";
+            })(),
+            whyNot.length ? `Pass   ${[...new Set(whyNot)].slice(0, 4).join("  ·  ")}` : "",
+            `Tape   BTC RSI ${btcRsi.toFixed(0)}  ·  ATR ${regime.ratio.toFixed(1)}×  ·  ${riskL}L/${riskS}S  ·  ${corrected.marginPct}% risk`,
           ]
             .filter(Boolean)
-            .join(" ");
+            .join("\n");
 
           if (!sized || !spec) {
             notes.push(veto);

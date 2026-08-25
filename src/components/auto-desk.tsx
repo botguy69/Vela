@@ -157,11 +157,11 @@ export function AutoDesk() {
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
               <div className="h-full bg-accent" style={{ width: `${s.progressPct}%` }} />
             </div>
-            <p className="mt-3 text-[10px] uppercase tracking-[0.16em] text-subtle">Tape</p>
-            <p className="mt-1.5 text-sm leading-relaxed text-fg">
+            <p className="mt-3 text-[10px] uppercase tracking-[0.16em] text-subtle">Last pass</p>
+            <p className="mt-1.5 whitespace-pre-line font-mono text-[12px] leading-6 text-fg sm:text-[13px]">
               {s.lastTickNote && s.lastTickNote !== "Tick running…"
                 ? s.lastTickNote
-                : "Waiting on a tick — board fills after the hunt ranks the list."}
+                : "Hunt hasn’t printed yet. Ranked names, passes, and BTC tape land here."}
             </p>
             {s.correction ? <p className="mt-2 text-xs text-subtle">{s.correction}</p> : null}
             {s.phaseId === "checkpoint" && (
