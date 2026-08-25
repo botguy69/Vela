@@ -388,10 +388,7 @@ export async function placeWeexOrder(
     body.slTriggerPrice = order.sl;
     body.SlWorkingType = "MARK_PRICE";
   }
-  if (order.tp) {
-    body.tpTriggerPrice = order.tp;
-    body.TpWorkingType = "CONTRACT_PRICE";
-  }
+  // TPs only via placeWeexTake after fill — attaching tp here duplicates TP-Last at full size.
   if (order.type === "LIMIT") {
     body.timeInForce = "POST_ONLY";
     body.price = order.price ?? "";
@@ -476,6 +473,8 @@ export async function cancelWeexProtective(creds: WeexCreds, symbol: string) {
     () => weexRequest({ creds, method: "DELETE", path: "/capi/v3/tpslOrder", query: { symbol } }),
     () => weexRequest({ creds, method: "POST", path: "/capi/v3/cancelAllTpSl", body: { symbol } }),
     () => weexRequest({ creds, method: "POST", path: "/capi/v3/plan/cancelAll", body: { symbol, productType: "USDT-FUTURES" } }),
+    () => weexRequest({ creds, method: "POST", path: "/capi/v3/order/tpsl/cancelAll", body: { symbol } }),
+    () => weexRequest({ creds, method: "POST", path: "/capi/v3/position/tpsl/cancel", body: { symbol } }),
   ];
   for (const t of tries) await t().catch(() => null);
   const listed = await listWeexAlgos(creds, symbol);
@@ -492,6 +491,53 @@ export async function cancelWeexProtective(creds: WeexCreds, symbol: string) {
       path: "/capi/v3/tpslOrder",
       query: { symbol, algoId: id },
     }).catch(() => null);
+    await weexRequest({
+      creds,
+      method: "DELETE",
+      path: "/capi/v3/order",
+      query: { symbol, orderId: id },
+    }).catch(() => null);
+  }
+  const books = [
+    { path: "/capi/v3/openOrders", query: { symbol } as Record<string, string> },
+    { path: "/capi/v3/openOrders", query: { symbol, productType: "USDT-FUTURES" } },
+    { path: "/capi/v3/tpslOrder", query: { symbol } },
+  ];
+  for (const p of books) {
+    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
+    if (!res.ok) continue;
+    for (const row of rowsFrom(res.data)) {
+      const o = row as Record<string, unknown>;
+      const type = String(o.type ?? o.orderType ?? o.planType ?? o.workingType ?? "").toUpperCase();
+      const reduce = o.reduceOnly === true || String(o.reduceOnly ?? "") === "true";
+      const tpish = reduce || /TAKE|STOP|TP|SL|PROFIT|LOSS|MARK|LAST/.test(type);
+      const limitEntry = type === "LIMIT" && !reduce && !tpish;
+      if (limitEntry) continue;
+      const orderId = String(o.orderId ?? o.algoId ?? o.id ?? "");
+      const oid = String(o.clientOid ?? o.clientOrderId ?? o.origClientOrderId ?? o.clientAlgoId ?? "");
+      if (orderId && orderId !== "undefined") {
+        await weexRequest({
+          creds,
+          method: "DELETE",
+          path: "/capi/v3/order",
+          query: { symbol, orderId },
+        }).catch(() => null);
+        await weexRequest({
+          creds,
+          method: "POST",
+          path: "/capi/v3/algoOrder/cancel",
+          body: { symbol, algoId: orderId },
+        }).catch(() => null);
+      }
+      if (oid && oid !== "undefined") {
+        await weexRequest({
+          creds,
+          method: "DELETE",
+          path: "/capi/v3/order",
+          query: { symbol, origClientOrderId: oid.slice(0, 36) },
+        }).catch(() => null);
+      }
+    }
   }
 }
 
