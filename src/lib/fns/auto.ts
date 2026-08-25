@@ -1563,7 +1563,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             notes.push(
               printed
                 ? `${pos.weex_symbol} TP1 printed · stop to fee BE ${be.toFixed(4)}`
-                : `${pos.weex_symbol} 1R · stop to fee BE ${be.toFixed(4)}`,
+                : `${pos.weex_symbol} size cut · stop to fee BE ${be.toFixed(4)}`,
             );
           }
         }

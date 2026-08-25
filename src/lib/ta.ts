@@ -595,15 +595,9 @@ export function shouldLockBreakeven(opts: {
 }): boolean {
   if (opts.already || opts.entry <= 0) return false;
   if (opts.reduced) return true;
-  if (Math.abs(opts.stop - opts.entry) / opts.entry < 0.001) return false;
-  const risk = Math.abs(opts.entry - opts.stop);
-  if (risk <= 0) return false;
-  const favor = opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last;
-  const r = favor / risk;
   const firstTake = opts.targets[0];
-  const hitFirst =
-    firstTake != null && (opts.side === "long" ? opts.last >= firstTake : opts.last <= firstTake);
-  return hitFirst || r >= 1;
+  if (firstTake == null || !(firstTake > 0)) return false;
+  return taggedTake(opts.side, opts.last, firstTake);
 }
 
 /** Realized takes + mark on leftover. Full flatten at last prints the whole ticket at that price. */

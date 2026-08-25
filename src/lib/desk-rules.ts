@@ -216,7 +216,6 @@ export function chopAction(opts: {
   const risk = Math.abs(opts.entry - opts.stop);
   const favor = opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last;
   const r = risk > 0 ? favor / risk : 0;
-  if (r >= 0.3) return "lockBe";
   if (r >= 0) return "hold";
   return "flatten";
 }
