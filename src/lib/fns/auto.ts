@@ -1897,6 +1897,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     };
     const riskL = countAtRisk("long");
     const riskS = countAtRisk("short");
+    const needL = Math.max(0, SIDE_CAP - riskL);
+    const needS = Math.max(0, SIDE_CAP - riskS);
+    const huntStatus = !settings.armed
+      ? "Disarmed. Not hunting."
+      : needL === 0 && needS === 0
+        ? "Not hunting — 2 longs and 2 shorts already at risk. Next after TP1/BE."
+        : `Hunting ${[needL ? `${needL} long` : "", needS ? `${needS} short` : ""].filter(Boolean).join(" + ")}. 78%+ only — empty slots are a pass.`;
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -1973,6 +1980,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         ...dbFilled.map((s) => s.weex_symbol),
       ];
       const beN = liveN.filter((p) => beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
+      huntTape = `${huntStatus}\nLive: ${[...new Set(names)].join(", ") || "—"}${beN ? ` · ${beN} BE leftover` : ""}.`;
       notes.push(
         `${[...new Set(names)].join(" ")} · 2 long + 2 short at-risk. Next after TP1/BE. ${beN} leftover(s) · cap 6.`,
       );
@@ -1986,6 +1994,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const btcBook = books.BTCUSDT ?? [];
         const regime = rules.regimeState(btcBook);
         if (regime.hot) {
+          huntTape = `${huntStatus}\nStood down — BTC shock wick (ATR ${regime.ratio.toFixed(1)}×). Slots stay empty.`;
           notes.push(`Regime: BTC shock wick (ATR ${regime.ratio.toFixed(1)}×). Standing down.`);
         } else {
           const rawAll = rules.applyLedger(
@@ -2138,14 +2147,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
 
           huntTape = [
+            huntStatus,
             sized
               ? `Took ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% ${sized.entryType}.`
-              : "Stood down — nothing cleared the 78% bar.",
+              : "Stood down this pass — nothing cleared the bar.",
             (() => {
               const rest = sized
                 ? eyeing.filter((e) => !e.toUpperCase().startsWith(sized.weexSymbol.replace("USDT", "").toUpperCase()))
                 : eyeing;
-              return rest.length ? `Watch  ${rest.join("  ·  ")}` : "";
+              return rest.length ? `Watch  ${rest.join("  ·  ")}` : "Watch  none — no 78%+ names on the list.";
             })(),
             whyNot.length ? `Pass   ${[...new Set(whyNot)].slice(0, 4).join("  ·  ")}` : "",
             `Tape   BTC RSI ${btcRsi.toFixed(0)}  ·  ATR ${regime.ratio.toFixed(1)}×  ·  ${riskL}L/${riskS}S  ·  ${corrected.marginPct}% risk`,
@@ -2274,14 +2284,16 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         }
       }
     } else if (!settings.armed) {
+      huntTape = huntStatus;
       notes.push("Disarmed. No new orders.");
-    } else if (riskL >= 1 && riskS >= 1) {
-      notes.push("2 longs + 2 shorts at-risk. Next after TP1/BE on a side. Cap 6.");
     } else if (stillOpen.length >= LIVE_CAP) {
+      huntTape = `${huntStatus}\nLive cap (6 names). Waiting on an exit.`;
       notes.push("Live cap (6 names). Waiting on an exit.");
     } else {
-      notes.push("Hunting 2L+2S. 1h bias, 15m trigger. 2nd same-side if it diverges from BTC. Cap 6.");
+      huntTape = huntTape || huntStatus;
     }
+
+    if (!huntTape) huntTape = huntStatus;
 
     const learned = [bar.note, ledger.note].filter(Boolean).join(" · ") || `${corrected.marginPct}% · ${corrected.minConf}%+ bar`;
     const note = huntTape || notes.filter(Boolean).slice(0, 5).join(" · ");

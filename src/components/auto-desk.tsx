@@ -161,7 +161,7 @@ export function AutoDesk() {
             <p className="mt-1.5 whitespace-pre-line font-mono text-[12px] leading-6 text-fg sm:text-[13px]">
               {s.lastTickNote && s.lastTickNote !== "Tick running…"
                 ? s.lastTickNote
-                : "Hunt hasn’t printed yet. Ranked names, passes, and BTC tape land here."}
+                : "Hunt hasn’t printed yet. Next pass will say if it’s hunting, watching, or standing down."}
             </p>
             {s.correction ? <p className="mt-2 text-xs text-subtle">{s.correction}</p> : null}
             {s.phaseId === "checkpoint" && (
