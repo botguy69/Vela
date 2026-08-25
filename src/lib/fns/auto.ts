@@ -1087,7 +1087,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     try {
       await sql`
         update auto_settings
-        set last_tick_at = now(), last_tick_note = ${"Tick running…"}, updated_at = now()
+        set last_tick_at = now(), updated_at = now()
         where user_id = ${userId}
       `;
     } catch {
@@ -1418,6 +1418,33 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               where id = ${pos.id}
             `;
             notes.push(`Filled ${pos.weex_symbol} limit`);
+          }
+        }
+        if (credsFill && !/tps:ok/.test(pos.weex_resp ?? "")) {
+          const tps = parseNums(pos.targets);
+          const spec = await specFor(coinByWeex(pos.weex_symbol));
+          const slices = takeQtys(n(pos.qty), tps.length, spec.quantityPrecision, formatWeexQty);
+          const { placeWeexTake } = await import("@/lib/weex.server");
+          let ok = 0;
+          for (let i = 0; i < tps.length; i += 1) {
+            const slice = slices[i]!;
+            if (Number(slice) <= 0) continue;
+            const sent = await placeWeexTake(credsFill, {
+              symbol: pos.weex_symbol,
+              positionSide: side === "short" ? "SHORT" : "LONG",
+              tp: formatWeexPx(tps[i]!, spec.pricePrecision),
+              quantity: slice,
+              clientOid: `velatp${pos.id}${i}${Date.now().toString(36)}`.slice(0, 36),
+            });
+            if (sent.ok) ok += 1;
+          }
+          if (ok) {
+            await sql`
+              update auto_signals
+              set weex_resp = ${`${pos.weex_resp ?? ""} tps:ok`.slice(0, 500)}, updated_at = now()
+              where id = ${pos.id}
+            `;
+            notes.push(`${pos.weex_symbol} limit armed ${ok} take(s) + stop`);
           }
         }
         continue;
@@ -2239,9 +2266,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               price: formatWeexPx(sized.entry, spec.pricePrecision),
               clientOid: oid,
               sl: formatWeexPx(sized.stop, spec.pricePrecision),
+              tp: formatWeexPx(tps[0]!, spec.pricePrecision),
             });
             const replies = [sent.ok ? JSON.stringify(sent.data).slice(0, 180) : sent.error.slice(0, 180)];
-            if (sent.ok && sized.entryType === "market") {
+            if (sent.ok) {
               const slices = takeQtys(sized.qty, tps.length, spec.quantityPrecision, formatWeexQty);
               for (let i = 0; i < tps.length; i += 1) {
                 const q = slices[i]!;
@@ -2256,7 +2284,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               }
             }
 
-            const weexResp = `${replies.join(" | ")}${sent.ok && sized.entryType === "market" ? " tps:ok" : ""}`.slice(0, 500);
+            const weexResp = `${replies.join(" | ")}${sent.ok ? " tps:ok" : ""}`.slice(0, 500);
             const status = sent.ok ? (sized.entryType === "market" ? "filled" : "working") : "error";
             const fillPx = status === "filled" ? sized.entry : null;
             if (!sent.ok) notes.push(`WEEX reject ${sized.weexSymbol}: ${replies[0]?.slice(0, 80) ?? "empty"}`);
@@ -2296,7 +2324,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     if (!huntTape) huntTape = huntStatus;
 
     const learned = [bar.note, ledger.note].filter(Boolean).join(" · ") || `${corrected.marginPct}% · ${corrected.minConf}%+ bar`;
-    const note = huntTape || notes.filter(Boolean).slice(0, 5).join(" · ");
+    const manage = notes
+      .filter((n) =>
+        /TP1|BE |flattened|working limit|Took |Closed|Hit stop|Sold |lock|RENDER|BCH|limit filled/i.test(n),
+      )
+      .slice(0, 5);
+    const note = [huntTape, ...manage].filter(Boolean).join("\n") || notes.filter(Boolean).slice(0, 5).join(" · ");
     await sql`
       update auto_settings
       set last_tick_at = now(),
