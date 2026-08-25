@@ -402,6 +402,7 @@ function mapSignal(row: SignalRow) {
     liveOnWeex: false,
     closeReason: inferClose(row),
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -443,6 +444,64 @@ async function ticketLedger(
       pnl: n(r.pnl),
     })),
   );
+}
+
+function matchWeexClose(
+  row: { weex_symbol: string; side: string; created_at: string; updated_at?: string | null },
+  closes: { symbol: string; side?: "long" | "short"; pnl: number; closePx: number; ts: number }[],
+) {
+  const key = row.weex_symbol.replace(/_/g, "").toUpperCase();
+  const side = row.side === "short" ? "short" : "long";
+  const created = new Date(row.created_at).getTime();
+  const updated = new Date(row.updated_at ?? row.created_at).getTime();
+  const cands = closes.filter((c) => {
+    if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
+    if (c.side && c.side !== side) return false;
+    if (!c.ts) return true;
+    return c.ts >= created - 30 * 60_000 && c.ts <= updated + 6 * 3600_000;
+  });
+  if (!cands.length) return null;
+  cands.sort((a, b) => {
+    const da = a.ts ? Math.abs(a.ts - updated) : 9e15;
+    const db = b.ts ? Math.abs(b.ts - updated) : 9e15;
+    return da - db;
+  });
+  return cands[0] ?? null;
+}
+
+async function restampWeexPnl(
+  sql: Awaited<ReturnType<typeof import("@/lib/db").getSql>>,
+  userId: string,
+  creds: { apiKey: string; apiSecret: string; passphrase: string },
+  notes: string[],
+) {
+  const { listWeexClosedPnl } = await import("@/lib/weex.server");
+  const closes = await listWeexClosedPnl(creds).catch(() => []);
+  if (!closes.length) return;
+  const rows = await sql<SignalRow>`
+    select * from auto_signals
+    where user_id = ${userId}
+      and status in ('stopped','targeted','skipped')
+      and updated_at > now() - interval '14 days'
+  `;
+  for (const row of rows) {
+    const hit = matchWeexClose(row, closes);
+    if (!hit) continue;
+    if (Math.abs(n(row.pnl) - hit.pnl) < 0.08) continue;
+    const st = hit.pnl >= 0.05 ? "targeted" : hit.pnl <= -0.05 ? "stopped" : row.status;
+    const px = hit.closePx > 0 ? hit.closePx : n(row.closed_px);
+    await sql`
+      update auto_signals
+      set pnl = ${hit.pnl},
+          closed_px = ${px || null},
+          status = ${st},
+          updated_at = now()
+      where id = ${row.id} and user_id = ${userId}
+    `;
+    notes.push(
+      `${row.weex_symbol} WEEX PnL ${hit.pnl >= 0 ? "+" : ""}${hit.pnl.toFixed(2)} (was ${n(row.pnl).toFixed(2)})`,
+    );
+  }
 }
 
 async function collapseOpenDupes(
@@ -807,12 +866,10 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     const pulled = settings ? await pullWeexBook(settings) : { live: null, error: null };
     const live = pulled.live;
     let livePos: Awaited<ReturnType<typeof import("@/lib/weex.server").listWeexPositions>> | null = null;
-    if (settings) {
-      const creds = await credsFrom(settings);
-      if (creds) {
-        const { listWeexPositions } = await import("@/lib/weex.server");
-        livePos = await listWeexPositions(creds).catch(() => null);
-      }
+    const creds = settings ? await credsFrom(settings) : null;
+    if (creds) {
+      const { listWeexPositions } = await import("@/lib/weex.server");
+      livePos = await listWeexPositions(creds).catch(() => null);
     }
     if (settings && live) {
       const peak = Math.max(n(settings.peak_usd) || live.equity, live.equity);
@@ -1434,6 +1491,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const flat = await closeFlatOnWeex(sql, userId, weexBook, notes, creds);
         bookedFlat = flat.booked;
         flattenedTick = flat.flattened;
+        await restampWeexPnl(sql, userId, creds, notes);
       }
     }
 

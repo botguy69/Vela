@@ -274,9 +274,7 @@ function parsePosition(row: unknown): {
     r.unrealizedPnl ??
       r.unrealizePnl ??
       r.upl ??
-      (r as { floatProfit?: string | number }).floatProfit ??
-      (r as { achievedProfits?: string | number }).achievedProfits ??
-      r.profit,
+      (r as { floatProfit?: string | number }).floatProfit,
   );
   const mark = Number(r.markPrice ?? r.marketPrice ?? 0);
   if (Number.isFinite(entry) && entry > 0 && q * entry < 0.05) return null;
@@ -332,6 +330,75 @@ export async function listWeexPositions(
   }
   if (uniq.size) return [...uniq.values()];
   return sawOk ? [] : null;
+}
+
+export type WeexClose = {
+  symbol: string;
+  side?: "long" | "short";
+  pnl: number;
+  closePx: number;
+  qty: number;
+  ts: number;
+};
+
+function parseClose(r: Record<string, unknown>): WeexClose | null {
+  const symbol = String(r.symbol ?? r.contract ?? r.coin ?? "")
+    .replace(/_/g, "")
+    .replace(/^cmt/i, "")
+    .toUpperCase();
+  const pnl = Number(
+    r.realizedPnl ??
+      r.realisedPnl ??
+      r.closePnl ??
+      r.netProfit ??
+      r.achievedProfits ??
+      r.income ??
+      r.pnl ??
+      r.profit ??
+      r.closeProfit,
+  );
+  if (!symbol.includes("USDT") || !Number.isFinite(pnl)) return null;
+  let ts = Number(r.cTime ?? r.uTime ?? r.closeTime ?? r.updatedTime ?? r.time ?? r.timestamp ?? 0);
+  if (ts > 0 && ts < 1e12) ts *= 1000;
+  const closePx = Number(
+    r.closePrice ?? r.closeAvgPrice ?? r.avgClosePrice ?? r.price ?? r.markPrice ?? 0,
+  );
+  const qty = Math.abs(Number(r.closeSize ?? r.size ?? r.qty ?? r.holdVol ?? r.amount ?? 0));
+  const sideRaw = String(r.positionSide ?? r.holdSide ?? r.side ?? r.posSide ?? "").toLowerCase();
+  const side: "long" | "short" | undefined = sideRaw.includes("short") || sideRaw === "sell" || sideRaw === "2"
+    ? "short"
+    : sideRaw.includes("long") || sideRaw === "buy" || sideRaw === "1"
+      ? "long"
+      : undefined;
+  return { symbol, side, pnl, closePx: Number.isFinite(closePx) ? closePx : 0, qty, ts };
+}
+
+export async function listWeexClosedPnl(creds: WeexCreds): Promise<WeexClose[]> {
+  const paths: { path: string; query?: Record<string, string> }[] = [
+    { path: "/capi/v3/historyPositions", query: { limit: "80" } },
+    { path: "/capi/v3/position/history", query: { limit: "80" } },
+    { path: "/capi/v3/positionHistory", query: { limit: "80" } },
+    { path: "/capi/v3/account/position/history", query: { limit: "80" } },
+    { path: "/capi/v3/income", query: { incomeType: "REALIZED_PNL", limit: "100" } },
+    { path: "/capi/v3/userTrades", query: { limit: "100" } },
+    { path: "/capi/v2/mix/position/history", query: { productType: "USDT-FUTURES", limit: "80" } },
+  ];
+  const out: WeexClose[] = [];
+  const seen = new Set<string>();
+  for (const p of paths) {
+    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
+    if (!res.ok) continue;
+    for (const row of rowsFrom(res.data)) {
+      const hit = parseClose(row as Record<string, unknown>);
+      if (!hit) continue;
+      const k = `${hit.symbol}|${hit.ts}|${hit.pnl.toFixed(4)}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(hit);
+    }
+    if (out.length >= 8) break;
+  }
+  return out;
 }
 
 export async function getWeexPositionQty(
