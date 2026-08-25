@@ -66,7 +66,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1: full list. 2% margin. After TP1/BE, next ticket can open — up to 6 live.",
+      note: "Stage 1 · 2% · 2L+2S.",
     };
   }
   if (equity < 1000) {
@@ -79,7 +79,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1: 2% until three losses (then 1.2%). Two wins in a row restore 2% even if still off peak. 2L+2S. One working limit. 78%+.",
+      note: "Stage 1 · 2% (1.2% after 3 losses). 78%+.",
     };
   }
   return {

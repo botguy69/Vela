@@ -157,7 +157,13 @@ export function AutoDesk() {
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised">
               <div className="h-full bg-accent" style={{ width: `${s.progressPct}%` }} />
             </div>
-            <p className="mt-3 text-sm text-muted">{s.correction}</p>
+            <p className="mt-3 text-[10px] uppercase tracking-[0.16em] text-subtle">Tape</p>
+            <p className="mt-1.5 text-sm leading-relaxed text-fg">
+              {s.lastTickNote && s.lastTickNote !== "Tick running…"
+                ? s.lastTickNote
+                : "Waiting on a tick — board fills after the hunt ranks the list."}
+            </p>
+            {s.correction ? <p className="mt-2 text-xs text-subtle">{s.correction}</p> : null}
             {s.phaseId === "checkpoint" && (
               <Button
                 className="mt-3"
@@ -173,8 +179,6 @@ export function AutoDesk() {
             )}
           </div>
         )}
-
-        {s?.lastTickNote && <p className="mt-4 text-sm text-muted">{s.lastTickNote}</p>}
 
         <div className="mt-8">
           <TicketsTable signals={desk.data?.signals ?? []} refresh={refresh} />
@@ -252,15 +256,20 @@ function TicketsTable({
   }>;
   refresh: () => void;
 }) {
+  const [showOld, setShowOld] = useState(false);
   const open = signals.filter(
     (t) => Boolean(t.liveOnWeex) || t.status === "working",
   );
-  const closed = signals.filter((t) => {
+  const history = signals.filter((t) => {
     if (open.includes(t)) return false;
-    if (t.status !== "stopped" && t.status !== "targeted") return false;
-    return Math.abs(t.pnl ?? 0) > 0.15;
+    if ((t.closeReason ?? "").startsWith("Duplicate")) return false;
+    if (t.status === "proposed" || t.status === "error") return false;
+    return t.status === "stopped" || t.status === "targeted" || t.status === "skipped" || Boolean(t.closeReason);
   });
-  const rows = [...open, ...closed];
+  const fill = Math.max(0, 10 - open.length);
+  const recent = history.slice(0, fill);
+  const older = history.slice(fill);
+  const rows = [...open, ...recent];
   return (
     <section>
       <h2 className="font-display text-2xl font-medium tracking-tight">Tickets</h2>
@@ -270,8 +279,57 @@ function TicketsTable({
           : open.length
             ? `${open.length} working limit`
             : "No live tickets"}
+        {older.length ? ` · ${older.length} older` : ""}
       </p>
-      <div className="mt-3 overflow-hidden rounded-xl bg-surface shadow-border">
+      <div className="mt-3">
+      <TicketSheet rows={rows} refresh={refresh} />
+      </div>
+      {older.length > 0 && (
+        <div className="mt-2">
+          <button
+            type="button"
+            className="text-xs text-muted underline-offset-4 hover:text-fg hover:underline"
+            onClick={() => setShowOld((v) => !v)}
+          >
+            {showOld ? "Hide older tickets" : `Show older tickets (${older.length})`}
+          </button>
+          {showOld && <div className="mt-2"><TicketSheet rows={older} refresh={refresh} faded /></div>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TicketSheet({
+  rows,
+  refresh,
+  faded,
+}: {
+  rows: Array<{
+    id: number;
+    weexSymbol: string;
+    side: "long" | "short";
+    entryType: string;
+    fillPx: number | null;
+    entry: number;
+    stop: number;
+    target: number;
+    targets: number[];
+    leverage: number;
+    pnl: number | null;
+    status: string;
+    beMoved: boolean;
+    thesis: string | null;
+    rr: number;
+    confidence: number | null;
+    liveOnWeex?: boolean;
+    closeReason?: string | null;
+  }>;
+  refresh: () => void;
+  faded?: boolean;
+}) {
+  return (
+      <div className={cn("overflow-hidden rounded-xl bg-surface shadow-border", faded && "opacity-80")}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="text-[11px] uppercase tracking-[0.14em] text-subtle">
@@ -371,7 +429,6 @@ function TicketsTable({
           </table>
         </div>
       </div>
-    </section>
   );
 }
 
