@@ -279,7 +279,7 @@ function parsePosition(row: unknown): {
       r.profit,
   );
   const mark = Number(r.markPrice ?? r.marketPrice ?? 0);
-  if (Number.isFinite(entry) && entry > 0 && q * entry < 0.2) return null;
+  if (Number.isFinite(entry) && entry > 0 && q * entry < 0.05) return null;
   return {
     symbol,
     side,
@@ -338,25 +338,11 @@ export async function getWeexPositionQty(
   creds: WeexCreds,
   symbol: string,
 ): Promise<number | null> {
-  const paths = [
-    { path: "/capi/v3/account/position/allPosition", query: { symbol } },
-    { path: "/capi/v3/account/position/singlePosition", query: { symbol } },
-    { path: "/capi/v3/account/positions", query: { symbol } },
-    { path: "/capi/v3/positionRisk", query: { symbol } },
-    { path: "/capi/v2/position", query: { symbol } },
-  ];
-  let sawOk = false;
-  for (const p of paths) {
-    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
-    if (!res.ok) continue;
-    sawOk = true;
-    const q = positionQtyFrom(res.data, symbol);
-    if (q != null && q > 0) return q;
-    if (q === 0) return 0;
-    const rows = rowsFrom(res.data);
-    if (Array.isArray(rows)) return 0;
-  }
-  return sawOk ? 0 : null;
+  const all = await listWeexPositions(creds);
+  if (all == null) return null;
+  const key = symbol.replace(/_/g, "").toUpperCase();
+  const hit = all.find((p) => p.symbol.replace(/_/g, "").toUpperCase() === key);
+  return hit?.qty ?? 0;
 }
 
 export async function setCrossMaxLeverage(creds: WeexCreds, symbol: string, leverage: number) {
@@ -450,6 +436,7 @@ export async function moveWeexStop(
     positionSide: "LONG" | "SHORT";
     stop: string;
     clientOid: string;
+    quantity?: string;
   },
 ): Promise<WeexResult<unknown>> {
   return weexRequest({
@@ -461,8 +448,8 @@ export async function moveWeexStop(
       clientAlgoId: order.clientOid.slice(0, 36),
       planType: "STOP_LOSS",
       triggerPrice: order.stop,
-      executePrice: "0",
-      quantity: "0",
+      executePrice: order.stop,
+      quantity: order.quantity && Number(order.quantity) > 0 ? order.quantity : "0",
       positionSide: order.positionSide,
       triggerPriceType: "MARK_PRICE",
     },
@@ -514,6 +501,7 @@ export async function listWeexAlgos(creds: WeexCreds, symbol: string): Promise<s
     { path: "/capi/v3/tpslOrder", query: { symbol } },
     { path: "/capi/v3/planOrder/current", query: { symbol } },
     { path: "/capi/v3/ordersPlan", query: { symbol, planType: "profit_loss" } },
+    { path: "/capi/v3/openOrders", query: { symbol } },
   ];
   const ids = new Set<string>();
   for (const p of paths) {
@@ -547,7 +535,7 @@ export async function placeWeexTake(
       clientAlgoId: order.clientOid.slice(0, 36),
       planType: "TAKE_PROFIT",
       triggerPrice: order.tp,
-      executePrice: "0",
+      executePrice: order.tp,
       quantity: order.quantity,
       positionSide: order.positionSide,
       triggerPriceType: "MARK_PRICE",

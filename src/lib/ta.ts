@@ -574,9 +574,9 @@ export function scanUniverse(
   return pick.sort((a, b) => b.score - a.score);
 }
 
-/** WEEX-style BE: round-trip taker (~0.06% in + 0.06% out) plus a hair so leftover isn't a fee loss. */
+/** WEEX-style BE: round-trip taker plus a hair so leftover isn't a fee loss. */
 export function breakevenPrice(side: Side, entry: number): number {
-  const roundTrip = 0.0006 * 2 + 0.0002;
+  const roundTrip = 0.0008 * 2 + 0.0004;
   return side === "long" ? entry * (1 + roundTrip) : entry * (1 - roundTrip);
 }
 

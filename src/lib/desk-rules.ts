@@ -166,7 +166,7 @@ export function shouldCancelStaleLimit(createdAt: string | Date, style: Style): 
   return Date.now() - t > limitMaxAgeMs(style);
 }
 
-/** Dead scalp (<0.3R in 5h) → flatten. Small green → lock fee-BE. BE leftovers → hold. */
+/** Dead loser after 5h → flatten. Green tickets hold or lock fee-BE. BE leftovers trail. */
 export function chopAction(opts: {
   since: string | Date;
   style: Style;
@@ -185,9 +185,9 @@ export function chopAction(opts: {
   const risk = Math.abs(opts.entry - opts.stop);
   const favor = opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last;
   const r = risk > 0 ? favor / risk : 0;
-  if (r < 0.3) return "flatten";
-  if (age >= chopTakeMs(opts.style)) return "flatten";
-  return "lockBe";
+  if (r >= 0.3) return "lockBe";
+  if (r >= 0) return "hold";
+  return "flatten";
 }
 
 export function shouldTimeStopFill(opts: {
@@ -355,17 +355,21 @@ export function confidenceBar(
   base: number,
 ): { minConf: number; note: string } {
   const rows = closed.filter((c) => c.conf > 0);
-  if (rows.length < 4) return { minConf: Math.max(78, base), note: "Bar 78%+. Volume + BB. One limit max." };
+  const recent = rows.slice(-12);
+  const recentLoss = recent.filter((c) => c.pnl < 0).length;
+  const wrBad = recent.length >= 8 && recentLoss / recent.length >= 0.5;
+  const floor = wrBad ? 82 : Math.max(80, base);
+  if (rows.length < 4) return { minConf: floor, note: `Bar ${floor}%+. 1 SL + 2 TP. Green tickets hold.` };
   const high = rows.filter((c) => c.conf >= base);
   const highLose = high.filter((c) => c.pnl < 0);
-  if (high.length >= 3 && highLose.length / high.length >= 0.5) {
-    const minConf = Math.min(84, Math.max(78, base + 4));
+  if ((high.length >= 3 && highLose.length / high.length >= 0.5) || wrBad) {
+    const minConf = Math.min(86, Math.max(floor, base + 4));
     return {
       minConf,
-      note: `High-conf SLs ${highLose.length}/${high.length}. Bar now ${minConf}%. Empty slots OK.`,
+      note: `WR weak. Bar ${minConf}%. Empty slots OK. No flatten on green.`,
     };
   }
-  return { minConf: Math.max(78, base), note: "Bar 78%+. Volume + BB. One limit at a time." };
+  return { minConf: floor, note: `Bar ${floor}%+. Volume + BB. 1 SL + 2 TP.` };
 }
 
 export function writeDeskNote(opts: {
