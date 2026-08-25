@@ -35,12 +35,7 @@ export function blocksBeta(
   opts?: { diverges?: boolean },
 ): boolean {
   const same = open.filter((p) => p.side === next.side && p.weex !== next.weex);
-  if (same.length >= 2) return true;
-  if (same.length === 0) return false;
-  if (opts?.diverges) return false;
-  if (betaWeight(next.weex) <= 0.3) return false;
-  const sum = sameSideBeta(same, next.side) + betaWeight(next.weex);
-  return sum > BETA_SOFT;
+  return same.length >= 2;
 }
 
 export function sma(values: number[], period: number): number | null {

@@ -1903,7 +1903,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ? "Disarmed. Not hunting."
       : needL === 0 && needS === 0
         ? "Not hunting — 2 longs and 2 shorts already at risk. Next after TP1/BE."
-        : `Hunting ${[needL ? `${needL} long` : "", needS ? `${needS} short` : ""].filter(Boolean).join(" + ")}. 78%+ only — empty slots are a pass.`;
+        : `Hunting up to 2L+2S (${riskL}L/${riskS}S live). Need ${[needL ? `${needL} long` : "", needS ? `${needS} short` : ""].filter(Boolean).join(" + ")}. 78%+ only — will not fill empty slots.`;
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -2078,9 +2078,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side }, { diverges })) {
               const same = betaBook.find((p) => p.side === pick.side);
               veto = same
-                ? `WEEX ${riskL}L/${riskS}S (${same.weex} ${same.side}). ${pick.weexSymbol} is a 3rd same-way beta — need diverge or TP1/BE on one first.`
-                : "Same-way beta is full.";
-              whyNot.push(`${tag} same-way beta`);
+                ? `Already ${riskL}L/${riskS}S at risk. ${pick.weexSymbol} ${pick.side} would be a 3rd same-side.`
+                : "Same-side book is full.";
+              whyNot.push(`${tag} 2 already on that side`);
               continue;
             }
             const marketLong = rules.btcLeads("long", btc15) || riskL > 0;
