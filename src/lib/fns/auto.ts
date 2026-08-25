@@ -2179,7 +2179,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
           for (const pick of ordered) {
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
-            if (flattened.has(pick.weexSymbol)) {
+            if (flattened.has(pick.weexSymbol) && !/double (top|bottom)|failed range/i.test(pick.thesis ?? "")) {
               veto = `You flattened ${pick.weexSymbol}. 2h pause on that pair.`;
               whyNot.push(`${tag} 2h flatten pause`);
               continue;
@@ -2200,7 +2200,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} ${trig.reason}`);
               continue;
             }
-            const diverges = rules.divergesFromBtc(pick.side, coin15, btc15);
+            const diverges =
+              rules.divergesFromBtc(pick.side, coin15, btc15) ||
+              /double (top|bottom)|failed range/i.test(pick.thesis ?? "");
             if (compass.bias !== "chop") {
               if (pick.side !== compass.bias && !diverges) {
                 veto = `${pick.weexSymbol} ${pick.side} vs BTC ${compass.bias} — not fading`;
