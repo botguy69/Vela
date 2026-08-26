@@ -321,10 +321,13 @@ async function closedStats(
       ))
       and created_at >= ${from}
   `;
-  const uniq = uniqueFills(rows);
-  const closed = uniq.length;
-  const wins = uniq.filter((r) => n(r.pnl) > 0).length;
-  const rs = uniq
+  const uniq = uniqueFills(rows).sort(
+    (a, b) => new Date(a.filled_at ?? 0).getTime() - new Date(b.filled_at ?? 0).getTime(),
+  );
+  const sample = uniq.slice(-10);
+  const closed = sample.length;
+  const wins = sample.filter((r) => n(r.pnl) > 0).length;
+  const rs = sample
     .map((r) => {
       const risk = oneRUsd(r);
       if (!(risk > 0.01)) return null;
@@ -340,13 +343,13 @@ async function closedStats(
     winRate: closed > 0 ? (wins / closed) * 100 : 0,
     avgWinR: avg(winRs),
     avgLossR: avg(lossRs),
-    names: uniq
+    names: [...sample]
+      .reverse()
       .map((r) => {
         const p = n(r.pnl);
         const pair = (r.weex_symbol ?? "").replace("USDT", "");
         return `${pair} ${p >= 0 ? "+" : ""}${p.toFixed(2)}`;
-      })
-      .slice(0, 20),
+      }),
   };
 }
 
@@ -398,6 +401,7 @@ function tp1Printed(
 
 function closeLabel(beMoved: boolean, printed: boolean, pnl: number, hitStop: boolean): string {
   if (beMoved && !printed && Math.abs(pnl) < 0.4) return "BE scratch — not a win or loss";
+  if (beMoved && printed && pnl >= 1) return "Hit TP1";
   if (beMoved && printed) return pnl >= 0 ? "TP1 then BE" : "TP1 then leftover stopped";
   if (hitStop && pnl <= 0) return "Hit stop";
   if (pnl > 0.4) return beMoved && !printed ? "Closed in green" : "Closed on WEEX";
@@ -485,7 +489,7 @@ async function ticketLedger(
 
 function matchWeexClose(
   row: { weex_symbol: string; side: string; created_at: string; updated_at?: string | null },
-  closes: { symbol: string; side?: "long" | "short"; pnl: number; closePx: number; ts: number }[],
+  closes: { symbol: string; side?: "long" | "short"; pnl: number; closePx: number; ts: number; qty?: number }[],
 ) {
   const key = row.weex_symbol.replace(/_/g, "").toUpperCase();
   const side = row.side === "short" ? "short" : "long";
@@ -538,13 +542,15 @@ async function restampWeexPnl(
     const why =
       hit.pnl <= -0.15
         ? "Hit stop"
-        : hit.pnl >= 0.15 && Boolean(row.be_moved)
-          ? "TP1 then BE"
-          : hit.pnl >= 0.15
-            ? "Closed in green"
-            : Math.abs(hit.pnl) < 0.15
-              ? "BE scratch — not a win or loss"
-              : row.close_reason;
+        : hit.pnl >= 1
+          ? "Hit TP1"
+          : hit.pnl >= 0.15 && Boolean(row.be_moved)
+            ? "TP1 then BE"
+            : hit.pnl >= 0.15
+              ? "Closed in green"
+              : Math.abs(hit.pnl) < 0.15
+                ? "BE scratch — not a win or loss"
+                : row.close_reason;
     await sql`
       update auto_signals
       set pnl = ${hit.pnl},
@@ -552,6 +558,7 @@ async function restampWeexPnl(
           status = ${st},
           close_reason = ${why},
           tp1_hit = ${hit.pnl > 0.3},
+          qty = ${hit.qty && hit.qty > n(row.qty) ? hit.qty : n(row.qty)},
           updated_at = now()
       where id = ${row.id} and user_id = ${userId}
     `;
@@ -1446,6 +1453,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const why = closeLabel(true, printed, pnl, !printed && pnl < 0);
       const already = row.close_reason === why && Math.abs(n(row.pnl) - pnl) < 0.02;
       if (already) continue;
+      if (Math.abs(n(row.pnl)) > 1 && Math.abs(n(row.pnl) - pnl) > 1) continue;
       const st = why.startsWith("BE scratch")
         ? "skipped"
         : pnl < 0 || why === "Hit stop" || why === "TP1 then leftover stopped"
