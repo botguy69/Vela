@@ -193,25 +193,17 @@ function huntHeader(liveL: number, liveS: number) {
   return `Hunting up to 2L+2S (${liveL}L/${liveS}S live). Need ${need}. A+ scalps only — will not fill empty slots.`;
 }
 
-function withLiveHunt(note: string | null, liveL: number, liveS: number) {
+function composePass(note: string | null, liveL: number, liveS: number, liveLines: string[]) {
   const head = huntHeader(liveL, liveS);
-  const rest = (note ?? "")
+  const keep = (note ?? "")
     .split("\n")
+    .map((ln) => ln.trim())
     .filter(
       (ln) =>
-        !/^Hunting up to 2L/.test(ln) &&
-        !/^Not hunting —/.test(ln) &&
-        !/^Need \d/.test(ln) &&
-        !/white.?list/i.test(ln) &&
-        !/blocked this server/i.test(ln) &&
-        !/allow any IP/i.test(ln) &&
-        !/stats_from/i.test(ln) &&
-        !/violates not-null/i.test(ln) &&
-        !/is not a function/i.test(ln),
-    )
-    .join("\n")
-    .trim();
-  return [head, rest].filter(Boolean).join("\n");
+        /^(Eying |A\+|Took |WR )/i.test(ln) || /^A\+ /.test(ln) || /^Setups:/i.test(ln),
+    );
+  const uniq = [...new Set([...liveLines.filter(Boolean), ...keep])];
+  return [head, ...uniq].filter(Boolean).join("\n");
 }
 
 function publicSettings(
@@ -219,7 +211,7 @@ function publicSettings(
   stats: { closed: number; wins: number; winRate?: number; avgWinR?: number; avgLossR?: number; names?: string[] } = { closed: 0, wins: 0 },
   live?: { equity: number; available: number } | null,
   weexError?: string | null,
-  book?: { liveL?: number; liveS?: number },
+  book?: { liveL?: number; liveS?: number; liveLines?: string[] },
 ) {
   const liveEq = live?.equity;
   const equity = liveEq != null ? liveEq : 0;
@@ -242,7 +234,7 @@ function publicSettings(
     minRr: phase.minRr,
     maxOpen: phase.maxOpen,
     lastTickAt: row.last_tick_at,
-    lastTickNote: withLiveHunt(row.last_tick_note, book?.liveL ?? 0, book?.liveS ?? 0),
+    lastTickNote: composePass(row.last_tick_note, book?.liveL ?? 0, book?.liveS ?? 0, book?.liveLines ?? []),
     goalUsd: n(row.goal_usd) || GOAL_USD,
     peakUsd: peak,
     lossStreak: row.loss_streak ?? 0,
@@ -1189,8 +1181,22 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     }
     const liveL = mapped.filter((t) => t.liveOnWeex && t.side === "long").length;
     const liveS = mapped.filter((t) => t.liveOnWeex && t.side === "short").length;
+    const { whyTookTrade } = await import("@/lib/desk-rules");
+    const liveLines = mapped
+      .filter((t) => t.liveOnWeex || t.status === "filled" || t.status === "working")
+      .map((t) =>
+        whyTookTrade({
+          symbol: t.weexSymbol,
+          side: t.side,
+          conf: Math.round(t.confidence ?? 0),
+          thesis: t.thesis ?? "",
+          bias: "chop",
+          live: t.status === "filled" || t.liveOnWeex,
+          working: t.status === "working",
+        }),
+      );
     return {
-      settings: publicSettings(settings!, stats, live, pulled.error, { liveL, liveS }),
+      settings: publicSettings(settings!, stats, live, pulled.error, { liveL, liveS, liveLines }),
       signals: mapped,
       universe: (await import("@/lib/universe")).TOP25.map((c) => ({
         id: c.id,
