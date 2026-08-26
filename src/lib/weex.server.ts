@@ -410,7 +410,7 @@ export async function listWeexClosedPnl(creds: WeexCreds): Promise<WeexClose[]> 
       seen.add(k);
       out.push(hit);
     }
-    if (out.length >= 8) break;
+    if (out.length >= 40) break;
   }
   return out;
 }

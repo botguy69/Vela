@@ -351,6 +351,18 @@ function parseNums(raw: string | null | undefined): number[] {
 }
 
 /** True only if TP1 actually printed (qty cut or price tagged the take) — not just a 1R BE lock. */
+function tp1Credible(
+  side: string,
+  entry: number,
+  last: number,
+  row: { targets?: string | null; tp1_hit?: boolean | null },
+): boolean {
+  if (!(entry > 0) || !(last > 0)) return false;
+  const adverse = side === "short" ? last > entry * 1.003 : last < entry * 0.997;
+  if (adverse) return false;
+  return Boolean(row.tp1_hit) || tp1Printed({ ...row, side }, last);
+}
+
 function tp1Printed(
   row: { side: string; targets?: string | null; tp1_hit?: boolean | null },
   last: number,
@@ -490,14 +502,24 @@ async function restampWeexPnl(
     if (!row.client_oid) continue;
     const hit = matchWeexClose(row, closes);
     if (!hit) continue;
-    if (Math.abs(n(row.pnl) - hit.pnl) < 0.08) continue;
+    if (Math.abs(n(row.pnl) - hit.pnl) < 0.08 && (hit.pnl >= 0) === (n(row.pnl) >= 0)) continue;
     const st = hit.pnl >= 0.05 ? "targeted" : hit.pnl <= -0.05 ? "stopped" : row.status;
     const px = hit.closePx > 0 ? hit.closePx : n(row.closed_px);
+    const why =
+      hit.pnl <= -0.3
+        ? "Hit stop"
+        : hit.pnl >= 0.3 && Boolean(row.be_moved)
+          ? "TP1 then BE"
+          : hit.pnl >= 0.3
+            ? "Closed in green"
+            : row.close_reason;
     await sql`
       update auto_signals
       set pnl = ${hit.pnl},
           closed_px = ${px || null},
           status = ${st},
+          close_reason = ${why},
+          tp1_hit = ${hit.pnl > 0.3},
           updated_at = now()
       where id = ${row.id} and user_id = ${userId}
     `;
@@ -790,7 +812,7 @@ async function closeFlatOnWeex(
     const stopPx = n(pos.stop);
     const hitSl = throughStop(side, last, stopPx);
     const px = hitSl ? stopPx : last;
-    const printed = Boolean(pos.tp1_hit) || tp1Printed(pos, px);
+    const printed = tp1Credible(side, entry, px, pos);
     const { ticketPnl } = await import("@/lib/ta");
     const pnl = ticketPnl({
       side,
@@ -1371,26 +1393,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const entry = n(row.fill_px ?? row.entry);
       const last = n(row.closed_px) || entry;
       const side = row.side === "short" ? "short" : "long";
-      const tp1 = parseNums(row.targets)[0];
-      let printed = Boolean(row.tp1_hit);
-      if (!printed && tp1 != null) {
-        const hours = await getWeexKlines(row.weex_symbol, "1h", 80).catch(() => []);
-        const since = new Date(row.filled_at ?? row.created_at).getTime();
-        const until = new Date(row.updated_at ?? row.created_at).getTime();
-        const after = hours.filter((c) => {
-          const t = c.time > 1e12 ? c.time : c.time * 1000;
-          return Number.isFinite(since) ? t >= since - 3600_000 && t <= until + 60_000 : true;
-        });
-        if (after.length) {
-          const ext =
-            side === "short"
-              ? Math.min(...after.map((c) => c.low))
-              : Math.max(...after.map((c) => c.high));
-          printed = tp1Printed({ ...row, tp1_hit: false }, ext);
-        } else if (row.close_reason === "TP1 then BE") {
-          printed = true;
-        }
-      }
+      const printed = tp1Credible(side, entry, last, row);
       const pnl = ticketPnl({
         side,
         entry,
@@ -1401,15 +1404,20 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         beMoved: true,
         tp1Hit: printed,
       });
-      const why = closeLabel(true, printed, pnl, false);
+      const why = closeLabel(true, printed, pnl, !printed && pnl < 0);
       const already = row.close_reason === why && Math.abs(n(row.pnl) - pnl) < 0.02;
       if (already) continue;
-      const st = why.startsWith("BE scratch") ? "skipped" : why === "TP1 then leftover stopped" ? "stopped" : "targeted";
+      const st = why.startsWith("BE scratch")
+        ? "skipped"
+        : pnl < 0 || why === "Hit stop" || why === "TP1 then leftover stopped"
+          ? "stopped"
+          : "targeted";
       await sql`
         update auto_signals
         set status = ${st},
             pnl = ${why.startsWith("BE scratch") ? 0 : pnl},
             close_reason = ${why},
+            tp1_hit = ${printed},
             updated_at = now()
         where id = ${row.id} and user_id = ${userId}
       `;
@@ -1502,7 +1510,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const px = bars.length ? bars[bars.length - 1]!.close : 0;
         if (px > 0) last = px;
       }
-      const printed = Boolean(row.tp1_hit) || tp1Printed({ ...row, tp1_hit: false }, last);
+      const printed = tp1Credible(side, entry, last, { ...row, tp1_hit: false });
       const pnl = ticketPnl({
         side,
         entry,
@@ -1818,7 +1826,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       }
       if (pos.status === "filled" && left === 0) {
         const exit = throughStop(side, px, stop) ? stop : px;
-        const printed = tp1Printed(pos, exit) || Boolean(pos.tp1_hit);
+        const printed = tp1Credible(side, entry, exit, pos);
         const { ticketPnl } = await import("@/lib/ta");
         const pnl = ticketPnl({
           side,
@@ -1954,7 +1962,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           continue;
         }
         const exit = hitStop ? stop : target;
-        const printed = Boolean(pos.tp1_hit) || tp1Printed(pos, exit) || (!hitStop && hitTp);
+        const printed = tp1Credible(side, entry, exit, pos);
         const { ticketPnl } = await import("@/lib/ta");
         const pnl = ticketPnl({
           side,
