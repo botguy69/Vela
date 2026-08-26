@@ -338,7 +338,9 @@ export function buildLedger(rows: ClosedTicket[]): Ledger {
     plans: [...plans.values()],
     skipPlans,
     skipSymbols,
-    note: bits.length ? `Setups: ${bits.join("; ")}.` : "Side is from BTC 4h+1h this tick, not last week's P&L.",
+    note: skipSymbols.size
+      ? `Sitting out ${[...skipSymbols].slice(0, 3).join(", ")}.`
+      : "Hunting A+ longs and shorts this tick.",
   };
 }
 
@@ -466,20 +468,10 @@ export function whyTookTrade(opts: {
 
 export function confidenceBar(
   closed: { conf: number; pnl: number }[],
-  base: number,
+  _base: number,
 ): { minConf: number; note: string } {
-  const rows = closed.filter((c) => c.conf > 0);
-  const recent = rows.slice(-12);
-  const recentLoss = recent.filter((c) => c.pnl < 0).length;
-  const wrBad = recent.length >= 8 && recentLoss / recent.length >= 0.5;
-  const floor = 80;
-  if (rows.length < 4) return { minConf: floor, note: `Bar ${floor}%+. A+ longs and shorts.` };
-  const high = rows.filter((c) => c.conf >= base);
-  const highLose = high.filter((c) => c.pnl < 0);
-  if ((high.length >= 3 && highLose.length / high.length >= 0.5) || wrBad) {
-    return { minConf: floor, note: `WR weak. Still 80%+ A+ — not killing scale2.` };
-  }
-  return { minConf: floor, note: `Bar ${floor}%+. A+ longs and shorts.` };
+  void closed;
+  return { minConf: 80, note: "A+ longs and shorts · 80%+." };
 }
 
 export function writeDeskNote(opts: {

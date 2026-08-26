@@ -200,12 +200,14 @@ function composePass(note: string | null, liveL: number, liveS: number, liveLine
     .map((ln) => ln.trim())
     .filter(
       (ln) =>
-        /^(Eying |A\+|Took |WR )/i.test(ln) || /^A\+ /.test(ln) || /^Setups:/i.test(ln),
-    );
+        /^(Eying |Took |Live |Limit )/i.test(ln) ||
+        /^A\+ /.test(ln),
+    )
+    .filter((ln) => !/killed|Bar 84|Setups:|WR weak/i.test(ln));
   const uniq = [...new Set([...liveLines.filter(Boolean), ...keep])];
   if (!uniq.some((ln) => /^A\+/.test(ln))) {
     uniq.push(
-      "A+ double · pin · engulf · climax · dry-up · washout · failed range · trend cooling · continuation (with BTC). Junk 21h-mean is off.",
+      "A+ double · pin · engulf · climax · dry-up · washout · failed range · trend cooling · continuation (with BTC). Longs and shorts both hunt. Junk 21h-mean is off.",
     );
   }
   return [head, ...uniq].filter(Boolean).join("\n");
@@ -2537,7 +2539,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
     if (!huntTape) huntTape = huntStatus;
 
-    const learned = [bar.note, ledger.note].filter(Boolean).join(" · ") || `${corrected.marginPct}% · ${corrected.minConf}%+ bar`;
+    const learned = "A+ longs and shorts · 80%+ · will not fill empty slots.";
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))

@@ -144,9 +144,7 @@ export function adaptMethod(opts: {
   if (opts.closed >= 12 && wr < 0.35) {
     next = {
       ...next,
-      minRr: Math.max(next.minRr, 2.1),
-      minConf: Math.min(84, next.minConf + 2),
-      note: `${next.note} WR weak — same trend playbook, higher bar. No method flip.`,
+      note: `${next.note} Book is cold — still A+ longs and shorts, same 80% bar. Size rules unchanged.`,
     };
   }
 
