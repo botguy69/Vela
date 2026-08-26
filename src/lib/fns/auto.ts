@@ -271,10 +271,12 @@ function uniqueFills<T extends {
 }>(rows: T[]): T[] {
   const best = new Map<string, T>();
   for (const r of rows) {
-    const key = `${r.weex_symbol ?? "?"}|${r.side ?? "?"}`;
+    const fill = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
+    const bucket = Number.isFinite(fill) ? Math.floor(fill / (2 * 3600_000)) : r.id ?? 0;
+    const key = `${r.weex_symbol ?? "?"}|${r.side ?? "?"}|${bucket}`;
     const prev = best.get(key);
-    const ru = new Date(r.updated_at ?? r.filled_at ?? 0).getTime();
-    const pu = prev ? new Date(prev.updated_at ?? prev.filled_at ?? 0).getTime() : 0;
+    const ru = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
+    const pu = prev ? new Date(prev.filled_at ?? prev.created_at ?? 0).getTime() : 0;
     if (!prev || ru >= pu) best.set(key, r);
   }
   return [...best.values()];
@@ -1424,6 +1426,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         and be_moved = true
         and status in ('skipped','stopped','targeted')
         and close_reason in ('Closed on WEEX', 'Hit stop', 'TP1 then BE')
+        and filled_at > now() - interval '6 hours'
     `;
     for (const row of botched) {
       const entry = n(row.fill_px ?? row.entry);
