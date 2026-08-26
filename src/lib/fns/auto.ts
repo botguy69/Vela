@@ -588,9 +588,13 @@ async function ensureTakes(
   const resp = pos.weex_resp ?? "";
   const already = /tps:(ok|swept)/.test(resp);
   const extras = stacked > want;
-  const sweptAt = Number(/tps:swept@(\d+)/.exec(resp)?.[1] || 0);
-  if (already && !extras && stopOverride == null) return;
-  if (sweptAt && Date.now() - sweptAt < 120_000 && !extras && stopOverride == null) return;
+  if (already && stopOverride == null) {
+    if (extras) {
+      await cancelWeexProtective(creds, pos.weex_symbol);
+      notes.push(`${pos.weex_symbol} extras on WEEX — cancelled what we could. Not adding.`);
+    }
+    return;
+  }
   const force = extras || stopOverride != null || !already;
   const { coinByWeex } = await import("@/lib/universe");
   const { getSql } = await import("@/lib/db");
