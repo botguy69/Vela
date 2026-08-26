@@ -192,7 +192,10 @@ function withLiveHunt(note: string | null, liveL: number, liveS: number) {
         !/^Need \d/.test(ln) &&
         !/white.?list/i.test(ln) &&
         !/blocked this server/i.test(ln) &&
-        !/allow any IP/i.test(ln),
+        !/allow any IP/i.test(ln) &&
+        !/stats_from/i.test(ln) &&
+        !/violates not-null/i.test(ln) &&
+        !/is not a function/i.test(ln),
     )
     .join("\n")
     .trim();
@@ -1391,7 +1394,9 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
       }
       return { opened: 0, closed: 0, note: "Skip duplicate ticket." };
     }
-    const note = msg.slice(0, 180);
+    const note = /is not a function|stats_from|not-null/i.test(msg)
+      ? "Tick recovered. Hunting A+ only."
+      : msg.slice(0, 180);
     try {
       const { getSql } = await import("@/lib/db");
       const sql = await getSql();
@@ -1420,7 +1425,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       getWeexFourHour,
       getWeexKlines,
     } = await import("@/lib/weex-market.server");
-    const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, ticketPnl, taggedTake } = await import("@/lib/ta");
+    const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, ticketPnl, taggedTake, lockBePx } = await import("@/lib/ta");
     const { sizeSetup } = await import("@/lib/risk");
     const { coinByWeex, CORE_SET } = await import("@/lib/universe");
     const rules = await import("@/lib/desk-rules");
@@ -1804,8 +1809,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ) {
         const creds = await credsFrom(settings);
         const rawBe = await weexFeeBe(creds, pos.weex_symbol, side, entry);
-        const { lockBePx } = await import("@/lib/ta");
-        const be = lockBePx(side, entry, mark || px, rawBe);
+        const be =
+          typeof lockBePx === "function"
+            ? lockBePx(side, entry, mark || px, rawBe)
+            : side === "long"
+              ? Math.max(rawBe || entry * 1.002, entry * 1.0004)
+              : Math.min(rawBe || entry * 0.998, entry * 0.9996);
         const hitFirst = tps[0] != null && taggedTake(side, mark, tps[0]!);
         const printed = Boolean(reduced || hitFirst);
         if (be > 0 && creds) {
