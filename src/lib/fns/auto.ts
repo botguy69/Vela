@@ -1772,7 +1772,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         if (credsForPos) {
           const { getWeexPositionQty } = await import("@/lib/weex.server");
           const left = await getWeexPositionQty(credsForPos, pos.weex_symbol);
-          if (left != null && n(pos.qty) > 0 && left < n(pos.qty) * 0.72) reduced = true;
+          const orig = Math.max(
+            origQty(pos),
+            entry > 0 && stop > 0 && n(pos.risk_usd) > 0 ? n(pos.risk_usd) / Math.abs(entry - stop) : 0,
+          );
+          if (left != null && orig > 0 && left < orig * 0.72) reduced = true;
         }
       }
       if (
