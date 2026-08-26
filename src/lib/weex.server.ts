@@ -100,8 +100,12 @@ export async function weexRequest<T>(opts: {
 }
 
 function weexHumanError(status: number, code: number, msg: string, text: string): string {
-  if (status === 403 || /forbidden|restricted|whitelist|cloudflare/i.test(msg + text)) {
-    return "WEEX blocked this server. On the API key, turn IP whitelist OFF (allow any IP). Wait 15 minutes after creating the key. Futures trade must be ON, withdrawals OFF.";
+  const blob = `${msg} ${text}`;
+  if (/ip.?white.?list|not (?:in|on) the white.?list|whitelist/i.test(blob)) {
+    return "WEEX: this IP isn’t on the key whitelist. If whitelist is already OFF, ignore — next tick retries.";
+  }
+  if (status === 403 && /cloudflare|cf-ray/i.test(blob)) {
+    return "WEEX CDN 403 from Render. Not your key. Next tick retries.";
   }
   if (code === -1044 || code === -1047 || code === -1049 || status === 401) {
     return "WEEX says the key, secret, or passphrase is wrong. Passphrase must be letters/numbers only. Copy secret again — it is shown only once.";
@@ -109,7 +113,9 @@ function weexHumanError(status: number, code: number, msg: string, text: string)
   if (code === -1052) {
     return "Key is missing Futures permission. Edit the key on WEEX and enable Futures / contract trade.";
   }
-  return msg || text.slice(0, 280) || `WEEX ${status}`;
+  const raw = (msg || text).replace(/\s+/g, " ").trim().slice(0, 180);
+  if (status === 403) return `WEEX 403${raw ? `: ${raw}` : ""}. Keys are fine if other tickets are live — next tick retries.`;
+  return raw || `WEEX ${status || code}`;
 }
 
 export function orderPath(sim: boolean): string {
