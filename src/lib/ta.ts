@@ -464,6 +464,77 @@ export function analyzeMarket(
     });
   }
 
+  const body = Math.abs(lastBar.close - lastBar.open);
+  const upperWick = lastBar.high - Math.max(lastBar.close, lastBar.open);
+  const lowerWick = Math.min(lastBar.close, lastBar.open) - lastBar.low;
+  if (body > 0 && lowerWick >= 1.6 * body && lastBar.close >= lastBar.open && r <= 48 && last <= mid + 0.35 * a) {
+    ideas.push({
+      side: "long",
+      entry: last,
+      stop: lastBar.low - stopPad * a * 0.3,
+      entryType: "market",
+      score: 80,
+      thesis: `Pin bar at lows, RSI ${r.toFixed(0)}`,
+      invalidation: `Hourly close through the pin low.`,
+      plan: "scale2",
+    });
+  }
+  if (body > 0 && upperWick >= 1.6 * body && lastBar.close <= lastBar.open && r >= 52 && last >= mid - 0.35 * a) {
+    ideas.push({
+      side: "short",
+      entry: last,
+      stop: lastBar.high + stopPad * a * 0.3,
+      entryType: "market",
+      score: 80,
+      thesis: `Pin bar at highs, RSI ${r.toFixed(0)}`,
+      invalidation: `Hourly close through the pin high.`,
+      plan: "scale2",
+    });
+  }
+  const prevBar = hourly[hourly.length - 2];
+  if (prevBar) {
+    const prevBear = prevBar.close < prevBar.open;
+    const prevBull = prevBar.close > prevBar.open;
+    const bullEngulf =
+      lastBar.close > lastBar.open &&
+      lastBar.open <= prevBar.close &&
+      lastBar.close >= prevBar.open &&
+      prevBear &&
+      r <= 55 &&
+      last >= mid * 0.994;
+    const bearEngulf =
+      lastBar.close < lastBar.open &&
+      lastBar.open >= prevBar.close &&
+      lastBar.close <= prevBar.open &&
+      prevBull &&
+      r >= 45 &&
+      last <= mid * 1.006;
+    if (bullEngulf) {
+      ideas.push({
+        side: "long",
+        entry: last,
+        stop: Math.min(lastBar.low, prevBar.low) - stopPad * a * 0.3,
+        entryType: "market",
+        score: 80,
+        thesis: `Bull engulf 21h, RSI ${r.toFixed(0)}`,
+        invalidation: `Hourly close back through the engulf low.`,
+        plan: "scale2",
+      });
+    }
+    if (bearEngulf) {
+      ideas.push({
+        side: "short",
+        entry: last,
+        stop: Math.max(lastBar.high, prevBar.high) + stopPad * a * 0.3,
+        entryType: "market",
+        score: 80,
+        thesis: `Bear engulf 21h, RSI ${r.toFixed(0)}`,
+        invalidation: `Hourly close back through the engulf high.`,
+        plan: "scale2",
+      });
+    }
+  }
+
   const finish = (best: Idea): RawSetup | null => {
     const risk = Math.abs(best.entry - best.stop);
     if (risk <= 0) return null;

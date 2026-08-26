@@ -146,7 +146,7 @@ export function marketBias(
         : "BTC 4h+1h offer, 15m pausing — shorts on bounce, longs only if a coin fades.",
     };
   }
-  return { bias: "chop", note: "BTC mixed — only A+ scalps (double/vol fade/washout) if 15m is clean. Max 1 at-risk." };
+  return { bias: "chop", note: "BTC mixed — A+ scalps only (structure, pin, engulf, climax, washout, continuation). Max 1 at-risk." };
 }
 
 /** Snap limit to the 15m mean. Stop / targets stay — breathing room is unchanged. */
@@ -373,10 +373,10 @@ export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
   return ranked;
 }
 
-/** Real A+ scalp — not every 82% mean-reversion. */
+/** Real A+ scalp — structure, extremes, tape. Not generic 21h mean RSI 48. */
 export function eliteScalp(thesis: string, conf: number, bar: number): boolean {
   if (conf < Math.max(82, bar)) return false;
-  return /double (top|bottom)|failed range|vol fade|washout RSI (1\d|2[0-2])|washout RSI (7[8-9]|8\d)/i.test(
+  return /double (top|bottom)|failed range|vol fade|washout RSI|climax rejection|Dry-up at|Trend cooling|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-8])|Overbought RSI (7[2-9]|8\d)/i.test(
     thesis,
   );
 }
