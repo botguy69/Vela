@@ -2098,32 +2098,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       }
     }
 
-    const [session] = await sql<{ net: string | number | null }>`
-      select coalesce(sum(pnl), 0) as net from auto_signals
-      where user_id = ${userId}
-        and status in ('stopped','targeted','skipped')
-        and updated_at > now() - interval '10 hours'
-        and (
-          close_reason is null
-          or (
-            close_reason not like 'Replaced%'
-            and close_reason not like 'Cancelled%'
-            and close_reason not like 'Duplicate%'
-            and close_reason not like 'Stale claim%'
-          )
-        )
-    `;
-    const sessionNet = n(session?.net);
-    const sessionStart = Math.max(equity - sessionNet, equity, 1);
-    const circuit = sessionNet < -0.1 * sessionStart;
-    const tightBook = equity < 80;
-
-    if (circuit) {
-      huntTape = `${huntStatus}\nCircuit — ${sessionNet.toFixed(0)} USDT over 10h (${((sessionNet / sessionStart) * 100).toFixed(0)}%). No new tickets. Managing live only.`;
-      notes.push(
-        `Circuit: session ${sessionNet.toFixed(2)} vs start ~${sessionStart.toFixed(0)}. Halt new entries so the book can't get cut in half offline.`,
-      );
-    } else if (riskL >= SIDE_CAP && riskS >= SIDE_CAP) {
+    if (riskL >= SIDE_CAP && riskS >= SIDE_CAP) {
       const names = [
         ...liveN.map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
         ...dbFilled.map((s) => s.weex_symbol),
@@ -2206,14 +2181,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
             const confNow = pick.confidence ?? scoreToConf(pick.score);
             const aPlus = rules.eliteScalp(pick.thesis ?? "", confNow, bar.minConf);
-            if (tightBook && riskL + riskS >= 1) {
-              whyNot.push(`${tag} heat cap — $ book, 1 at-risk`);
-              continue;
-            }
-            if (compass.bias === "chop" && riskL + riskS >= 1) {
-              whyNot.push(`${tag} chop — 1 at-risk max`);
-              continue;
-            }
             if (compass.bias === "chop" && !aPlus) {
               whyNot.push(`${tag} chop — not an A+ scalp`);
               continue;

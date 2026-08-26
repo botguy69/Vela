@@ -146,7 +146,7 @@ export function marketBias(
         : "BTC 4h+1h offer, 15m pausing — shorts on bounce, longs only if a coin fades.",
     };
   }
-  return { bias: "chop", note: "BTC mixed — A+ scalps only (structure, pin, engulf, climax, washout, continuation). Max 1 at-risk." };
+  return { bias: "chop", note: "BTC mixed — A+ scalps only (structure, pin, engulf, climax, washout). 15m must be clean." };
 }
 
 /** Snap limit to the 15m mean. Stop / targets stay — breathing room is unchanged. */
