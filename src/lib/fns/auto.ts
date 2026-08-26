@@ -471,10 +471,18 @@ function matchWeexClose(
   const cands = closes.filter((c) => {
     if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
     if (c.side && c.side !== side) return false;
-    if (!c.ts) return false;
+    if (!c.ts) return true;
     return c.ts >= created - 30 * 60_000 && c.ts <= updated + 6 * 3600_000;
   });
-  if (!cands.length) return null;
+  if (!cands.length) {
+    const loose = closes.filter((c) => {
+      if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
+      return !c.side || c.side === side;
+    });
+    if (!loose.length) return null;
+    loose.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    return loose[0] ?? null;
+  }
   cands.sort((a, b) => {
     const da = a.ts ? Math.abs(a.ts - updated) : 9e15;
     const db = b.ts ? Math.abs(b.ts - updated) : 9e15;
@@ -499,20 +507,21 @@ async function restampWeexPnl(
       and updated_at > now() - interval '14 days'
   `;
   for (const row of rows) {
-    if (!row.client_oid) continue;
     const hit = matchWeexClose(row, closes);
     if (!hit) continue;
-    if (Math.abs(n(row.pnl) - hit.pnl) < 0.08 && (hit.pnl >= 0) === (n(row.pnl) >= 0)) continue;
-    const st = hit.pnl >= 0.05 ? "targeted" : hit.pnl <= -0.05 ? "stopped" : row.status;
+    if (Math.abs(n(row.pnl) - hit.pnl) < 0.08 && (hit.pnl >= 0) === (n(row.pnl) >= 0) && !String(row.close_reason ?? "").startsWith("BE scratch")) continue;
+    const st = hit.pnl >= 0.05 ? "targeted" : hit.pnl <= -0.05 ? "stopped" : "skipped";
     const px = hit.closePx > 0 ? hit.closePx : n(row.closed_px);
     const why =
-      hit.pnl <= -0.3
+      hit.pnl <= -0.15
         ? "Hit stop"
-        : hit.pnl >= 0.3 && Boolean(row.be_moved)
+        : hit.pnl >= 0.15 && Boolean(row.be_moved)
           ? "TP1 then BE"
-          : hit.pnl >= 0.3
+          : hit.pnl >= 0.15
             ? "Closed in green"
-            : row.close_reason;
+            : Math.abs(hit.pnl) < 0.15
+              ? "BE scratch — not a win or loss"
+              : row.close_reason;
     await sql`
       update auto_signals
       set pnl = ${hit.pnl},
@@ -1382,6 +1391,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     }
 
     const notes: string[] = [];
+    {
+      const credsEarly = await credsFrom(settings);
+      if (credsEarly) await restampWeexPnl(sql, userId, credsEarly, notes);
+    }
     const botched = await sql<SignalRow>`
       select * from auto_signals
       where user_id = ${userId}
