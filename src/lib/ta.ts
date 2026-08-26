@@ -621,18 +621,17 @@ export function breakevenPrice(side: Side, entry: number): number {
   return side === "long" ? entry * (1 + roundTrip) : entry * (1 - roundTrip);
 }
 
-/** Long SL must sit below mark; short SL above. Null = would fire now — flatten leftover. */
-export function safeBeStop(side: Side, entry: number, mark: number, weexBe: number): number | null {
+/** Place BE under/above the market. Never null — leftover stays, SL moves. */
+export function lockBePx(side: Side, entry: number, mark: number, weexBe: number): number {
   const raw = weexBe > 0 ? weexBe : breakevenPrice(side, entry);
-  if (!(raw > 0) || !(mark > 0)) return null;
   if (side === "long") {
-    const be = Math.max(raw, entry * 1.0004);
-    if (be >= mark * 0.999) return null;
-    return be;
+    const want = Math.max(raw, entry * 1.0004);
+    if (mark > 0 && want >= mark * 0.999) return Math.min(want, mark * 0.9985);
+    return want;
   }
-  const be = Math.min(raw, entry * 0.9996);
-  if (be <= mark * 1.001) return null;
-  return be;
+  const want = Math.min(raw, entry * 0.9996);
+  if (mark > 0 && want <= mark * 1.001) return Math.max(want, mark * 1.0015);
+  return want;
 }
 
 export function taggedTake(side: Side, last: number, target: number): boolean {
@@ -672,14 +671,19 @@ export function ticketPnl(opts: {
   const favor = (px: number, q: number) =>
     opts.side === "short" ? (opts.entry - px) * q : (px - opts.entry) * q;
   const tp1 = opts.targets[0];
+  const tp2 = opts.targets[1];
   const reduced =
     opts.leftover != null && Number.isFinite(opts.leftover) && orig > 0 && opts.leftover < orig * 0.72;
   const tagged = tp1 != null && taggedTake(opts.side, opts.last, tp1);
+  const hitTp2 = tp2 != null && taggedTake(opts.side, opts.last, tp2);
   const tp1Hit = Boolean(opts.tp1Hit) || reduced || tagged || (opts.beMoved && tp1 != null);
+  if (hitTp2 && opts.leftover === 0) {
+    return favor(tp1 ?? opts.last, orig * 0.5) + favor(opts.last, orig * 0.5);
+  }
   if (tp1Hit && tp1 != null && opts.leftover === 0) {
     const nearEntry = opts.entry > 0 && Math.abs(opts.last - opts.entry) / opts.entry < 0.006;
-    if (nearEntry || opts.beMoved) return favor(tp1, orig * 0.5) + favor(opts.last, orig * 0.5);
-    if (!nearEntry) return favor(opts.last, orig);
+    if (nearEntry) return favor(tp1, orig * 0.5) + favor(opts.last, orig * 0.5);
+    return favor(opts.last, orig);
   }
   const half = orig * 0.5;
   if (tp1Hit && tp1 != null) {

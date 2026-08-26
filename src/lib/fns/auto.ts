@@ -203,6 +203,11 @@ function composePass(note: string | null, liveL: number, liveS: number, liveLine
         /^(Eying |A\+|Took |WR )/i.test(ln) || /^A\+ /.test(ln) || /^Setups:/i.test(ln),
     );
   const uniq = [...new Set([...liveLines.filter(Boolean), ...keep])];
+  if (!uniq.some((ln) => /^A\+/.test(ln))) {
+    uniq.push(
+      "A+ double · pin · engulf · climax · dry-up · washout · failed range · trend cooling · continuation (with BTC). Junk 21h-mean is off.",
+    );
+  }
   return [head, ...uniq].filter(Boolean).join("\n");
 }
 
@@ -294,7 +299,7 @@ function uniqueFills<T extends {
   for (const r of rows) {
     const fill = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
     const bucket = Number.isFinite(fill) ? Math.floor(fill / (2 * 3600_000)) : r.id ?? 0;
-    const key = `${r.weex_symbol ?? "?"}|${r.side ?? "?"}|${bucket}`;
+    const key = String(r.id ?? `${r.weex_symbol ?? "?"}|${r.side ?? "?"}|${bucket}`);
     const prev = best.get(key);
     const ru = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
     const pu = prev ? new Date(prev.filled_at ?? prev.created_at ?? 0).getTime() : 0;
@@ -333,14 +338,10 @@ async function closedStats(
       and filled_at is not null
       and client_oid is not null
       and abs(coalesce(pnl, 0)) > 0.15
-      and (close_reason is null or (
-        close_reason not like 'Duplicate%'
-        and close_reason not like 'Cancelled%'
-        and close_reason not like 'Stale claim%'
-        and close_reason not like 'BE scratch%'
-        and close_reason not like 'Limit%'
-      ))
-      and created_at >= ${from}
+      and close_reason in (
+        'Hit TP1','Hit TP2','TP1 then BE','Hit stop','Closed on WEEX','Closed in green','TP1 then leftover stopped'
+      )
+      and filled_at > now() - interval '21 days'
   `;
   const uniq = uniqueFills(rows).sort(
     (a, b) => new Date(a.filled_at ?? 0).getTime() - new Date(b.filled_at ?? 0).getTime(),
@@ -420,7 +421,20 @@ function tp1Printed(
   return row.side === "short" ? last <= tp1 * 1.001 : last >= tp1 * 0.999;
 }
 
-function closeLabel(beMoved: boolean, printed: boolean, pnl: number, hitStop: boolean): string {
+function closeLabel(
+  beMoved: boolean,
+  printed: boolean,
+  pnl: number,
+  hitStop: boolean,
+  last?: number,
+  targets?: number[],
+  side?: "long" | "short",
+): string {
+  const tp2 = targets?.[1];
+  if (printed && tp2 != null && last != null && side) {
+    const hitTp2 = side === "short" ? last <= tp2 * 1.001 : last >= tp2 * 0.999;
+    if (hitTp2) return "Hit TP2";
+  }
   if (beMoved && printed) return pnl >= 0 ? "TP1 then BE" : "TP1 then leftover stopped";
   if (beMoved && pnl >= 0.15) return "TP1 then BE";
   if (beMoved && !printed && Math.abs(pnl) < 0.15) return "BE scratch — not a win or loss";
@@ -568,7 +582,7 @@ async function restampWeexPnl(
     select * from auto_signals
     where user_id = ${userId}
       and status in ('stopped','targeted','skipped')
-      and filled_at > now() - interval '3 days'
+      and filled_at > now() - interval '48 hours'
   `;
   for (const row of rows) {
     let hit = matchWeexClose(row, closes);
@@ -582,15 +596,23 @@ async function restampWeexPnl(
     }
     if (!hit) continue;
     const settled =
-      /Hit TP1|TP1 then BE|Hit stop|Closed on WEEX|Closed in green/.test(String(row.close_reason ?? "")) &&
+      /Hit TP1|Hit TP2|TP1 then BE|Hit stop|Closed on WEEX|Closed in green/.test(String(row.close_reason ?? "")) &&
       Math.abs(n(row.pnl)) > 0.05 &&
-      Date.now() - new Date(row.updated_at).getTime() > 15 * 60_000;
+      Date.now() - new Date(row.updated_at).getTime() > 15 * 60_000 &&
+      Math.abs(hit.pnl - n(row.pnl)) < 1;
     if (settled) continue;
     if (Math.abs(n(row.pnl) - hit.pnl) < 0.08 && (hit.pnl >= 0) === (n(row.pnl) >= 0) && !String(row.close_reason ?? "").startsWith("BE scratch")) continue;
     const st = hit.pnl >= 0.05 ? "targeted" : hit.pnl <= -0.05 ? "stopped" : "skipped";
     const px = hit.closePx > 0 ? hit.closePx : n(row.closed_px);
+    const tps = parseNums(row.targets);
+    const tp2 = tps[1];
+    const sd = row.side === "short" ? "short" : "long";
+    const tagged2 =
+      tp2 != null && px > 0 && (sd === "short" ? px <= tp2 * 1.001 : px >= tp2 * 0.999);
     const why =
-      hit.pnl <= -0.15
+      tagged2
+        ? "Hit TP2"
+        : hit.pnl <= -0.15
         ? "Hit stop"
         : hit.pnl >= 1
           ? "Hit TP1"
@@ -888,7 +910,15 @@ async function closeFlatOnWeex(
       beMoved: Boolean(pos.be_moved),
       tp1Hit: printed,
     });
-    const why = closeLabel(Boolean(pos.be_moved), printed, pnl, hitSl);
+    const why = closeLabel(
+      Boolean(pos.be_moved),
+      printed,
+      pnl,
+      hitSl,
+      last,
+      parseNums(pos.targets),
+      side,
+    );
     const scratch = why.startsWith("BE scratch");
     const winClose = why === "TP1 then BE" || why === "Closed in green" || (why === "Closed on WEEX" && pnl >= 0);
     const st = scratch
@@ -1182,13 +1212,20 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     if (creds) {
       const { listWeexClosedPnl } = await import("@/lib/weex.server");
       const closes = await listWeexClosedPnl(creds).catch(() => []);
-      for (const t of mapped) {
-        if (t.liveOnWeex || t.status === "filled" || t.status === "working") continue;
-        const hit = matchWeexClose(
-          { weex_symbol: t.weexSymbol, side: t.side, created_at: t.createdAt, updated_at: t.updatedAt },
-          closes,
-        );
-        if (hit) t.pnl = hit.pnl;
+      if (closes.length) {
+        const used = new Set<string>();
+        for (const t of mapped) {
+          if (t.liveOnWeex || t.status === "filled" || t.status === "working") continue;
+          const hit = matchWeexClose(
+            { weex_symbol: t.weexSymbol, side: t.side, created_at: t.createdAt, updated_at: t.updatedAt },
+            closes,
+          );
+          if (!hit) continue;
+          const k = `${hit.symbol}|${hit.ts}|${hit.pnl.toFixed(4)}`;
+          if (used.has(k)) continue;
+          used.add(k);
+          t.pnl = hit.pnl;
+        }
       }
     }
     const liveL = mapped.filter((t) => t.liveOnWeex && t.side === "long").length;
@@ -1531,7 +1568,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         beMoved: true,
         tp1Hit: true,
       });
-      const why = closeLabel(true, printed, pnl, !printed && pnl < 0);
+      const why = closeLabel(true, printed, pnl, !printed && pnl < 0, last, parseNums(row.targets), side);
       const already = row.close_reason === why && Math.abs(n(row.pnl) - pnl) < 0.02;
       if (already) continue;
       if (
