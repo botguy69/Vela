@@ -585,9 +585,13 @@ async function ensureTakes(
   const stacked = (await listWeexAlgos(creds, pos.weex_symbol)).length;
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
   const want = 1 + Math.min(2, parseNums(pos.targets).length || 2);
-  const force = stopOverride != null || stacked !== want;
   const resp = pos.weex_resp ?? "";
-  if (!force && stacked === want && /tps:(ok|swept|lock)/.test(resp)) return;
+  const already = /tps:(ok|swept)/.test(resp);
+  const extras = stacked > want;
+  const sweptAt = Number(/tps:swept@(\d+)/.exec(resp)?.[1] || 0);
+  if (already && !extras && stopOverride == null) return;
+  if (sweptAt && Date.now() - sweptAt < 120_000 && !extras && stopOverride == null) return;
+  const force = extras || stopOverride != null || !already;
   const { coinByWeex } = await import("@/lib/universe");
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
@@ -616,8 +620,20 @@ async function ensureTakes(
   }
   const side = pos.side === "short" ? "SHORT" : "LONG";
   await cancelWeexProtective(creds, pos.weex_symbol);
-  const still = await listWeexAlgos(creds, pos.weex_symbol);
-  if (still.length) await cancelWeexProtective(creds, pos.weex_symbol);
+  let still = await listWeexAlgos(creds, pos.weex_symbol);
+  if (still.length) {
+    await cancelWeexProtective(creds, pos.weex_symbol);
+    still = await listWeexAlgos(creds, pos.weex_symbol);
+  }
+  const stamp = `${resp.replace(/tps:(lock|ok|swept)@?\d*/g, "").trim()} tps:ok tps:swept@${Date.now()}`.slice(0, 500);
+  if (still.length > 0) {
+    notes.push(
+      `${pos.weex_symbol} ${still.length} TPSL still on WEEX after cancel — not stacking more. In WEEX: Cancel all TP/SL on this pair. Bot will not add until that pile is gone.`,
+    );
+    await sql`update auto_signals set weex_resp = ${stamp}, updated_at = now() where id = ${pos.id}`;
+    pos.weex_resp = stamp;
+    return;
+  }
   const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
   if (stopPx > 0) {
     await moveWeexStop(creds, {
@@ -643,13 +659,13 @@ async function ensureTakes(
     if (sent.ok) ok += 1;
     else notes.push(`${pos.weex_symbol} TP${i + 1} failed: ${sent.error.slice(0, 80)}`);
   }
-  notes.push(`${pos.weex_symbol} swept to 1 SL @ ${stopPx.toFixed(4)} + ${ok} TP (had ${stacked} orders)`);
+  notes.push(`${pos.weex_symbol} 1 SL @ ${stopPx.toFixed(4)} + ${ok} TP`);
   await sql`
     update auto_signals
-    set weex_resp = ${`${resp} tps:ok tps:swept`.slice(0, 500)}, updated_at = now()
+    set weex_resp = ${stamp}, updated_at = now()
     where id = ${pos.id}
   `;
-  pos.weex_resp = `${resp} tps:ok tps:swept`;
+  pos.weex_resp = stamp;
   pos.stop = stopPx;
 }
 
