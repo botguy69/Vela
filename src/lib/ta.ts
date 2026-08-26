@@ -675,9 +675,10 @@ export function ticketPnl(opts: {
   const reduced =
     opts.leftover != null && Number.isFinite(opts.leftover) && orig > 0 && opts.leftover < orig * 0.72;
   const tagged = tp1 != null && taggedTake(opts.side, opts.last, tp1);
-  const tp1Hit = Boolean(opts.tp1Hit) || reduced || tagged;
+  const tp1Hit = Boolean(opts.tp1Hit) || reduced || tagged || (opts.beMoved && tp1 != null);
   if (tp1Hit && tp1 != null && opts.leftover === 0) {
     const nearEntry = opts.entry > 0 && Math.abs(opts.last - opts.entry) / opts.entry < 0.006;
+    if (nearEntry || opts.beMoved) return favor(tp1, orig * 0.5) + favor(opts.last, orig * 0.5);
     if (!nearEntry) return favor(opts.last, orig);
   }
   const half = orig * 0.5;

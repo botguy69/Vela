@@ -408,9 +408,9 @@ function tp1Printed(
 }
 
 function closeLabel(beMoved: boolean, printed: boolean, pnl: number, hitStop: boolean): string {
-  if (beMoved && !printed && Math.abs(pnl) < 0.4) return "BE scratch — not a win or loss";
-  if (beMoved && printed && pnl >= 1) return "Hit TP1";
   if (beMoved && printed) return pnl >= 0 ? "TP1 then BE" : "TP1 then leftover stopped";
+  if (beMoved && pnl >= 0.15) return "TP1 then BE";
+  if (beMoved && !printed && Math.abs(pnl) < 0.15) return "BE scratch — not a win or loss";
   if (hitStop && pnl <= 0) return "Hit stop";
   if (pnl > 0.4) return beMoved && !printed ? "Closed in green" : "Closed on WEEX";
   if (pnl < -0.4) return "Closed on WEEX";
@@ -580,9 +580,11 @@ async function restampWeexPnl(
             ? "TP1 then BE"
             : hit.pnl >= 0.15
               ? "Closed in green"
-              : Math.abs(hit.pnl) < 0.15
-                ? "BE scratch — not a win or loss"
-                : row.close_reason;
+              : Boolean(row.be_moved)
+                ? "TP1 then BE"
+                : Math.abs(hit.pnl) < 0.15
+                  ? "BE scratch — not a win or loss"
+                  : row.close_reason;
     await sql`
       update auto_signals
       set pnl = ${hit.pnl},
@@ -1449,6 +1451,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     }
 
     const notes: string[] = [];
+    if (settings.stats_from) {
+      await sql`update auto_settings set stats_from = null, updated_at = now() where user_id = ${userId}`;
+      settings.stats_from = null;
+    }
     {
       const credsEarly = await credsFrom(settings);
       if (credsEarly) await restampWeexPnl(sql, userId, credsEarly, notes);
