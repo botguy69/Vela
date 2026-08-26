@@ -2123,10 +2123,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const whyLive = stillOpen
       .filter((s) => s.status === "filled" || s.status === "working")
       .map((s) => {
-        const tail = (s.thesis ?? "").split("·").pop()?.trim() || s.thesis || "";
-        const kind = rules.aPlusKind(s.thesis ?? "");
-        const why = kind ? `${kind} — ${tail.slice(0, 52)}` : tail.slice(0, 56);
-        return `${s.weex_symbol.replace("USDT", "")} ${s.side} ${Math.round(n(s.confidence))}% ${why}`;
+        const tail = (s.thesis ?? "").split("·").pop()?.trim() || "";
+        return `${s.weex_symbol.replace("USDT", "")} ${s.side} ${Math.round(n(s.confidence))}% — ${tail.slice(0, 64)}`;
       });
     const credsGate2 = await credsFrom(settings);
     let parked: SignalRow | null = null;
@@ -2211,13 +2209,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         ...dbFilled.map((s) => s.weex_symbol),
       ];
       const beN = liveN.filter((p) => beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-      huntTape = [
-        huntStatus,
-        whyLive.length ? `Why    ${whyLive.join("  ·  ")}` : "",
-        `Live: ${[...new Set(names)].join(", ") || "—"}${beN ? ` · ${beN} BE leftover` : ""}.`,
-      ]
-        .filter(Boolean)
-        .join("\n");
+      huntTape = [huntStatus, whyLive.length ? whyLive.join("\n") : ""].filter(Boolean).join("\n");
       notes.push(
         `${[...new Set(names)].join(" ")} · 2 long + 2 short at-risk. Next after TP1/BE. ${beN} leftover(s) · cap 6.`,
       );
@@ -2277,18 +2269,27 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const btc15 = await getWeexKlines("BTCUSDT", "15m", 48).catch(() => []);
           const btc4 = await getWeexFourHour("BTCUSDT").catch(() => []);
           const compass = rules.marketBias(btc4, btcBook, btc15);
-          const ordered = [...raw].sort(
-            (a, b) => (b.confidence ?? b.score) - (a.confidence ?? a.score),
-          );
-          const eyeing = ordered.slice(0, 5).map((s) => {
-            const conf = Math.round(s.confidence ?? s.score);
-            const bit = (s.thesis ?? "").split("·").pop()?.trim() ?? "";
-            return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${conf}% ${s.rr.toFixed(1)}R${bit ? ` ${bit.slice(0, 42)}` : ""}`;
+          const ordered = [...raw].sort((a, b) => {
+            const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf) ? 1 : 0;
+            const bA = rules.eliteScalp(b.thesis ?? "", b.confidence ?? scoreToConf(b.score), bar.minConf) ? 1 : 0;
+            if (needS > 0 && needL === 0) {
+              const as = a.side === "short" ? 1 : 0;
+              const bs = b.side === "short" ? 1 : 0;
+              if (as !== bs) return bs - as;
+            }
+            if (needL > 0 && needS === 0) {
+              const al = a.side === "long" ? 1 : 0;
+              const bl = b.side === "long" ? 1 : 0;
+              if (al !== bl) return bl - al;
+            }
+            if (aA !== bA) return bA - aA;
+            return (b.confidence ?? b.score) - (a.confidence ?? a.score);
           });
+          let veto =
+            needS > 0 && needL === 0
+              ? "No A+ short this pass."
+              : "No A+ this pass.";
           const whyNot: string[] = [];
-          let veto = ordered.length
-            ? `Empty slots OK. ${ordered.length} idea(s) ranked — none cleared HTF/15m/conf. BTC RSI ${btcRsi.toFixed(0)} ATR ${regime.ratio.toFixed(1)}×.`
-            : `Empty slots OK. No A+ this tick. BTC RSI ${btcRsi.toFixed(0)} last ${btcLast?.toFixed(0) ?? "?"} ATR ${regime.ratio.toFixed(1)}×.`;
 
           for (const pick of ordered) {
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
@@ -2409,26 +2410,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
           huntTape = [
             huntStatus,
-            whyLive.length ? `Why    ${whyLive.join("  ·  ")}` : "",
-            compass.note,
-            `A+     ${rules.APLUS_MENU}`,
             sized
-              ? `Took ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% ${sized.entryType}.`
-              : "Stood down this pass — nothing cleared the bar.",
-            (() => {
-              const kinds = [...new Set(ordered.map((s) => rules.aPlusKind(s.thesis ?? "")).filter(Boolean))];
-              return kinds.length
-                ? `Setups this pass  ${kinds.join(" · ")}`
-                : "Setups this pass  none of the A+ catalog printed.";
-            })(),
-            (() => {
-              const rest = sized
-                ? eyeing.filter((e) => !e.toUpperCase().startsWith(sized.weexSymbol.replace("USDT", "").toUpperCase()))
-                : eyeing;
-              return rest.length ? `Watch  ${rest.join("  ·  ")}` : "Watch  none — no 78%+ names on the list.";
-            })(),
-            whyNot.length ? `Pass   ${[...new Set(whyNot)].slice(0, 4).join("  ·  ")}` : "",
-            `Tape   BTC RSI ${btcRsi.toFixed(0)}  ·  ATR ${regime.ratio.toFixed(1)}×  ·  ${riskL}L/${riskS}S  ·  ${corrected.marginPct}% risk`,
+              ? `Took ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% — ${(sized.thesis ?? "").split("·").pop()?.trim() ?? ""}`
+              : whyLive.length
+                ? whyLive.join("\n")
+                : veto,
           ]
             .filter(Boolean)
             .join("\n");

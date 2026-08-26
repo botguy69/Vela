@@ -170,36 +170,6 @@ export function analyzeMarket(
 
   const ideas: Idea[] = [];
 
-  if (up && r <= 58 && r >= 28) {
-    const entry = Math.max(mid, last - 0.35 * a);
-    const stop = Math.min(lo, entry) - stopPad * a * 0.35;
-    ideas.push({
-      side: "long",
-      entry,
-      stop,
-      entryType: last - entry < 0.2 * a ? "market" : "limit",
-      score: 70 + Math.max(0, 52 - Math.abs(r - 44)) / 4 + (up ? 8 : 0),
-      thesis: `Bid 21h mean, RSI ${r.toFixed(0)}`,
-      invalidation: `Hourly close back through the 21-hour average.`,
-      plan: "scale2",
-    });
-  }
-
-  if (down && r >= 42 && r <= 72) {
-    const entry = Math.min(mid, last + 0.35 * a);
-    const stop = Math.max(hi, entry) + stopPad * a * 0.35;
-    ideas.push({
-      side: "short",
-      entry,
-      stop,
-      entryType: entry - last < 0.2 * a ? "market" : "limit",
-      score: 70 + Math.max(0, 52 - Math.abs(r - 56)) / 4 + (down ? 8 : 0),
-      thesis: `Offer 21h mean, RSI ${r.toFixed(0)}`,
-      invalidation: `Hourly close back above the 21-hour average.`,
-      plan: "scale2",
-    });
-  }
-
   // Continuation: with the mean, not already 1 ATR into the spike.
   if (up && r >= 42 && r <= 62 && last <= mid + 0.85 * a && last >= mid * 0.998) {
     const entry = Math.min(last, fast + 0.1 * a);
@@ -267,7 +237,7 @@ export function analyzeMarket(
       entry,
       stop,
       entryType: "market",
-      score: 68 + (r - 72),
+      score: 80 + Math.min(6, r - 72) * 0.4,
       thesis: `Overbought RSI ${r.toFixed(0)}`,
       invalidation: `Break of the local swing high.`,
       plan: "scale2",
@@ -287,7 +257,7 @@ export function analyzeMarket(
         entry: last,
         stop: Math.max(hi, last) + stopPad * a * 0.35,
         entryType: "market",
-        score: 73 + Math.min(6, r - 64),
+        score: 80 + Math.min(6, r - 64) * 0.3,
         thesis: `Trend cooling, RSI ${r.toFixed(0)} off ${rAgo.toFixed(0)}`,
         invalidation: `Hourly close makes a new high.`,
         plan: "scale2",
