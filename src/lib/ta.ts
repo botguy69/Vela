@@ -621,10 +621,25 @@ export function breakevenPrice(side: Side, entry: number): number {
   return side === "long" ? entry * (1 + roundTrip) : entry * (1 - roundTrip);
 }
 
+/** Long SL must sit below mark; short SL above. Null = would fire now — flatten leftover. */
+export function safeBeStop(side: Side, entry: number, mark: number, weexBe: number): number | null {
+  const raw = weexBe > 0 ? weexBe : breakevenPrice(side, entry);
+  if (!(raw > 0) || !(mark > 0)) return null;
+  if (side === "long") {
+    const be = Math.max(raw, entry * 1.0004);
+    if (be >= mark * 0.999) return null;
+    return be;
+  }
+  const be = Math.min(raw, entry * 0.9996);
+  if (be <= mark * 1.001) return null;
+  return be;
+}
+
 export function taggedTake(side: Side, last: number, target: number): boolean {
   if (!(target > 0) || !(last > 0)) return false;
   return side === "long" ? last >= target * 0.999 : last <= target * 1.001;
 }
+
 export function shouldLockBreakeven(opts: {
   side: Side;
   entry: number;
@@ -662,26 +677,21 @@ export function ticketPnl(opts: {
   const tagged = tp1 != null && taggedTake(opts.side, opts.last, tp1);
   const tp1Hit = Boolean(opts.tp1Hit) || reduced || tagged;
   const half = orig * 0.5;
-  const atBe = Math.abs(opts.last - opts.entry) / opts.entry < 0.004;
-  if (opts.leftover === 0) {
-    if (opts.beMoved && tp1Hit && tp1 != null && atBe && !tagged) {
-      return favor(tp1, half) + favor(opts.last, half);
-    }
-    return favor(opts.last, orig);
-  }
-  if (opts.beMoved && tp1Hit && tp1 != null) {
+  if (tp1Hit && tp1 != null) {
     const left =
       opts.leftover != null && Number.isFinite(opts.leftover) && opts.leftover >= 0
         ? opts.leftover
-        : half;
-    return favor(tp1, half) + favor(opts.last, left);
+        : opts.leftover === 0
+          ? half
+          : half;
+    const closed = Math.max(0, orig - (opts.leftover === 0 ? half : left));
+    const takeQty = closed > 0 ? closed : half;
+    const rest = opts.leftover === 0 ? orig - takeQty : left;
+    return favor(tp1, takeQty) + favor(opts.last, rest);
   }
   const left =
     opts.leftover != null && Number.isFinite(opts.leftover) && opts.leftover >= 0
       ? opts.leftover
       : orig;
-  const closed = Math.max(0, orig - left);
-  let realized = 0;
-  if (closed > 0 && tp1 != null) realized += favor(tp1, closed);
-  return realized + favor(opts.last, left);
+  return favor(opts.last, left > 0 ? left : orig);
 }

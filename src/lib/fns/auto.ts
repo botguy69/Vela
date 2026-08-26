@@ -1374,9 +1374,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       if (!printed && tp1 != null) {
         const hours = await getWeexKlines(row.weex_symbol, "1h", 80).catch(() => []);
         const since = new Date(row.filled_at ?? row.created_at).getTime();
+        const until = new Date(row.updated_at ?? row.created_at).getTime();
         const after = hours.filter((c) => {
           const t = c.time > 1e12 ? c.time : c.time * 1000;
-          return Number.isFinite(since) ? t >= since - 3600_000 : true;
+          return Number.isFinite(since) ? t >= since - 3600_000 && t <= until + 60_000 : true;
         });
         if (after.length) {
           const ext =
@@ -1701,27 +1702,51 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         })
       ) {
         const creds = await credsFrom(settings);
-        const be = await weexFeeBe(creds, pos.weex_symbol, side, entry);
-        let moved = false;
-        if (creds) {
-          pos.stop = be;
-          await ensureTakes(pos, notes, creds, be);
-          moved = true;
-        }
+        const rawBe = await weexFeeBe(creds, pos.weex_symbol, side, entry);
+        const { safeBeStop } = await import("@/lib/ta");
+        const be = safeBeStop(side, entry, mark || px, rawBe);
         const hitFirst = tps[0] != null && taggedTake(side, mark, tps[0]!);
         const printed = Boolean(reduced || hitFirst);
-        if (moved || !creds) {
+        if (be == null && creds) {
+          const liveLeft = (await (await import("@/lib/weex.server")).getWeexPositionQty(creds, pos.weex_symbol)) ?? 0;
+          if (liveLeft > 0) {
+            const spec = await specFor(coinByWeex(pos.weex_symbol));
+            const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
+            await cancelWeexProtective(creds, pos.weex_symbol).catch(() => null);
+            await flattenWeex(creds, {
+              symbol: pos.weex_symbol,
+              side: side === "short" ? "BUY" : "SELL",
+              positionSide: side === "short" ? "SHORT" : "LONG",
+              quantity: formatWeexQty(liveLeft, spec.quantityPrecision),
+              clientOid: `velabe${pos.id}${Date.now().toString(36)}`.slice(0, 36),
+            });
+            notes.push(`${pos.weex_symbol} TP1 banked — BE would fire through the market, flattened leftover.`);
+          }
           await sql`
             update auto_signals
-            set stop = ${be}, be_moved = true, tp1_hit = ${printed}, updated_at = now()
+            set be_moved = true, tp1_hit = true, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
-          if (moved) {
-            notes.push(
-              printed
-                ? `${pos.weex_symbol} TP1 printed · stop to fee BE ${be.toFixed(4)}`
-                : `${pos.weex_symbol} size cut · stop to fee BE ${be.toFixed(4)}`,
-            );
+        } else if (be != null) {
+          let moved = false;
+          if (creds) {
+            pos.stop = be;
+            await ensureTakes(pos, notes, creds, be);
+            moved = true;
+          }
+          if (moved || !creds) {
+            await sql`
+              update auto_signals
+              set stop = ${be}, be_moved = true, tp1_hit = ${printed}, updated_at = now()
+              where id = ${pos.id} and user_id = ${userId}
+            `;
+            if (moved) {
+              notes.push(
+                printed
+                  ? `${pos.weex_symbol} TP1 printed · stop to fee BE ${be.toFixed(4)} (under the market)`
+                  : `${pos.weex_symbol} size cut · stop to fee BE ${be.toFixed(4)}`,
+              );
+            }
           }
         }
       } else if (pos.be_moved) {
