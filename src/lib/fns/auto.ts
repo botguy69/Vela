@@ -476,26 +476,43 @@ async function ticketLedger(
 }
 
 function whyFromWeex(
-  hit: { pnl: number; closePx: number },
-  row: { side: string; be_moved?: boolean | null; targets?: string | null },
+  hit: { pnl: number; closePx: number; ts?: number },
+  row: {
+    side: string;
+    be_moved?: boolean | null;
+    targets?: string | null;
+    filled_at?: string | null;
+    created_at?: string;
+  },
   px: number,
 ): string {
   const tps = parseNums(row.targets);
   const tp2 = tps[1];
   const sd = row.side === "short" ? "short" : "long";
-  if (tp2 != null && px > 0 && (sd === "short" ? px <= tp2 * 1.003 : px >= tp2 * 0.997)) return "Hit TP2";
+  const near = (level: number) =>
+    sd === "short" ? px <= level * 1.006 : px >= level * 0.994;
+  if (tp2 != null && px > 0 && near(tp2)) return "Hit TP2";
   if (hit.pnl <= -0.15) return "Hit stop";
-  if (hit.pnl >= 1) return "Hit TP1";
+  const t0 = new Date(row.filled_at ?? row.created_at ?? 0).getTime();
+  const heldH = t0 > 0 && hit.ts ? (hit.ts - t0) / 3600_000 : 0;
+  if (heldH >= 5 && Math.abs(hit.pnl) < 0.5) return "Time stop — flattened";
   if (hit.pnl >= 0.15 && Boolean(row.be_moved)) return "TP1 then BE";
+  if (hit.pnl >= 1) return "Hit TP1";
   if (hit.pnl >= 0.15) return "Closed in green";
-  if (hit.pnl <= -0.08) return "Closed on WEEX";
+  if (hit.pnl <= -0.05) return "Hit stop";
   return "Closed on WEEX";
 }
 
-function applyWeexHit(hit: { pnl: number; closePx: number; qty?: number }, row: SignalRow) {
+function applyWeexHit(hit: { pnl: number; closePx: number; qty?: number; ts?: number }, row: SignalRow) {
   const px = hit.closePx > 0 ? hit.closePx : n(row.closed_px);
   const why = whyFromWeex(hit, row, px);
-  const st = hit.pnl >= 0.05 ? "targeted" : hit.pnl <= -0.05 ? "stopped" : "skipped";
+  const st = why.startsWith("Time stop")
+    ? "skipped"
+    : hit.pnl >= 0.05
+      ? "targeted"
+      : hit.pnl <= -0.05
+        ? "stopped"
+        : "skipped";
   return { pnl: hit.pnl, px, why, st };
 }
 
@@ -504,37 +521,41 @@ function matchWeexClose(
     weex_symbol: string;
     side: string;
     created_at: string;
+    filled_at?: string | null;
     updated_at?: string | null;
     fill_px?: string | number | null;
     entry?: string | number | null;
   },
   closes: { symbol: string; side?: "long" | "short"; pnl: number; closePx: number; entry?: number; ts: number; qty?: number }[],
+  used?: Set<string>,
 ) {
   const key = row.weex_symbol.replace(/_/g, "").toUpperCase();
   const side = row.side === "short" ? "short" : "long";
-  const created = new Date(row.created_at).getTime();
-  const updated = new Date(row.updated_at ?? row.created_at).getTime();
+  const t0 = new Date(row.filled_at ?? row.created_at).getTime();
+  const t1 = new Date(row.updated_at ?? row.filled_at ?? row.created_at).getTime();
   const entry = n(row.fill_px) || n(row.entry);
   const cands = closes.filter((c) => {
     if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
     if (c.side && c.side !== side) return false;
-    if (c.ts && (c.ts < created - 2 * 3600_000 || c.ts > Math.max(updated, created) + 18 * 3600_000))
-      return false;
+    const id = `${c.symbol}|${c.side ?? "?"}|${c.entry ?? 0}|${c.ts}|${c.pnl}`;
+    if (used?.has(id)) return false;
+    if (c.ts && t0 > 0 && (c.ts < t0 - 4 * 3600_000 || c.ts > t1 + 48 * 3600_000)) return false;
     return true;
   });
   if (!cands.length) return null;
   const scored = cands.map((c) => {
     const ed =
       entry > 0 && c.entry && c.entry > 0 ? Math.abs(c.entry - entry) / entry : 0.5;
-    const td = c.ts ? Math.abs(c.ts - created) / 3600_000 : 9;
+    const td = c.ts && t0 > 0 ? Math.abs(c.ts - t0) / 3600_000 : 9;
     return { c, score: ed * 5000 + td };
   });
   scored.sort((a, b) => a.score - b.score);
   const top = scored[0]!.c;
   const ed = entry > 0 && top.entry && top.entry > 0 ? Math.abs(top.entry - entry) / entry : -1;
-  const td = top.ts ? Math.abs(top.ts - created) / 3600_000 : 9;
+  const td = top.ts && t0 > 0 ? Math.abs(top.ts - t0) / 3600_000 : 9;
   if (ed >= 0 && ed > 0.012) return null;
-  if (ed < 0 && td > 8) return null;
+  if (ed < 0 && td > 12) return null;
+  used?.add(`${top.symbol}|${top.side ?? "?"}|${top.entry ?? 0}|${top.ts}|${top.pnl}`);
   return top;
 }
 
@@ -582,13 +603,20 @@ async function restampWeexPnl(
     select * from auto_signals
     where user_id = ${userId}
       and status in ('stopped','targeted','skipped')
-      and filled_at > now() - interval '48 hours'
+      and filled_at > now() - interval '7 days'
   `;
+  const used = new Set<string>();
   for (const row of rows) {
-    const hit = matchWeexClose(row, closes);
+    if (/^Limit |^Duplicate|^Replaced by|^Cancelled/.test(String(row.close_reason ?? ""))) continue;
+    const hit = matchWeexClose(row, closes, used);
     if (!hit) continue;
-    if (Math.abs(hit.pnl - n(row.pnl)) < 0.15 && !String(row.close_reason ?? "").startsWith("BE scratch")) continue;
     const book = applyWeexHit(hit, row);
+    if (
+      Math.abs(book.pnl - n(row.pnl)) < 0.05 &&
+      row.close_reason === book.why &&
+      row.status === book.st
+    )
+      continue;
     await sql`
       update auto_signals
       set pnl = ${book.pnl},

@@ -447,11 +447,11 @@ export async function listWeexClosedPnl(creds: WeexCreds, symbol?: string): Prom
     { path: "/capi/v3/userTrades", query: q() },
     { path: "/capi/v3/income", query: { incomeType: "REALIZED_PNL", limit: "100", ...(sym ? { symbol: sym } : {}) } },
   ];
-  const out: WeexClose[] = [];
-  const seen = new Set<string>();
   for (const p of paths) {
     const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
     if (!res.ok) continue;
+    const batch: WeexClose[] = [];
+    const seen = new Set<string>();
     for (const row of rowsFrom(res.data)) {
       const hit = parseClose(row as Record<string, unknown>);
       if (!hit) continue;
@@ -459,11 +459,43 @@ export async function listWeexClosedPnl(creds: WeexCreds, symbol?: string): Prom
       const k = `${hit.symbol}|${hit.ts}|${hit.pnl.toFixed(4)}`;
       if (seen.has(k)) continue;
       seen.add(k);
-      out.push(hit);
+      batch.push(hit);
     }
+    if (!batch.length) continue;
+    const collapsed = collapseCloses(batch);
+    collapsed.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    return collapsed.slice(0, 200);
   }
-  out.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-  return out.slice(0, 200);
+  return [];
+}
+
+function collapseCloses(closes: WeexClose[]): WeexClose[] {
+  const m = new Map<string, WeexClose>();
+  for (const c of closes) {
+    const ek = c.entry > 0 ? c.entry.toPrecision(5) : "x";
+    const k = `${c.symbol}|${c.side ?? "?"}|${ek}`;
+    const prev = m.get(k);
+    if (!prev) {
+      m.set(k, { ...c });
+      continue;
+    }
+    const bigger = Math.max(Math.abs(c.pnl), Math.abs(prev.pnl));
+    const smaller = Math.min(Math.abs(c.pnl), Math.abs(prev.pnl));
+    const dup = bigger > 0.3 && smaller > 0.3 && smaller / bigger > 0.8 && Math.sign(c.pnl) === Math.sign(prev.pnl);
+    if (dup) {
+      m.set(k, Math.abs(c.pnl) > Math.abs(prev.pnl) ? c : prev);
+      continue;
+    }
+    m.set(k, {
+      ...prev,
+      pnl: prev.pnl + c.pnl,
+      qty: Math.max(prev.qty, c.qty),
+      closePx: (c.ts || 0) >= (prev.ts || 0) ? c.closePx || prev.closePx : prev.closePx,
+      ts: Math.max(prev.ts || 0, c.ts || 0),
+      entry: prev.entry > 0 ? prev.entry : c.entry,
+    });
+  }
+  return [...m.values()];
 }
 
 export async function getWeexPositionQty(
