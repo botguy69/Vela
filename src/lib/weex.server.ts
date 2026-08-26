@@ -677,6 +677,44 @@ export async function listWeexAlgoRows(
   return out;
 }
 
+export async function trimWeexTakes(
+  creds: WeexCreds,
+  symbol: string,
+  opts: { side: "long" | "short"; sl: number; tps: number[]; mark?: number },
+): Promise<{ kept: number; killed: number; haveSl: boolean; haveTp: number }> {
+  const rows = await listWeexAlgoRows(creds, symbol);
+  const mark = opts.mark ?? 0;
+  const sl = opts.sl;
+  const tps = opts.tps.filter((p) => p > 0).slice(0, 2);
+  const isStop = (r: { type: string; trigger: number }) => {
+    if (/TAKE|PROFIT|^TP$|TP-|pos_profit/i.test(r.type) && !/STOP|LOSS/i.test(r.type)) return false;
+    if (/STOP|LOSS|^SL$|SL-|pos_loss|STOP_MARKET/i.test(r.type)) return true;
+    if (!(r.trigger > 0) || !(mark > 0)) return false;
+    return opts.side === "long" ? r.trigger < mark * 0.9995 : r.trigger > mark * 1.0005;
+  };
+  const isTp = (r: { type: string; trigger: number }) => {
+    if (/STOP|LOSS|^SL$|SL-|pos_loss/i.test(r.type) && !/TAKE|PROFIT/i.test(r.type)) return false;
+    if (/TAKE|PROFIT|^TP$|TP-|pos_profit/i.test(r.type)) return true;
+    if (!(r.trigger > 0) || !(mark > 0)) return false;
+    return opts.side === "long" ? r.trigger > mark * 1.0005 : r.trigger < mark * 0.9995;
+  };
+  const keep = new Set<string>();
+  const slRows = rows.filter(isStop).sort((a, b) => Math.abs(a.trigger - sl) - Math.abs(b.trigger - sl));
+  if (slRows[0]) keep.add(slRows[0].id);
+  const tpRows = rows.filter((r) => isTp(r) && !keep.has(r.id));
+  for (const tp of tps) {
+    const cand = tpRows
+      .filter((r) => !keep.has(r.id))
+      .sort((a, b) => Math.abs(a.trigger - tp) - Math.abs(b.trigger - tp))[0];
+    if (cand) keep.add(cand.id);
+  }
+  const kill = rows.filter((r) => !keep.has(r.id)).map((r) => r.id);
+  if (kill.length) await cancelAlgoIds(creds, symbol, kill);
+  const haveSl = [...keep].some((id) => slRows.some((r) => r.id === id));
+  const haveTp = Math.max(0, keep.size - (haveSl ? 1 : 0));
+  return { kept: keep.size, killed: kill.length, haveSl, haveTp };
+}
+
 export async function listWeexAlgos(creds: WeexCreds, symbol: string): Promise<string[]> {
   return (await listWeexAlgoRows(creds, symbol)).map((r) => r.id);
 }
