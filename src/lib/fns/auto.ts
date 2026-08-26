@@ -332,10 +332,9 @@ async function closedStats(
   const uniq = uniqueFills(rows).sort(
     (a, b) => new Date(a.filled_at ?? 0).getTime() - new Date(b.filled_at ?? 0).getTime(),
   );
-  const sample = uniq.slice(-10);
-  const closed = sample.length;
-  const wins = sample.filter((r) => n(r.pnl) > 0).length;
-  const rs = sample
+  const closed = uniq.length;
+  const wins = uniq.filter((r) => n(r.pnl) > 0).length;
+  const rs = uniq
     .map((r) => {
       const risk = oneRUsd(r);
       if (!(risk > 0.01)) return null;
@@ -351,13 +350,14 @@ async function closedStats(
     winRate: closed > 0 ? (wins / closed) * 100 : 0,
     avgWinR: avg(winRs),
     avgLossR: avg(lossRs),
-    names: [...sample]
+    names: [...uniq]
       .reverse()
       .map((r) => {
         const p = n(r.pnl);
         const pair = (r.weex_symbol ?? "").replace("USDT", "");
         return `${pair} ${p >= 0 ? "+" : ""}${p.toFixed(2)}`;
-      }),
+      })
+      .slice(0, 20),
   };
 }
 
@@ -1458,14 +1458,18 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       where user_id = ${userId}
         and be_moved = true
         and status in ('skipped','stopped','targeted')
-        and close_reason in ('Closed on WEEX', 'Hit stop', 'TP1 then BE')
+        and close_reason in ('Closed on WEEX', 'Hit stop', 'TP1 then BE', 'BE scratch — not a win or loss')
         and filled_at > now() - interval '6 hours'
     `;
     for (const row of botched) {
       const entry = n(row.fill_px ?? row.entry);
       const last = n(row.closed_px) || entry;
       const side = row.side === "short" ? "short" : "long";
-      const printed = tp1Credible(side, entry, last, row);
+      const printed =
+        tp1Credible(side, entry, last, row) ||
+        (Boolean(row.be_moved) &&
+          parseNums(row.targets)[0] != null &&
+          (side === "long" ? last >= entry * 0.999 : last <= entry * 1.001));
       const pnl = ticketPnl({
         side,
         entry,
