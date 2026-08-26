@@ -507,11 +507,32 @@ function matchWeexClose(
       return !c.side || c.side === side;
     });
     if (!loose.length) return null;
-    loose.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
-    return loose[0] ?? null;
+    cands.push(...loose);
   }
-  cands.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
-  return cands[0] ?? null;
+  cands.sort((a, b) => {
+    const q = (b.qty ?? 0) - (a.qty ?? 0);
+    if (q !== 0) return q;
+    return Math.abs(b.pnl) - Math.abs(a.pnl);
+  });
+  const top = cands[0]!;
+  const rest = cands.filter((c) => c !== top);
+  const samePx = rest.filter(
+    (c) => top.closePx > 0 && c.closePx > 0 && Math.abs(c.closePx - top.closePx) / top.closePx < 0.002,
+  );
+  if ((top.qty ?? 0) < 1 && samePx.length) {
+    const pnl = top.pnl + samePx.reduce((s, c) => s + c.pnl, 0);
+    const qty = samePx.reduce((s, c) => s + (c.qty ?? 0), top.qty ?? 0);
+    return { ...top, pnl, qty };
+  }
+  const split = cands.filter((c) => Math.abs(c.pnl) > 0.05);
+  if (split.length > 1 && (top.qty ?? 0) < split.reduce((s, c) => s + (c.qty ?? 0), 0) * 0.7) {
+    return {
+      ...top,
+      pnl: split.reduce((s, c) => s + c.pnl, 0),
+      qty: split.reduce((s, c) => s + (c.qty ?? 0), 0),
+    };
+  }
+  return top;
 }
 
 async function restampWeexPnl(
@@ -1422,7 +1443,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const why = closeLabel(true, printed, pnl, !printed && pnl < 0);
       const already = row.close_reason === why && Math.abs(n(row.pnl) - pnl) < 0.02;
       if (already) continue;
-      if (Math.abs(n(row.pnl)) > 1 && Math.abs(n(row.pnl) - pnl) > 1) continue;
+      if (Math.abs(n(row.pnl)) > 1) continue;
       const st = why.startsWith("BE scratch")
         ? "skipped"
         : pnl < 0 || why === "Hit stop" || why === "TP1 then leftover stopped"

@@ -377,7 +377,21 @@ function parseClose(r: Record<string, unknown>): WeexClose | null {
   const closePx = Number(
     r.closePrice ?? r.closeAvgPrice ?? r.avgClosePrice ?? r.price ?? r.markPrice ?? 0,
   );
-  const qty = Math.abs(Number(r.closeSize ?? r.size ?? r.qty ?? r.holdVol ?? r.amount ?? 0));
+  const qty = Math.abs(
+    Number(
+      r.closeSize ??
+        r.size ??
+        r.qty ??
+        r.holdVol ??
+        r.amount ??
+        r.closeTotalPos ??
+        r.maxOpen ??
+        r.maxHold ??
+        r.holdAvai ??
+        r.volume ??
+        0,
+    ),
+  );
   const sideRaw = String(r.positionSide ?? r.holdSide ?? r.side ?? r.posSide ?? "").toLowerCase();
   const side: "long" | "short" | undefined = sideRaw.includes("short") || sideRaw === "sell" || sideRaw === "2"
     ? "short"
