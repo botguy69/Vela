@@ -1752,9 +1752,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       if (pos.status === "filled" && credsTp) await ensureTakes(pos, notes, credsTp);
 
       const tps = parseNums(pos.targets);
+      const stopLooksBe = side === "long" ? stop >= entry * 0.9995 : stop <= entry * 1.0005;
+      const beLocked = Boolean(pos.be_moved) && stopLooksBe;
       let mark = px;
       let reduced = false;
-      if (pos.status === "filled" && !pos.be_moved) {
+      if (pos.status === "filled" && !beLocked) {
         const sinceMs = new Date(pos.filled_at ?? pos.created_at).getTime();
         const minutes = await getWeexKlines(pos.weex_symbol, "1m", 120).catch(() => []);
         const after = minutes.filter((c) => {
@@ -1780,7 +1782,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           stop,
           last: mark,
           targets: tps,
-          already: Boolean(pos.be_moved),
+          already: beLocked,
           reduced,
         })
       ) {
