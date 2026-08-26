@@ -2187,8 +2187,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     );
 
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
-    const beNames = new Set(
-      stillOpenRaw.filter((s) => s.be_moved).map((s) => s.weex_symbol.replace(/_/g, "").toUpperCase()),
+    const beFree = new Set(
+      stillOpenRaw
+        .filter((s) => s.be_moved && s.tp1_hit)
+        .map((s) => s.weex_symbol.replace(/_/g, "").toUpperCase()),
     );
     let hiddenLive = 0;
     if (liveN.length === 0 && flattened.size) {
@@ -2202,20 +2204,20 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       }
     }
     const dbFilled = stillOpenRaw.filter(
-      (s) => s.status === "filled" && !s.be_moved && !flattened.has(s.weex_symbol),
+      (s) => s.status === "filled" && !(s.be_moved && s.tp1_hit) && !flattened.has(s.weex_symbol),
     );
     const countAtRisk = (side: "long" | "short") => {
       const syms = new Set<string>();
       for (const p of liveN) {
         if ((p.side === "short" ? "short" : "long") !== side) continue;
         const k = p.symbol.replace(/_/g, "").toUpperCase();
-        if (beNames.has(k)) continue;
+        if (beFree.has(k)) continue;
         syms.add(k);
       }
       for (const s of stillOpenRaw) {
         if ((s.side === "short" ? "short" : "long") !== side) continue;
         if (flattened.has(s.weex_symbol)) continue;
-        if (s.status === "filled" && s.be_moved) continue;
+        if (s.status === "filled" && s.be_moved && s.tp1_hit) continue;
         if (s.status !== "filled" && s.status !== "working" && s.status !== "proposed") continue;
         syms.add(s.weex_symbol.replace(/_/g, "").toUpperCase());
       }
@@ -2234,7 +2236,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
           ? liveN
-              .map((p) => `${p.symbol.replace(/_/g, "").toUpperCase()} ${(p.side === "short" ? "short" : "long")}${beNames.has(p.symbol.replace(/_/g, "").toUpperCase()) ? " BE" : ""}`)
+              .map((p) => `${p.symbol.replace(/_/g, "").toUpperCase()} ${(p.side === "short" ? "short" : "long")}${beFree.has(p.symbol.replace(/_/g, "").toUpperCase()) ? " BE" : ""}`)
               .join(", ")
           : "flat"
       }.`,
@@ -2257,7 +2259,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     if (credsGate2) {
       const filledSym = new Set(
         liveN
-          .filter((p) => !beNames.has(p.symbol.replace(/_/g, "").toUpperCase()))
+          .filter((p) => !beFree.has(p.symbol.replace(/_/g, "").toUpperCase()))
           .map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
       );
       for (const s of dbFilled) filledSym.add(s.weex_symbol.replace(/_/g, "").toUpperCase());
@@ -2269,7 +2271,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const filledSide = liveN.filter(
           (p) =>
             (p.side === "short" ? "short" : "long") === side &&
-            !beNames.has(p.symbol.replace(/_/g, "").toUpperCase()),
+            !beFree.has(p.symbol.replace(/_/g, "").toUpperCase()),
         ).length;
         return filledSide >= SIDE_CAP;
       });
@@ -2334,7 +2336,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         ...liveN.map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
         ...dbFilled.map((s) => s.weex_symbol),
       ];
-      const beN = liveN.filter((p) => beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
+      const beN = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
       huntTape = [huntStatus, ...whyLive].filter(Boolean).join("\n");
       notes.push(
         `${[...new Set(names)].join(" ")} · 2 long + 2 short at-risk. Next after TP1/BE. ${beN} leftover(s) · cap 6.`,
@@ -2369,7 +2371,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                 p.qty > 0 &&
                 !flattened.has(p.symbol) &&
                 !flattened.has(sym) &&
-                !beNames.has(sym)
+                !beFree.has(sym)
               );
             })
             .map((p) => ({
