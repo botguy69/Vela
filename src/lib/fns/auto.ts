@@ -1460,8 +1460,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
     const notes: string[] = [];
     if (settings.stats_from) {
-      await sql`update auto_settings set stats_from = null, updated_at = now() where user_id = ${userId}`;
-      settings.stats_from = null;
+      const epoch = new Date(0).toISOString();
+      await sql`update auto_settings set stats_from = ${epoch}, updated_at = now() where user_id = ${userId}`;
+      settings.stats_from = epoch;
     }
     {
       const credsEarly = await credsFrom(settings);
