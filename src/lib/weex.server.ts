@@ -362,6 +362,7 @@ export type WeexClose = {
   side?: "long" | "short";
   pnl: number;
   closePx: number;
+  entry: number;
   qty: number;
   ts: number;
 };
@@ -388,6 +389,16 @@ function parseClose(r: Record<string, unknown>): WeexClose | null {
   const closePx = Number(
     r.closePrice ?? r.closeAvgPrice ?? r.avgClosePrice ?? r.price ?? r.markPrice ?? 0,
   );
+  const entry = Number(
+    r.openPriceAvg ??
+      r.openAvgPrice ??
+      r.entryPrice ??
+      r.openPrice ??
+      r.averageOpenPrice ??
+      r.openPriceAvg ??
+      r.avgOpenPrice ??
+      0,
+  );
   const qty = Math.abs(
     Number(
       r.closeSize ??
@@ -409,7 +420,15 @@ function parseClose(r: Record<string, unknown>): WeexClose | null {
     : sideRaw.includes("long") || sideRaw === "buy" || sideRaw === "1"
       ? "long"
       : undefined;
-  return { symbol, side, pnl, closePx: Number.isFinite(closePx) ? closePx : 0, qty, ts };
+  return {
+    symbol,
+    side,
+    pnl,
+    closePx: Number.isFinite(closePx) ? closePx : 0,
+    entry: Number.isFinite(entry) ? entry : 0,
+    qty,
+    ts,
+  };
 }
 
 export async function listWeexClosedPnl(creds: WeexCreds, symbol?: string): Promise<WeexClose[]> {

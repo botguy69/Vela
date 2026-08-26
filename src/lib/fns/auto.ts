@@ -432,7 +432,7 @@ function closeLabel(
 ): string {
   const tp2 = targets?.[1];
   if (printed && tp2 != null && last != null && side) {
-    const hitTp2 = side === "short" ? last <= tp2 * 1.001 : last >= tp2 * 0.999;
+    const hitTp2 = side === "short" ? last <= tp2 * 1.003 : last >= tp2 * 0.997;
     if (hitTp2) return "Hit TP2";
   }
   if (beMoved && printed) return pnl >= 0 ? "TP1 then BE" : "TP1 then leftover stopped";
@@ -523,51 +523,73 @@ async function ticketLedger(
 }
 
 function matchWeexClose(
-  row: { weex_symbol: string; side: string; created_at: string; updated_at?: string | null },
-  closes: { symbol: string; side?: "long" | "short"; pnl: number; closePx: number; ts: number; qty?: number }[],
+  row: {
+    weex_symbol: string;
+    side: string;
+    created_at: string;
+    updated_at?: string | null;
+    fill_px?: string | number | null;
+    entry?: string | number | null;
+  },
+  closes: { symbol: string; side?: "long" | "short"; pnl: number; closePx: number; entry?: number; ts: number; qty?: number }[],
 ) {
   const key = row.weex_symbol.replace(/_/g, "").toUpperCase();
   const side = row.side === "short" ? "short" : "long";
   const created = new Date(row.created_at).getTime();
   const updated = new Date(row.updated_at ?? row.created_at).getTime();
+  const entry = n(row.fill_px) || n(row.entry);
   const cands = closes.filter((c) => {
     if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
     if (c.side && c.side !== side) return false;
-    if (!c.ts) return true;
-    return c.ts >= created - 30 * 60_000 && c.ts <= Math.max(updated, created) + 12 * 3600_000;
+    if (c.ts && (c.ts < created - 2 * 3600_000 || c.ts > Math.max(updated, created) + 18 * 3600_000))
+      return false;
+    return true;
   });
-  if (!cands.length) {
-    const loose = closes.filter((c) => {
-      if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
-      return !c.side || c.side === side;
-    });
-    if (!loose.length) return null;
-    cands.push(...loose);
-  }
-  cands.sort((a, b) => {
-    const q = (b.qty ?? 0) - (a.qty ?? 0);
-    if (q !== 0) return q;
-    return Math.abs(b.pnl) - Math.abs(a.pnl);
+  if (!cands.length) return null;
+  const scored = cands.map((c) => {
+    const ed =
+      entry > 0 && c.entry && c.entry > 0 ? Math.abs(c.entry - entry) / entry : 0.5;
+    const td = c.ts ? Math.abs(c.ts - created) / 3600_000 : 9;
+    return { c, score: ed * 80 + td };
   });
-  const top = cands[0]!;
-  const rest = cands.filter((c) => c !== top);
-  const samePx = rest.filter(
-    (c) => top.closePx > 0 && c.closePx > 0 && Math.abs(c.closePx - top.closePx) / top.closePx < 0.002,
-  );
-  if ((top.qty ?? 0) < 1 && samePx.length) {
-    const pnl = top.pnl + samePx.reduce((s, c) => s + c.pnl, 0);
-    const qty = samePx.reduce((s, c) => s + (c.qty ?? 0), top.qty ?? 0);
-    return { ...top, pnl, qty };
-  }
-  const split = cands.filter((c) => Math.abs(c.pnl) > 0.05);
-  if (split.length > 1 && (top.qty ?? 0) < split.reduce((s, c) => s + (c.qty ?? 0), 0) * 0.7) {
-    return {
-      ...top,
-      pnl: split.reduce((s, c) => s + c.pnl, 0),
-      qty: split.reduce((s, c) => s + (c.qty ?? 0), 0),
-    };
-  }
+  scored.sort((a, b) => a.score - b.score);
+  const top = scored[0]!.c;
+  const ed = entry > 0 && top.entry && top.entry > 0 ? Math.abs(top.entry - entry) / entry : -1;
+  const td = top.ts ? Math.abs(top.ts - created) / 3600_000 : 9;
+  if (ed >= 0 && ed > 0.012) return null;
+  if (ed < 0 && td > 8) return null;
   return top;
+}
+
+function weexScoreboard(
+  closes: { symbol: string; side?: "long" | "short"; pnl: number; entry?: number; ts: number }[],
+) {
+  const cut = Date.now() - 21 * 86400_000;
+  const best = new Map<string, { symbol: string; pnl: number; ts: number }>();
+  for (const c of closes) {
+    if (!Number.isFinite(c.pnl) || Math.abs(c.pnl) < 0.08) continue;
+    if (c.ts && c.ts < cut) continue;
+    const entryK = c.entry && c.entry > 0 ? c.entry.toPrecision(5) : "x";
+    const bucket = c.ts ? Math.floor(c.ts / (10 * 60_000)) : 0;
+    const k = `${c.symbol}|${c.side ?? "?"}|${entryK}|${bucket}`;
+    const prev = best.get(k);
+    if (!prev || Math.abs(c.pnl) > Math.abs(prev.pnl)) best.set(k, { symbol: c.symbol, pnl: c.pnl, ts: c.ts });
+  }
+  const uniq = [...best.values()].sort((a, b) => a.ts - b.ts);
+  const wins = uniq.filter((c) => c.pnl > 0);
+  const names = uniq
+    .slice(-20)
+    .reverse()
+    .map((c) => {
+      const coin = c.symbol.replace("USDT", "").replace(/^1000/, "");
+      return `${coin} ${c.pnl >= 0 ? "+" : ""}${c.pnl.toFixed(2)}`;
+    });
+  return {
+    closed: uniq.length,
+    wins: wins.length,
+    winRate: uniq.length ? Math.round((100 * wins.length) / uniq.length) : 0,
+    names,
+  };
 }
 
 async function restampWeexPnl(
@@ -595,11 +617,7 @@ async function restampWeexPnl(
       }
     }
     if (!hit) continue;
-    const settled =
-      /Hit TP1|Hit TP2|TP1 then BE|Hit stop|Closed on WEEX|Closed in green/.test(String(row.close_reason ?? "")) &&
-      Math.abs(n(row.pnl)) > 0.05 &&
-      Date.now() - new Date(row.updated_at).getTime() > 15 * 60_000 &&
-      Math.abs(hit.pnl - n(row.pnl)) < 1;
+    const settled = Math.abs(hit.pnl - n(row.pnl)) < 0.15;
     if (settled) continue;
     if (Math.abs(n(row.pnl) - hit.pnl) < 0.08 && (hit.pnl >= 0) === (n(row.pnl) >= 0) && !String(row.close_reason ?? "").startsWith("BE scratch")) continue;
     const st = hit.pnl >= 0.05 ? "targeted" : hit.pnl <= -0.05 ? "stopped" : "skipped";
@@ -608,7 +626,7 @@ async function restampWeexPnl(
     const tp2 = tps[1];
     const sd = row.side === "short" ? "short" : "long";
     const tagged2 =
-      tp2 != null && px > 0 && (sd === "short" ? px <= tp2 * 1.001 : px >= tp2 * 0.999);
+      tp2 != null && px > 0 && (sd === "short" ? px <= tp2 * 1.003 : px >= tp2 * 0.997);
     const why =
       tagged2
         ? "Hit TP2"
@@ -1079,7 +1097,7 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       settings.account_usd = live.equity;
       settings.peak_usd = peak;
     }
-    const stats = await closedStats(sql, context.userId, settings?.stats_from);
+    let stats = await closedStats(sql, context.userId, settings?.stats_from);
     const byId = new Map<number, SignalRow>();
     const openRows = await sql<SignalRow>`
       select * from auto_signals
@@ -1217,7 +1235,14 @@ export const getAutoDesk = createServerFn({ method: "GET" })
         for (const t of mapped) {
           if (t.liveOnWeex || t.status === "filled" || t.status === "working") continue;
           const hit = matchWeexClose(
-            { weex_symbol: t.weexSymbol, side: t.side, created_at: t.createdAt, updated_at: t.updatedAt },
+            {
+              weex_symbol: t.weexSymbol,
+              side: t.side,
+              created_at: t.createdAt,
+              updated_at: t.updatedAt,
+              fill_px: t.fillPx,
+              entry: t.entry,
+            },
             closes,
           );
           if (!hit) continue;
@@ -1225,6 +1250,16 @@ export const getAutoDesk = createServerFn({ method: "GET" })
           if (used.has(k)) continue;
           used.add(k);
           t.pnl = hit.pnl;
+        }
+        const board = weexScoreboard(closes);
+        if (board.closed > 0) {
+          stats = {
+            ...stats,
+            closed: board.closed,
+            wins: board.wins,
+            winRate: board.winRate,
+            names: board.names,
+          };
         }
       }
     }
@@ -1522,7 +1557,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     } else if (pulled.error) {
       /* shown in last tick note if we skip size */
     }
-    const stats = await closedStats(sql, userId, settings.stats_from);
+    let stats = await closedStats(sql, userId, settings.stats_from);
     const pub = publicSettings(settings, stats, live, pulled.error);
     const phase = livePhase(settings, stats);
 
@@ -1543,15 +1578,25 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     }
     {
       const credsEarly = await credsFrom(settings);
-      if (credsEarly) await restampWeexPnl(sql, userId, credsEarly, notes);
+      if (credsEarly) {
+        await restampWeexPnl(sql, userId, credsEarly, notes);
+        const { listWeexClosedPnl } = await import("@/lib/weex.server");
+        const closes = await listWeexClosedPnl(credsEarly).catch(() => []);
+        const board = weexScoreboard(closes);
+        if (board.closed > 0) {
+          stats = {
+            ...stats,
+            closed: board.closed,
+            wins: board.wins,
+            winRate: board.winRate,
+            names: board.names,
+          };
+        }
+      }
     }
     const botched = await sql<SignalRow>`
       select * from auto_signals
-      where user_id = ${userId}
-        and be_moved = true
-        and status in ('skipped','stopped','targeted')
-        and close_reason like 'BE scratch%'
-        and filled_at > now() - interval '14 days'
+      where user_id = ${userId} and false
     `;
     for (const row of botched) {
       const entry = n(row.fill_px ?? row.entry);
@@ -2882,7 +2927,7 @@ export const reviewBook = createServerFn({ method: "POST" })
     const sql = await getSql();
     const [settings] = await sql<SettingsRow>`select * from auto_settings where user_id = ${context.userId}`;
     if (!settings) return { ok: false as const, error: "No desk yet." };
-    const stats = await closedStats(sql, context.userId, settings?.stats_from);
+    let stats = await closedStats(sql, context.userId, settings?.stats_from);
     const pulled = await pullWeexBook(settings).catch(() => ({ live: null as { equity: number; available: number } | null, error: null as string | null }));
     const pub = publicSettings(settings, stats, pulled.live, pulled.error);
     const open = await sql<SignalRow>`
