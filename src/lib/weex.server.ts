@@ -481,8 +481,9 @@ function collapseCloses(closes: WeexClose[]): WeexClose[] {
     }
     const bigger = Math.max(Math.abs(c.pnl), Math.abs(prev.pnl));
     const smaller = Math.min(Math.abs(c.pnl), Math.abs(prev.pnl));
-    const dup = bigger > 0.3 && smaller > 0.3 && smaller / bigger > 0.8 && Math.sign(c.pnl) === Math.sign(prev.pnl);
-    if (dup) {
+    const ratio = bigger > 0 ? smaller / bigger : 1;
+    const sameSign = Math.sign(c.pnl) === Math.sign(prev.pnl) || prev.pnl === 0 || c.pnl === 0;
+    if (sameSign && (ratio > 0.82 || ratio < 0.4)) {
       m.set(k, Math.abs(c.pnl) > Math.abs(prev.pnl) ? c : prev);
       continue;
     }

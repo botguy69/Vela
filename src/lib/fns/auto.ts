@@ -525,6 +525,7 @@ function matchWeexClose(
     updated_at?: string | null;
     fill_px?: string | number | null;
     entry?: string | number | null;
+    qty?: string | number | null;
   },
   closes: { symbol: string; side?: "long" | "short"; pnl: number; closePx: number; entry?: number; ts: number; qty?: number }[],
   used?: Set<string>,
@@ -534,6 +535,7 @@ function matchWeexClose(
   const t0 = new Date(row.filled_at ?? row.created_at).getTime();
   const t1 = new Date(row.updated_at ?? row.filled_at ?? row.created_at).getTime();
   const entry = n(row.fill_px) || n(row.entry);
+  const wantQty = n(row.qty);
   const cands = closes.filter((c) => {
     if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
     if (c.side && c.side !== side) return false;
@@ -546,14 +548,15 @@ function matchWeexClose(
   const scored = cands.map((c) => {
     const ed =
       entry > 0 && c.entry && c.entry > 0 ? Math.abs(c.entry - entry) / entry : 0.5;
+    const qd = wantQty > 0 && c.qty && c.qty > 0 ? Math.abs(c.qty - wantQty) / wantQty : 0.4;
     const td = c.ts && t0 > 0 ? Math.abs(c.ts - t0) / 3600_000 : 9;
-    return { c, score: ed * 5000 + td };
+    return { c, score: ed * 8000 + qd * 40 - Math.abs(c.pnl) * 2 + td * 0.02 };
   });
   scored.sort((a, b) => a.score - b.score);
   const top = scored[0]!.c;
   const ed = entry > 0 && top.entry && top.entry > 0 ? Math.abs(top.entry - entry) / entry : -1;
   const td = top.ts && t0 > 0 ? Math.abs(top.ts - t0) / 3600_000 : 9;
-  if (ed >= 0 && ed > 0.012) return null;
+  if (ed >= 0 && ed > 0.0018) return null;
   if (ed < 0 && td > 12) return null;
   used?.add(`${top.symbol}|${top.side ?? "?"}|${top.entry ?? 0}|${top.ts}|${top.pnl}`);
   return top;
