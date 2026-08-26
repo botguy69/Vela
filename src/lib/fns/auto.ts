@@ -668,8 +668,9 @@ async function ensureTakes(
   stopOverride?: number,
 ) {
   if (pos.status !== "filled") return;
+  const already = /tps:ok/.test(pos.weex_resp ?? "");
   const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
-  const { placeWeexTake, moveWeexStop, trimWeexTakes, getWeexPositionQty, listWeexPositions } = await import("@/lib/weex.server");
+  const { placeWeexTake, moveWeexStop, trimWeexTakes, cancelWeexProtective, getWeexPositionQty, listWeexPositions } = await import("@/lib/weex.server");
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
   const { coinByWeex } = await import("@/lib/universe");
   const spec = await specFor(coinByWeex(pos.weex_symbol));
@@ -699,6 +700,10 @@ async function ensureTakes(
   });
   if (trimmed.killed) {
     notes.push(`${pos.weex_symbol} cancelled ${trimmed.killed} extra TP/SL. Kept ${trimmed.kept} (1 SL + 2 TP max).`);
+  }
+  if (already && stopOverride == null) {
+    notes.push(`${pos.weex_symbol} 1 SL + 2 TP already armed. Not adding.`);
+    return;
   }
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();

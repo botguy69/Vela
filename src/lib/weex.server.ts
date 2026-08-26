@@ -578,7 +578,10 @@ export async function cancelWeexProtective(creds: WeexCreds, symbol: string) {
     () => weexRequest({ creds, method: "POST", path: "/capi/v3/cancelAllTpSl", body: { symbol } }),
     () => weexRequest({ creds, method: "POST", path: "/capi/v3/plan/cancelAll", body: { symbol, productType: "USDT-FUTURES" } }),
     () => weexRequest({ creds, method: "POST", path: "/capi/v3/order/tpsl/cancelAll", body: { symbol } }),
-    () => weexRequest({ creds, method: "POST", path: "/capi/v3/position/tpsl/cancel", body: { symbol } }),
+    () => weexRequest({ creds, method: "POST", path: "/capi/v2/mix/order/cancel-all-plan", body: { symbol, productType: "USDT-FUTURES", planType: "profit_loss", marginCoin: "USDT" } }),
+    () => weexRequest({ creds, method: "POST", path: "/capi/v2/mix/order/cancel-all-plan", body: { symbol, productType: "USDT-FUTURES", planType: "pos_profit", marginCoin: "USDT" } }),
+    () => weexRequest({ creds, method: "POST", path: "/capi/v2/mix/order/cancel-all-plan", body: { symbol, productType: "USDT-FUTURES", planType: "pos_loss", marginCoin: "USDT" } }),
+    () => weexRequest({ creds, method: "POST", path: "/capi/v2/mix/order/cancel-all-tpsl", body: { symbol, productType: "USDT-FUTURES", marginCoin: "USDT" } }),
   ];
   for (const t of tries) await t().catch(() => null);
   const listed = await listWeexAlgos(creds, symbol);
@@ -676,6 +679,11 @@ export async function listWeexAlgoRows(
     { path: "/capi/v3/openOrders", query: { symbol } },
     { path: "/capi/v3/position/tpsl", query: { symbol } },
     { path: "/capi/v3/order/tpsl/current", query: { symbol } },
+    { path: "/capi/v2/mix/order/orders-plan-pending", query: { symbol, productType: "USDT-FUTURES", planType: "profit_loss" } },
+    { path: "/capi/v2/mix/order/orders-plan-pending", query: { symbol, productType: "USDT-FUTURES", planType: "pos_profit" } },
+    { path: "/capi/v2/mix/order/orders-plan-pending", query: { symbol, productType: "USDT-FUTURES", planType: "pos_loss" } },
+    { path: "/capi/v2/mix/order/orders-tpsl-pending", query: { symbol, productType: "USDT-FUTURES" } },
+    { path: "/capi/v2/mix/order/orders-pending", query: { symbol, productType: "USDT-FUTURES" } },
   ];
   const out: { id: string; type: string; trigger: number }[] = [];
   const seen = new Set<string>();
