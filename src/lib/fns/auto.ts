@@ -171,6 +171,18 @@ function livePhase(
   });
 }
 
+function feeBePx(side: "long" | "short", entry: number, mark: number, weexBe: number): number {
+  const raw = weexBe > 0 ? weexBe : side === "long" ? entry * 1.002 : entry * 0.998;
+  if (side === "long") {
+    const want = Math.max(raw, entry * 1.0004);
+    if (mark > 0 && want >= mark * 0.999) return Math.min(want, mark * 0.9985);
+    return want;
+  }
+  const want = Math.min(raw, entry * 0.9996);
+  if (mark > 0 && want <= mark * 1.001) return Math.max(want, mark * 1.0015);
+  return want;
+}
+
 function huntHeader(liveL: number, liveS: number) {
   const needL = Math.max(0, 2 - liveL);
   const needS = Math.max(0, 2 - liveS);
@@ -577,6 +589,11 @@ async function restampWeexPnl(
       }
     }
     if (!hit) continue;
+    const settled =
+      /Hit TP1|TP1 then BE|Hit stop|Closed on WEEX|Closed in green/.test(String(row.close_reason ?? "")) &&
+      Math.abs(n(row.pnl)) > 0.05 &&
+      Date.now() - new Date(row.updated_at).getTime() > 15 * 60_000;
+    if (settled) continue;
     if (Math.abs(n(row.pnl) - hit.pnl) < 0.08 && (hit.pnl >= 0) === (n(row.pnl) >= 0) && !String(row.close_reason ?? "").startsWith("BE scratch")) continue;
     const st = hit.pnl >= 0.05 ? "targeted" : hit.pnl <= -0.05 ? "stopped" : "skipped";
     const px = hit.closePx > 0 ? hit.closePx : n(row.closed_px);
@@ -1425,7 +1442,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       getWeexFourHour,
       getWeexKlines,
     } = await import("@/lib/weex-market.server");
-    const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, ticketPnl, taggedTake, lockBePx } = await import("@/lib/ta");
+    const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, ticketPnl, taggedTake } = await import("@/lib/ta");
     const { sizeSetup } = await import("@/lib/risk");
     const { coinByWeex, CORE_SET } = await import("@/lib/universe");
     const rules = await import("@/lib/desk-rules");
@@ -1498,8 +1515,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       });
       const why = closeLabel(true, printed, pnl, !printed && pnl < 0);
       const already = row.close_reason === why && Math.abs(n(row.pnl) - pnl) < 0.02;
-      if (already && !String(row.close_reason ?? "").startsWith("BE scratch")) continue;
-      if (Math.abs(n(row.pnl)) > 1 && !String(row.close_reason ?? "").startsWith("BE scratch")) continue;
+      if (already) continue;
+      if (
+        /Hit TP1|TP1 then BE|Hit stop|Closed on WEEX/.test(String(row.close_reason ?? "")) &&
+        Math.abs(n(row.pnl)) > 0.05 &&
+        !String(row.close_reason ?? "").startsWith("BE scratch")
+      )
+        continue;
       const st = why.startsWith("BE scratch")
         ? "skipped"
         : pnl < 0 || why === "Hit stop" || why === "TP1 then leftover stopped"
@@ -1809,12 +1831,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ) {
         const creds = await credsFrom(settings);
         const rawBe = await weexFeeBe(creds, pos.weex_symbol, side, entry);
-        const be =
-          typeof lockBePx === "function"
-            ? lockBePx(side, entry, mark || px, rawBe)
-            : side === "long"
-              ? Math.max(rawBe || entry * 1.002, entry * 1.0004)
-              : Math.min(rawBe || entry * 0.998, entry * 0.9996);
+        const be = feeBePx(side, entry, mark || px, rawBe);
         const hitFirst = tps[0] != null && taggedTake(side, mark, tps[0]!);
         const printed = Boolean(reduced || hitFirst);
         if (be > 0 && creds) {
