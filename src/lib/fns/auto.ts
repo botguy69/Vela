@@ -2043,6 +2043,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           : "flat"
       }.`,
     );
+    const whyLive = stillOpen
+      .filter((s) => s.status === "filled" || s.status === "working")
+      .map((s) => {
+        const tail = (s.thesis ?? "").split("·").pop()?.trim() || s.thesis || "";
+        const kind = rules.aPlusKind(s.thesis ?? "");
+        const why = kind ? `${kind} — ${tail.slice(0, 52)}` : tail.slice(0, 56);
+        return `${s.weex_symbol.replace("USDT", "")} ${s.side} ${Math.round(n(s.confidence))}% ${why}`;
+      });
     const credsGate2 = await credsFrom(settings);
     let parked: SignalRow | null = null;
     if (credsGate2) {
@@ -2126,7 +2134,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         ...dbFilled.map((s) => s.weex_symbol),
       ];
       const beN = liveN.filter((p) => beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-      huntTape = `${huntStatus}\nLive: ${[...new Set(names)].join(", ") || "—"}${beN ? ` · ${beN} BE leftover` : ""}.`;
+      huntTape = [
+        huntStatus,
+        whyLive.length ? `Why    ${whyLive.join("  ·  ")}` : "",
+        `Live: ${[...new Set(names)].join(", ") || "—"}${beN ? ` · ${beN} BE leftover` : ""}.`,
+      ]
+        .filter(Boolean)
+        .join("\n");
       notes.push(
         `${[...new Set(names)].join(" ")} · 2 long + 2 short at-risk. Next after TP1/BE. ${beN} leftover(s) · cap 6.`,
       );
@@ -2318,6 +2332,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
           huntTape = [
             huntStatus,
+            whyLive.length ? `Why    ${whyLive.join("  ·  ")}` : "",
             compass.note,
             `A+     ${rules.APLUS_MENU}`,
             sized
@@ -2464,10 +2479,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
     const learned = [bar.note, ledger.note].filter(Boolean).join(" · ") || `${corrected.marginPct}% · ${corrected.minConf}%+ bar`;
     const manage = notes
-      .filter((n) =>
-        /TP1|BE |flattened|working limit|Took |Closed|Hit stop|Sold |lock|RENDER|BCH|limit filled/i.test(n),
-      )
-      .slice(0, 5);
+      .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
+      .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))
+      .slice(0, 4);
     const note = [huntTape, ...manage].filter(Boolean).join("\n") || notes.filter(Boolean).slice(0, 5).join(" · ");
     await sql`
       update auto_settings
