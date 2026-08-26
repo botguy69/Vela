@@ -2119,22 +2119,33 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           !extras.some((e) => e.id === s.id),
       );
       leftoverWorking.sort((a, b) => n(b.confidence) - n(a.confidence));
-      for (const row of leftoverWorking.slice(1)) {
-        if (row.client_oid) {
-          await cancelWeexOrder(credsGate2, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
+      const keyOf = (sym: string) => sym.replace(/_/g, "").toUpperCase();
+      let slotL = liveN.filter((p) => p.side !== "short" && !beFree.has(keyOf(p.symbol))).length;
+      let slotS = liveN.filter((p) => p.side === "short" && !beFree.has(keyOf(p.symbol))).length;
+      parked = null;
+      for (const row of leftoverWorking) {
+        const side = row.side === "short" ? "short" : "long";
+        const full = side === "short" ? slotS >= SIDE_CAP : slotL >= SIDE_CAP;
+        if (full) {
+          if (row.client_oid) {
+            await cancelWeexOrder(credsGate2, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
+          }
+          await cancelWeexProtective(credsGate2, row.weex_symbol).catch(() => null);
+          await sql`
+            update auto_signals
+            set status = 'skipped',
+                close_reason = ${"Cancelled — 2 already on that side"},
+                pnl = 0,
+                updated_at = now()
+            where id = ${row.id} and user_id = ${userId}
+          `;
+          notes.push(`${row.weex_symbol} limit cancelled — 2 already on that side`);
+          continue;
         }
-        await cancelWeexProtective(credsGate2, row.weex_symbol).catch(() => null);
-        await sql`
-          update auto_signals
-          set status = 'skipped',
-              close_reason = ${"Cancelled — one working limit at a time"},
-              pnl = 0,
-              updated_at = now()
-          where id = ${row.id} and user_id = ${userId}
-        `;
-        notes.push(`${row.weex_symbol} extra limit cancelled — one parked ticket only`);
+        if (side === "short") slotS += 1;
+        else slotL += 1;
+        if (!parked) parked = row;
       }
-      parked = leftoverWorking[0] ?? null;
       if (parked) {
         const stale = await sql<{ client_oid: string | null; weex_symbol: string }>`
           select client_oid, weex_symbol from auto_signals
@@ -2373,15 +2384,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} already parked — leave the limit`);
               continue;
             }
-            if (
-              parked &&
-              (parked.weex_symbol !== pick.weexSymbol || parked.side !== pick.side) &&
-              conf < n(parked.confidence) + 2
-            ) {
-              veto = `Parked ${parked.weex_symbol} ${n(parked.confidence)}% limit. ${pick.weexSymbol} ${conf}% not enough to replace.`;
-              whyNot.push(`${tag} parked limit better`);
-              continue;
-            }
             const timed0 = rules.withLtfEntry(pick, aPlus ? null : trig.pullback);
             const timed = !aPlus && trig.wait ? { ...timed0, entryType: "limit" as const } : timed0;
             const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
@@ -2401,27 +2403,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             notes.push(`Keep parked ${parked.weex_symbol} limit — not re-placing the same pair.`);
             tookLine = `Limit still working ${parked.weex_symbol} ${parked.side} — not a fill yet.`;
           } else {
-            if (parked && credsGate2) {
-              const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
-              if (parked.client_oid) {
-                await cancelWeexOrder(credsGate2, {
-                  symbol: parked.weex_symbol,
-                  clientOid: parked.client_oid,
-                }).catch(() => null);
-              }
-              await cancelWeexProtective(credsGate2, parked.weex_symbol).catch(() => null);
-              await sql`
-                update auto_signals
-                set status = 'skipped',
-                    close_reason = ${`Replaced by ${sized.weexSymbol} ${sized.side} ${sized.confidence}% ${sized.entryType}`},
-                    pnl = 0,
-                    updated_at = now()
-                where id = ${parked.id} and user_id = ${userId}
-              `;
-              notes.push(
-                `Replaced ${parked.weex_symbol} ${n(parked.confidence)}% limit with ${sized.weexSymbol} ${sized.side} ${sized.confidence}% ${sized.entryType}`,
-              );
-            }
             const [taken] = await sql<{ id: number }>`
               select id from auto_signals
               where user_id = ${userId}
