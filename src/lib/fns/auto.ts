@@ -287,6 +287,7 @@ async function closedStats(
     from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted')
       and filled_at is not null
+      and client_oid is not null
       and abs(coalesce(pnl, 0)) > 0.15
       and (close_reason is null or (
         close_reason not like 'Duplicate%'
@@ -425,6 +426,7 @@ async function ticketLedger(
     select id, plan, side, weex_symbol, pnl, filled_at, updated_at, created_at from auto_signals
     where user_id = ${userId} and status in ('stopped','targeted')
       and filled_at is not null
+      and client_oid is not null
       and abs(coalesce(pnl, 0)) > 0.15
       and (close_reason is null or (
         close_reason not like 'Duplicate%'
@@ -457,7 +459,7 @@ function matchWeexClose(
   const cands = closes.filter((c) => {
     if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
     if (c.side && c.side !== side) return false;
-    if (!c.ts) return true;
+    if (!c.ts) return false;
     return c.ts >= created - 30 * 60_000 && c.ts <= updated + 6 * 3600_000;
   });
   if (!cands.length) return null;
@@ -485,6 +487,7 @@ async function restampWeexPnl(
       and updated_at > now() - interval '14 days'
   `;
   for (const row of rows) {
+    if (!row.client_oid) continue;
     const hit = matchWeexClose(row, closes);
     if (!hit) continue;
     if (Math.abs(n(row.pnl) - hit.pnl) < 0.08) continue;
@@ -736,6 +739,10 @@ async function resurrectLive(
     if (!row) {
       notes.push(`${key} live on WEEX with no ticket`);
       continue;
+    }
+    if (row.status === "stopped" || row.status === "targeted" || row.status === "skipped") {
+      const when = new Date(row.filled_at ?? row.created_at).getTime();
+      if (Number.isFinite(when) && Date.now() - when > 30 * 60_000) continue;
     }
     await sql`
       update auto_signals
@@ -989,6 +996,8 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       select * from auto_signals
       where user_id = ${context.userId}
         and status in ('stopped','targeted','skipped')
+        and filled_at is not null
+        and client_oid is not null
         and (
           close_reason is null
           or (
@@ -998,13 +1007,16 @@ export const getAutoDesk = createServerFn({ method: "GET" })
             and close_reason not like 'Stale claim%'
           )
         )
-      order by updated_at desc
+      order by coalesce(filled_at, created_at) desc
       limit 25
     `;
     for (const r of closedRows) if (!byId.has(r.id)) byId.set(r.id, r);
     const signals = [...byId.values()].sort((a, b) => {
-      const ta = new Date(a.updated_at ?? a.created_at).getTime();
-      const tb = new Date(b.updated_at ?? b.created_at).getTime();
+      const liveA = a.status === "filled" || a.status === "working" ? 1 : 0;
+      const liveB = b.status === "filled" || b.status === "working" ? 1 : 0;
+      if (liveA !== liveB) return liveB - liveA;
+      const ta = new Date(a.filled_at ?? a.created_at).getTime();
+      const tb = new Date(b.filled_at ?? b.created_at).getTime();
       return tb - ta;
     });
     const mapped = signals
@@ -1408,6 +1420,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       select * from auto_signals
       where user_id = ${userId}
         and close_reason = 'Closed on WEEX'
+        and filled_at > now() - interval '6 hours'
         and updated_at > now() - interval '12 hours'
     `;
     for (const row of fakeFlat) {
@@ -1521,6 +1534,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       select * from auto_signals
       where user_id = ${userId}
         and close_reason = 'Hit stop'
+        and filled_at > now() - interval '6 hours'
         and updated_at > now() - interval '12 hours'
     `;
     for (const row of fakeWins) {
@@ -1544,6 +1558,17 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       notes.push(`${row.weex_symbol} restated: SL ${fair.toFixed(2)} (was booked as a win)`);
     }
     await collapseOpenDupes(sql, userId, settings, notes);
+    await sql`
+      update auto_signals
+      set status = 'skipped',
+          close_reason = ${"Ghost — never on WEEX"},
+          pnl = 0,
+          updated_at = now()
+      where user_id = ${userId}
+        and status in ('stopped','targeted','skipped')
+        and (client_oid is null or filled_at is null)
+        and coalesce(close_reason, '') not like 'Ghost%'
+    `;
     await sql`
       update auto_signals
       set status = 'error',
