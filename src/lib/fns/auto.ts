@@ -165,11 +165,32 @@ function livePhase(
   });
 }
 
+function huntHeader(liveL: number, liveS: number) {
+  const needL = Math.max(0, 2 - liveL);
+  const needS = Math.max(0, 2 - liveS);
+  if (needL === 0 && needS === 0) {
+    return "Not hunting — 2 longs and 2 shorts already at risk. Next after TP1/BE.";
+  }
+  const need = [needL ? `${needL} long` : "", needS ? `${needS} short` : ""].filter(Boolean).join(" + ");
+  return `Hunting up to 2L+2S (${liveL}L/${liveS}S live). Need ${need}. A+ scalps only — will not fill empty slots.`;
+}
+
+function withLiveHunt(note: string | null, liveL: number, liveS: number) {
+  const head = huntHeader(liveL, liveS);
+  const rest = (note ?? "")
+    .split("\n")
+    .filter((ln) => !/^Hunting up to 2L/.test(ln) && !/^Not hunting —/.test(ln) && !/^Need \d/.test(ln))
+    .join("\n")
+    .trim();
+  return [head, rest].filter(Boolean).join("\n");
+}
+
 function publicSettings(
   row: SettingsRow,
   stats: { closed: number; wins: number; winRate?: number; avgWinR?: number; avgLossR?: number; names?: string[] } = { closed: 0, wins: 0 },
   live?: { equity: number; available: number } | null,
   weexError?: string | null,
+  book?: { liveL?: number; liveS?: number },
 ) {
   const liveEq = live?.equity;
   const equity = liveEq != null ? liveEq : 0;
@@ -192,7 +213,7 @@ function publicSettings(
     minRr: phase.minRr,
     maxOpen: phase.maxOpen,
     lastTickAt: row.last_tick_at,
-    lastTickNote: row.last_tick_note,
+    lastTickNote: withLiveHunt(row.last_tick_note, book?.liveL ?? 0, book?.liveS ?? 0),
     goalUsd: n(row.goal_usd) || GOAL_USD,
     peakUsd: peak,
     lossStreak: row.loss_streak ?? 0,
@@ -1124,8 +1145,10 @@ export const getAutoDesk = createServerFn({ method: "GET" })
         });
       }
     }
+    const liveL = mapped.filter((t) => t.liveOnWeex && t.side === "long").length;
+    const liveS = mapped.filter((t) => t.liveOnWeex && t.side === "short").length;
     return {
-      settings: publicSettings(settings!, stats, live, pulled.error),
+      settings: publicSettings(settings!, stats, live, pulled.error, { liveL, liveS }),
       signals: mapped,
       universe: (await import("@/lib/universe")).TOP25.map((c) => ({
         id: c.id,
