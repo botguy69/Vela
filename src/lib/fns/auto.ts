@@ -581,7 +581,7 @@ async function ensureTakes(
 ) {
   if (pos.status !== "filled") return;
   const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
-  const { placeWeexTake, moveWeexStop, cancelWeexProtective, getWeexPositionQty, listWeexAlgos } = await import("@/lib/weex.server");
+  const { placeWeexTake, moveWeexStop, cancelWeexProtective, cancelWeexStops, getWeexPositionQty, listWeexAlgos, listWeexPositions } = await import("@/lib/weex.server");
   const stacked = (await listWeexAlgos(creds, pos.weex_symbol)).length;
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
   const want = 1 + Math.min(2, parseNums(pos.targets).length || 2);
@@ -617,15 +617,44 @@ async function ensureTakes(
   const spec = await specFor(coinByWeex(pos.weex_symbol));
   const liveQty = (await getWeexPositionQty(creds, pos.weex_symbol)) ?? origQty(pos);
   if (!(liveQty > 0)) return;
+  const book = await listWeexPositions(creds).catch(() => null);
+  const key = pos.weex_symbol.replace(/_/g, "").toUpperCase();
+  const live = (book ?? []).find((p) => p.symbol.replace(/_/g, "").toUpperCase() === key);
+  const mark = live?.mark ?? 0;
+  const side = pos.side === "short" ? "SHORT" : "LONG";
+  const sideLc = pos.side === "short" ? "short" : "long";
+  const { taggedTake } = await import("@/lib/ta");
   const rawTps = parseNums(pos.targets).slice(0, 2);
   const tps: number[] = [];
   for (const p of rawTps) {
     const px = Number(formatWeexPx(p, spec.pricePrecision));
     if (!(px > 0)) continue;
     if (tps.some((t) => t === px)) continue;
+    if (mark > 0 && taggedTake(sideLc, mark, px)) continue;
     tps.push(px);
   }
-  const side = pos.side === "short" ? "SHORT" : "LONG";
+
+  if (stopOverride != null) {
+    await cancelWeexStops(creds, pos.weex_symbol);
+    const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
+    if (stopPx > 0) {
+      await moveWeexStop(creds, {
+        symbol: pos.weex_symbol,
+        positionSide: side,
+        stop: formatWeexPx(stopPx, spec.pricePrecision),
+        quantity: qtyStr,
+        clientOid: `velasl${pos.id}${Date.now().toString(36)}`.slice(0, 36),
+      });
+    }
+    notes.push(
+      `${pos.weex_symbol} SL → WEEX BE ${stopPx.toFixed(4)} on leftover ${Number(qtyStr)}. TPs not re-attached (won't sell TP1 again).`,
+    );
+    const stampBe = `${resp.replace(/tps:(lock|ok|swept)@?\d*/g, "").trim()} tps:ok tps:swept@${Date.now()}`.slice(0, 500);
+    await sql`update auto_signals set weex_resp = ${stampBe}, stop = ${stopPx}, updated_at = now() where id = ${pos.id}`;
+    pos.weex_resp = stampBe;
+    pos.stop = stopPx;
+    return;
+  }
   await cancelWeexProtective(creds, pos.weex_symbol);
   let still = await listWeexAlgos(creds, pos.weex_symbol);
   if (still.length) {
