@@ -146,7 +146,7 @@ export function marketBias(
         : "BTC 4h+1h offer, 15m pausing — shorts on bounce, longs only if a coin fades.",
     };
   }
-  return { bias: "chop", note: "BTC 4h/1h mixed — A+ (82%+) still fire if 15m is clean." };
+  return { bias: "chop", note: "BTC mixed — only A+ scalps (double/vol fade/washout) if 15m is clean. Max 1 at-risk." };
 }
 
 /** Snap limit to the 15m mean. Stop / targets stay — breathing room is unchanged. */
@@ -373,7 +373,14 @@ export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
   return ranked;
 }
 
-/** If high-confidence tickets keep stopping out, the bar moves up. Never claims 90%. */
+/** Real A+ scalp — not every 82% mean-reversion. */
+export function eliteScalp(thesis: string, conf: number, bar: number): boolean {
+  if (conf < Math.max(82, bar)) return false;
+  return /double (top|bottom)|failed range|vol fade|washout RSI (1\d|2[0-2])|washout RSI (7[8-9]|8\d)/i.test(
+    thesis,
+  );
+}
+
 export function confidenceBar(
   closed: { conf: number; pnl: number }[],
   base: number,
