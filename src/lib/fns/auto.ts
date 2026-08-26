@@ -527,7 +527,7 @@ function matchWeexClose(
     const ed =
       entry > 0 && c.entry && c.entry > 0 ? Math.abs(c.entry - entry) / entry : 0.5;
     const td = c.ts ? Math.abs(c.ts - created) / 3600_000 : 9;
-    return { c, score: ed * 80 + td };
+    return { c, score: ed * 5000 + td };
   });
   scored.sort((a, b) => a.score - b.score);
   const top = scored[0]!.c;
