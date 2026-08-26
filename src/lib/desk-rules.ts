@@ -400,6 +400,56 @@ export function aPlusKind(thesis: string): string | null {
   return null;
 }
 
+export function whyTookTrade(opts: {
+  symbol: string;
+  side: "long" | "short";
+  conf: number;
+  thesis: string;
+  bias: "long" | "short" | "chop";
+}): string {
+  const pair = opts.symbol.replace(/USDT/g, "");
+  const kind = aPlusKind(opts.thesis);
+  const raw = (opts.thesis.split("·").pop() ?? opts.thesis).replace(/\s+/g, " ").trim();
+  const short = opts.side === "short";
+  const setup =
+    kind === "washout"
+      ? `Washout at the lows (${raw}). Slow mean holding — bounce, not a knife.`
+      : kind === "pin"
+        ? short
+          ? `Pin bar at the highs (${raw}). Upper wick rejected — fade it.`
+          : `Pin bar at the lows (${raw}). Lower wick held — buy the dip.`
+        : kind === "engulf"
+          ? short
+            ? `Bear engulf on the 21h (${raw}).`
+            : `Bull engulf on the 21h (${raw}).`
+          : kind === "double"
+            ? short
+              ? `Double top / 2nd-test supply (${raw}).`
+              : `Double bottom / 2nd-test buyers (${raw}).`
+            : kind === "climax"
+              ? `Volume climax rejection (${raw}).`
+              : kind === "dry-up"
+                ? `Volume dry-up at the extreme (${raw}).`
+                : kind === "overbought"
+                  ? `Overbought (${raw}). Fade the stretch.`
+                  : kind === "oversold"
+                    ? `Oversold bounce (${raw}).`
+                    : kind === "trend cooling"
+                      ? `Trend cooling (${raw}). RSI rolling over — short the stall.`
+                      : kind === "failed range"
+                        ? `Failed range (${raw}).`
+                        : kind === "continuation"
+                          ? `Continuation pullback with the 21h (${raw}).`
+                          : raw || "A+ structure.";
+  const tape =
+    opts.bias === "chop"
+      ? "BTC mixed — structure scalp, not a tape-follow."
+      : opts.side === opts.bias
+        ? `With BTC ${opts.bias} on 4h+1h.`
+        : `Fading BTC ${opts.bias} — this coin is doing the other side.`;
+  return `Took ${pair} ${opts.side} · ${opts.conf}% confidence. ${setup} ${tape}`;
+}
+
 export function confidenceBar(
   closed: { conf: number; pnl: number }[],
   base: number,

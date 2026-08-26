@@ -2411,9 +2411,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           huntTape = [
             huntStatus,
             sized
-              ? `Took ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% — ${(sized.thesis ?? "").split("·").pop()?.trim() ?? ""}`
-              : whyLive.length
-                ? whyLive.join("\n")
+              ? rules.whyTookTrade({
+                  symbol: sized.weexSymbol,
+                  side: sized.side,
+                  conf: Math.round(sized.confidence),
+                  thesis: sized.thesis ?? "",
+                  bias: compass.bias,
+                })
+              : needS > 0 && needL === 0
+                ? "No A+ short this pass (pin high, engulf, double top, climax, overbought, trend cooling). Slots stay empty."
                 : veto,
           ]
             .filter(Boolean)
