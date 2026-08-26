@@ -1667,7 +1667,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       }
 
       const credsTp = await credsFrom(settings);
-      if (pos.status === "filled" && credsTp) await ensureTakes(pos, notes, credsTp);
+      if (pos.status === "filled" && credsTp) {
+        await ensureTakes(pos, notes, credsTp);
+        const { cancelWeexStops } = await import("@/lib/weex.server");
+        await cancelWeexStops(credsTp, pos.weex_symbol, {
+          side,
+          mark: px,
+          keepPx: n(pos.stop),
+        });
+      }
 
       const tps = parseNums(pos.targets);
       let mark = px;
