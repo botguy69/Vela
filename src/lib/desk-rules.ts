@@ -406,6 +406,8 @@ export function whyTookTrade(opts: {
   conf: number;
   thesis: string;
   bias: "long" | "short" | "chop";
+  live?: boolean;
+  working?: boolean;
 }): string {
   const pair = opts.symbol.replace(/USDT/g, "");
   const kind = aPlusKind(opts.thesis);
@@ -441,13 +443,15 @@ export function whyTookTrade(opts: {
                         : kind === "continuation"
                           ? `Continuation pullback with the 21h (${raw}).`
                           : raw || "A+ structure.";
-  const tape =
-    opts.bias === "chop"
+  const tape = opts.live
+    ? ""
+    : opts.bias === "chop"
       ? "BTC mixed — structure scalp, not a tape-follow."
       : opts.side === opts.bias
         ? `With BTC ${opts.bias} on 4h+1h.`
         : `Fading BTC ${opts.bias} — this coin is doing the other side.`;
-  return `Took ${pair} ${opts.side} · ${opts.conf}% confidence. ${setup} ${tape}`;
+  const verb = opts.working ? "Limit" : opts.live ? "Live" : "Took";
+  return `${verb} ${pair} ${opts.side} · ${opts.conf}% confidence. ${setup}${tape ? ` ${tape}` : ""}`;
 }
 
 export function confidenceBar(

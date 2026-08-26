@@ -1289,9 +1289,10 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
     return await executeAutoTickBody(userId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const note = /auto_signals_one_open|unique/i.test(msg)
-      ? "Already one ticket on that pair — skipped duplicate."
-      : msg.slice(0, 180);
+    if (/auto_signals_one_open|unique/i.test(msg)) {
+      return { opened: 0, closed: 0, note: "" };
+    }
+    const note = msg.slice(0, 180);
     try {
       const { getSql } = await import("@/lib/db");
       const sql = await getSql();
@@ -2165,10 +2166,17 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     );
     const whyLive = stillOpen
       .filter((s) => s.status === "filled" || s.status === "working")
-      .map((s) => {
-        const tail = (s.thesis ?? "").split("·").pop()?.trim() || "";
-        return `${s.weex_symbol.replace("USDT", "")} ${s.side} ${Math.round(n(s.confidence))}% — ${tail.slice(0, 64)}`;
-      });
+      .map((s) =>
+        rules.whyTookTrade({
+          symbol: s.weex_symbol,
+          side: s.side === "short" ? "short" : "long",
+          conf: Math.round(n(s.confidence)),
+          thesis: s.thesis ?? "",
+          bias: "chop",
+          live: true,
+          working: s.status === "working",
+        }),
+      );
     const credsGate2 = await credsFrom(settings);
     let parked: SignalRow | null = null;
     if (credsGate2) {
@@ -2252,7 +2260,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         ...dbFilled.map((s) => s.weex_symbol),
       ];
       const beN = liveN.filter((p) => beNames.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-      huntTape = [huntStatus, whyLive.length ? whyLive.join("\n") : ""].filter(Boolean).join("\n");
+      huntTape = [huntStatus, ...whyLive].filter(Boolean).join("\n");
       notes.push(
         `${[...new Set(names)].join(" ")} · 2 long + 2 short at-risk. Next after TP1/BE. ${beN} leftover(s) · cap 6.`,
       );
@@ -2328,6 +2336,21 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (aA !== bA) return bA - aA;
             return (b.confidence ?? b.score) - (a.confidence ?? a.score);
           });
+          const held = new Set([
+            ...busy,
+            ...stillOpen.map((s) => s.weex_symbol),
+          ]);
+          const eyeing = ordered
+            .filter((s) => {
+              const conf = s.confidence ?? scoreToConf(s.score);
+              return rules.eliteScalp(s.thesis ?? "", conf, bar.minConf) && !held.has(s.weexSymbol);
+            })
+            .slice(0, 3)
+            .map((s) => {
+              const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
+              return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
+            });
+          const eyeLine = eyeing.length ? `Eying  ${eyeing.join(" · ")}` : "Eying  no A+ this pass.";
           let veto =
             needS > 0 && needL === 0
               ? "No A+ short this pass."
@@ -2575,7 +2598,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             }
           }
-          huntTape = [huntStatus, tookLine].filter(Boolean).join("\n");
+          huntTape = [huntStatus, ...whyLive, tookLine, eyeLine].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {
