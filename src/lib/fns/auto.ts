@@ -2212,8 +2212,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               side: ((p as { side?: string }).side === "short" ? "short" : "long") as "long" | "short",
             }));
 
-          let sized = null as ReturnType<typeof sizeSetup>;
-          let spec = null as Awaited<ReturnType<typeof specFor>> | null;
+          const batch: {
+            sized: NonNullable<ReturnType<typeof sizeSetup>>;
+            spec: Awaited<ReturnType<typeof specFor>>;
+          }[] = [];
+          let roomL = needL;
+          let roomS = needS;
+          let openLimits = stillOpenRaw.filter(
+            (s) => s.status === "working" || s.status === "proposed",
+          ).length;
           const btcLast = btcBook[btcBook.length - 1]?.close;
           const btcCloses = btcBook.map((c) => c.close);
           let btcRsi = 0;
@@ -2287,14 +2294,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             if (busy.has(pick.weexSymbol)) continue;
             if (stillOpen.some((s) => s.weex_symbol === pick.weexSymbol)) continue;
-            if (pick.side === "long" && riskL >= SIDE_CAP) {
+            if (pick.side === "long" && (riskL >= SIDE_CAP || roomL <= 0)) {
               whyNot.push(`${tag} long book full`);
               continue;
             }
-            if (pick.side === "short" && riskS >= SIDE_CAP) {
+            if (pick.side === "short" && (riskS >= SIDE_CAP || roomS <= 0)) {
               whyNot.push(`${tag} short book full`);
               continue;
             }
+            if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
             const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
             const trig = rules.ltfTrigger(pick.side, coin15);
             if (!aPlus && !trig.ok && !trig.wait) {
@@ -2364,7 +2372,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} crowded funding`);
               continue;
             }
-            spec = await specFor(coinByWeex(pick.weexSymbol));
+            const spec = await specFor(coinByWeex(pick.weexSymbol));
             const conf = pick.confidence ?? scoreToConf(pick.score);
             if (conf < bar.minConf) {
               veto = `${pick.weexSymbol} ${pick.side} conf ${conf}% below ${bar.minConf}% bar`;
@@ -2388,8 +2396,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const timed = !aPlus && trig.wait ? { ...timed0, entryType: "limit" as const } : timed0;
             const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
             if (!sz) continue;
-            sized = sz;
-            break;
+            if (sz.entryType === "limit" && openLimits >= 1) {
+              whyNot.push(`${tag} one unfilled limit already — need a market A+ for another slot`);
+              continue;
+            }
+            batch.push({ sized: sz, spec });
+            if (sz.entryType === "limit") openLimits += 1;
+            if (sz.side === "long") roomL -= 1;
+            else roomS -= 1;
+            if (roomL <= 0 && roomS <= 0) break;
           }
 
           let tookLine =
@@ -2397,12 +2412,18 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               ? "No A+ short this pass (pin high, engulf, double top, climax, overbought, trend cooling). Slots stay empty."
               : veto;
 
-          if (!sized || !spec) {
+          if (!batch.length) {
             notes.push(veto);
-          } else if (parked && parked.weex_symbol === sized.weexSymbol && parked.side === sized.side) {
-            notes.push(`Keep parked ${parked.weex_symbol} limit — not re-placing the same pair.`);
-            tookLine = `Limit still working ${parked.weex_symbol} ${parked.side} — not a fill yet.`;
           } else {
+            const tookLines: string[] = [];
+            for (const item of batch) {
+              const sized = item.sized;
+              const spec = item.spec;
+              if (parked && parked.weex_symbol === sized.weexSymbol && parked.side === sized.side) {
+                notes.push(`Keep parked ${parked.weex_symbol} limit — not re-placing the same pair.`);
+                tookLines.push(`Limit still working ${parked.weex_symbol} ${parked.side} — not a fill yet.`);
+                continue;
+              }
             const [taken] = await sql<{ id: number }>`
               select id from auto_signals
               where user_id = ${userId}
@@ -2413,7 +2434,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             `;
             if (taken) {
               notes.push(`Skip ${sized.weexSymbol} — already one ticket`);
-              tookLine = `Skip ${sized.weexSymbol.replace("USDT", "")} — already a ticket.`;
+              tookLines.push(`Skip ${sized.weexSymbol.replace("USDT", "")} — already a ticket.`);
             } else {
             const { placeWeexOrder, setCrossMaxLeverage } = await import("@/lib/weex.server");
             const creds = (await credsFrom(settings))!;
@@ -2437,7 +2458,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               ticketId = claim?.id ?? null;
             } catch {
               notes.push(`Skip ${sized.weexSymbol} — already one ticket`);
-              tookLine = `Skip ${sized.weexSymbol.replace("USDT", "")} — already a ticket.`;
+              tookLines.push(`Skip ${sized.weexSymbol.replace("USDT", "")} — already a ticket.`);
             }
             if (!ticketId) {
               /* unique lost the race */
@@ -2462,18 +2483,18 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const fillPx = status === "filled" ? sized.entry : null;
             if (!sent.ok) {
               notes.push(`WEEX reject ${sized.weexSymbol}: ${replies[0]?.slice(0, 80) ?? "empty"}`);
-              tookLine = `WEEX rejected ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% — ${(replies[0] ?? "empty").slice(0, 90)}`;
+              tookLines.push(`WEEX rejected ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% — ${(replies[0] ?? "empty").slice(0, 90)}`);
             } else {
               notes.push(
                 `${corrected.name} ${sized.leverage}x ${sized.side} ${sized.weexSymbol} · ${sized.rr.toFixed(1)}R · conf ${sized.confidence}% · $${sized.marginUsd.toFixed(2)}`,
               );
-              tookLine = rules.whyTookTrade({
+              tookLines.push(rules.whyTookTrade({
                 symbol: sized.weexSymbol,
                 side: sized.side,
                 conf: Math.round(sized.confidence),
                 thesis: sized.thesis ?? "",
                 bias: compass.bias,
-              });
+              }));
             }
 
             const filledAt = status === "filled" ? new Date().toISOString() : null;
@@ -2498,6 +2519,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             }
             }
+            }
+            if (tookLines.length) tookLine = tookLines.join("\n");
           }
           const needL2 = Math.max(0, SIDE_CAP - riskL);
           const needS2 = Math.max(0, SIDE_CAP - riskS);
