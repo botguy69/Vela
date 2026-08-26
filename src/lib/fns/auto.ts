@@ -2179,9 +2179,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
           for (const pick of ordered) {
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
-            if (flattened.has(pick.weexSymbol) && !/double (top|bottom)|failed range/i.test(pick.thesis ?? "")) {
-              veto = `You flattened ${pick.weexSymbol}. 2h pause on that pair.`;
-              whyNot.push(`${tag} 2h flatten pause`);
+            const confNow = pick.confidence ?? scoreToConf(pick.score);
+            const aPlus = confNow >= Math.max(82, bar.minConf);
+            if (flattened.has(pick.weexSymbol) && !aPlus) {
+              veto = `You flattened ${pick.weexSymbol}. Pause on that pair.`;
+              whyNot.push(`${tag} flatten pause`);
               continue;
             }
             if (busy.has(pick.weexSymbol)) continue;
@@ -2201,6 +2203,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const diverges =
+              aPlus ||
               rules.divergesFromBtc(pick.side, coin15, btc15) ||
               /double (top|bottom)|failed range/i.test(pick.thesis ?? "");
             if (compass.bias !== "chop") {
@@ -2210,7 +2213,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                 continue;
               }
             } else if (!diverges) {
-              veto = `${pick.weexSymbol} ${pick.side} — BTC chop, coin not fading`;
+              veto = `${pick.weexSymbol} ${pick.side} — BTC chop, not A+`;
               whyNot.push(`${tag} BTC chop`);
               continue;
             }
@@ -2230,7 +2233,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not fading BTC`);
               continue;
             }
-            if (!fadeVsBook) {
+            if (!fadeVsBook && !aPlus) {
               const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
               if (!rules.htfAllows(pick.side, h4)) {
                 veto = `HTF veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
