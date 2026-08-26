@@ -82,10 +82,16 @@ function origQty(row: {
   notional?: string | number | null;
   fill_px?: string | number | null;
   entry?: string | number | null;
+  risk_usd?: string | number | null;
+  targets?: string | null;
 }): number {
   const e = n(row.fill_px) || n(row.entry);
   const fromNotional = e > 0 ? n(row.notional) / e : 0;
-  return Math.max(n(row.qty), fromNotional);
+  const tp1 = parseNums(row.targets)[0];
+  const risk = n(row.risk_usd);
+  const rDist = tp1 != null && e > 0 ? Math.abs(tp1 - e) / 2.5 : 0;
+  const fromR = rDist > 0 && risk > 0 ? risk / rDist : 0;
+  return Math.max(n(row.qty), fromNotional, fromR);
 }
 
 function takeQtys(
@@ -719,17 +725,19 @@ async function ensureTakes(
   const sql = await getSql();
   const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
   if (stopOverride != null) {
-    if (!trimmed.haveSl && stopPx > 0) {
+    const { cancelWeexStops } = await import("@/lib/weex.server");
+    await cancelWeexStops(creds, pos.weex_symbol, { side: sideLc, mark, keepPx: 0 });
+    if (stopPx > 0) {
       await moveWeexStop(creds, {
         symbol: pos.weex_symbol,
         positionSide: side,
         stop: formatWeexPx(stopPx, spec.pricePrecision),
         quantity: qtyStr,
-        clientOid: `velasl${pos.id}`.slice(0, 36),
+        clientOid: `velabe${pos.id}`.slice(0, 36),
       });
     }
     await trimWeexTakes(creds, pos.weex_symbol, { side: sideLc, sl: stopPx, tps, mark });
-    notes.push(`${pos.weex_symbol} SL → WEEX BE ${stopPx.toFixed(4)}. 1 SL + leftover TPs.`);
+    notes.push(`${pos.weex_symbol} SL → WEEX BE ${stopPx.toFixed(4)} on leftover ${Number(qtyStr)}.`);
     const stampBe = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept)@?\d*/g, "").trim()} tps:ok`.slice(0, 500);
     await sql`update auto_signals set weex_resp = ${stampBe}, stop = ${stopPx}, updated_at = now() where id = ${pos.id}`;
     pos.weex_resp = stampBe;
@@ -1465,17 +1473,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         and be_moved = true
         and status in ('skipped','stopped','targeted')
         and close_reason in ('Closed on WEEX', 'Hit stop', 'TP1 then BE', 'BE scratch — not a win or loss')
-        and filled_at > now() - interval '6 hours'
+        and filled_at > now() - interval '14 days'
     `;
     for (const row of botched) {
       const entry = n(row.fill_px ?? row.entry);
-      const last = n(row.closed_px) || entry;
       const side = row.side === "short" ? "short" : "long";
-      const printed =
-        tp1Credible(side, entry, last, row) ||
-        (Boolean(row.be_moved) &&
-          parseNums(row.targets)[0] != null &&
-          (side === "long" ? last >= entry * 0.999 : last <= entry * 1.001));
+      const printed = Boolean(row.tp1_hit) || parseNums(row.targets)[0] != null;
+      const last = n(row.closed_px) || n(row.stop) || entry;
       const pnl = ticketPnl({
         side,
         entry,
@@ -1484,12 +1488,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         leftover: 0,
         targets: parseNums(row.targets),
         beMoved: true,
-        tp1Hit: printed,
+        tp1Hit: true,
       });
       const why = closeLabel(true, printed, pnl, !printed && pnl < 0);
       const already = row.close_reason === why && Math.abs(n(row.pnl) - pnl) < 0.02;
-      if (already) continue;
-      if (Math.abs(n(row.pnl)) > 1) continue;
+      if (already && !String(row.close_reason ?? "").startsWith("BE scratch")) continue;
+      if (Math.abs(n(row.pnl)) > 1 && !String(row.close_reason ?? "").startsWith("BE scratch")) continue;
       const st = why.startsWith("BE scratch")
         ? "skipped"
         : pnl < 0 || why === "Hit stop" || why === "TP1 then leftover stopped"
@@ -1782,10 +1786,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         if (credsForPos) {
           const { getWeexPositionQty } = await import("@/lib/weex.server");
           const left = await getWeexPositionQty(credsForPos, pos.weex_symbol);
-          const orig = Math.max(
-            origQty(pos),
-            entry > 0 && stop > 0 && n(pos.risk_usd) > 0 ? n(pos.risk_usd) / Math.abs(entry - stop) : 0,
-          );
+          const orig = origQty(pos);
           if (left != null && orig > 0 && left < orig * 0.72) reduced = true;
         }
       }
@@ -1802,51 +1803,23 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ) {
         const creds = await credsFrom(settings);
         const rawBe = await weexFeeBe(creds, pos.weex_symbol, side, entry);
-        const { safeBeStop } = await import("@/lib/ta");
-        const be = safeBeStop(side, entry, mark || px, rawBe);
+        const { lockBePx } = await import("@/lib/ta");
+        const be = lockBePx(side, entry, mark || px, rawBe);
         const hitFirst = tps[0] != null && taggedTake(side, mark, tps[0]!);
         const printed = Boolean(reduced || hitFirst);
-        if (be == null && creds) {
-          const liveLeft = (await (await import("@/lib/weex.server")).getWeexPositionQty(creds, pos.weex_symbol)) ?? 0;
-          if (liveLeft > 0) {
-            const spec = await specFor(coinByWeex(pos.weex_symbol));
-            const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
-            await cancelWeexProtective(creds, pos.weex_symbol).catch(() => null);
-            await flattenWeex(creds, {
-              symbol: pos.weex_symbol,
-              side: side === "short" ? "BUY" : "SELL",
-              positionSide: side === "short" ? "SHORT" : "LONG",
-              quantity: formatWeexQty(liveLeft, spec.quantityPrecision),
-              clientOid: `velabe${pos.id}${Date.now().toString(36)}`.slice(0, 36),
-            });
-            notes.push(`${pos.weex_symbol} TP1 banked — BE would fire through the market, flattened leftover.`);
-          }
+        if (be > 0 && creds) {
+          pos.stop = be;
+          await ensureTakes(pos, notes, creds, be);
           await sql`
             update auto_signals
-            set be_moved = true, tp1_hit = true, updated_at = now()
+            set stop = ${be}, be_moved = true, tp1_hit = true, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
-        } else if (be != null) {
-          let moved = false;
-          if (creds) {
-            pos.stop = be;
-            await ensureTakes(pos, notes, creds, be);
-            moved = true;
-          }
-          if (moved || !creds) {
-            await sql`
-              update auto_signals
-              set stop = ${be}, be_moved = true, tp1_hit = ${printed}, updated_at = now()
-              where id = ${pos.id} and user_id = ${userId}
-            `;
-            if (moved) {
-              notes.push(
-                printed
-                  ? `${pos.weex_symbol} TP1 printed · stop to fee BE ${be.toFixed(4)} (under the market)`
-                  : `${pos.weex_symbol} size cut · stop to fee BE ${be.toFixed(4)}`,
-              );
-            }
-          }
+          notes.push(
+            printed
+              ? `${pos.weex_symbol} TP1 · SL → WEEX BE ${be.toFixed(4)}`
+              : `${pos.weex_symbol} size cut · SL → WEEX BE ${be.toFixed(4)}`,
+          );
         }
       } else if (pos.be_moved) {
         if (reduced && !pos.tp1_hit) {

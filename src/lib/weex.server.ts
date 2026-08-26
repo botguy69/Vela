@@ -753,6 +753,20 @@ export async function cancelWeexStops(
   symbol: string,
   opts?: { side?: "long" | "short"; mark?: number; keepPx?: number },
 ) {
+  if (!(opts?.keepPx) || opts.keepPx <= 0) {
+    await weexRequest({
+      creds,
+      method: "POST",
+      path: "/capi/v2/mix/order/cancel-all-plan",
+      body: { symbol, productType: "USDT-FUTURES", planType: "pos_loss", marginCoin: "USDT" },
+    }).catch(() => null);
+    await weexRequest({
+      creds,
+      method: "POST",
+      path: "/capi/v3/algoOrder/cancelAll",
+      body: { symbol, planType: "STOP_LOSS" },
+    }).catch(() => null);
+  }
   const rows = await listWeexAlgoRows(creds, symbol);
   const side = opts?.side;
   const mark = opts?.mark ?? 0;
