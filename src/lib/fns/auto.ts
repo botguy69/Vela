@@ -2297,9 +2297,16 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           huntTape = [
             huntStatus,
             compass.note,
+            `A+     ${rules.APLUS_MENU}`,
             sized
               ? `Took ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% ${sized.entryType}.`
               : "Stood down this pass — nothing cleared the bar.",
+            (() => {
+              const kinds = [...new Set(ordered.map((s) => rules.aPlusKind(s.thesis ?? "")).filter(Boolean))];
+              return kinds.length
+                ? `Setups this pass  ${kinds.join(" · ")}`
+                : "Setups this pass  none of the A+ catalog printed.";
+            })(),
             (() => {
               const rest = sized
                 ? eyeing.filter((e) => !e.toUpperCase().startsWith(sized.weexSymbol.replace("USDT", "").toUpperCase()))

@@ -381,6 +381,25 @@ export function eliteScalp(thesis: string, conf: number, bar: number): boolean {
   );
 }
 
+export const APLUS_MENU =
+  "double · pin · engulf · climax · dry-up · washout · failed range · trend cooling · continuation (with BTC)";
+
+export function aPlusKind(thesis: string): string | null {
+  const t = thesis;
+  if (/double (top|bottom)|buyers on 2nd|supply on 2nd|vol fade/i.test(t)) return "double";
+  if (/failed range/i.test(t)) return "failed range";
+  if (/Pin bar/i.test(t)) return "pin";
+  if (/engulf/i.test(t)) return "engulf";
+  if (/climax rejection/i.test(t)) return "climax";
+  if (/Dry-up at/i.test(t)) return "dry-up";
+  if (/washout RSI/i.test(t)) return "washout";
+  if (/Trend cooling/i.test(t)) return "trend cooling";
+  if (/Oversold bounce RSI (1\d|2[0-8])/i.test(t)) return "oversold";
+  if (/Overbought RSI (7[2-9]|8\d)/i.test(t)) return "overbought";
+  if (/Continuation/i.test(t)) return "continuation";
+  return null;
+}
+
 export function confidenceBar(
   closed: { conf: number; pnl: number }[],
   base: number,
@@ -390,17 +409,17 @@ export function confidenceBar(
   const recentLoss = recent.filter((c) => c.pnl < 0).length;
   const wrBad = recent.length >= 8 && recentLoss / recent.length >= 0.5;
   const floor = wrBad ? 82 : Math.max(80, base);
-  if (rows.length < 4) return { minConf: floor, note: `Bar ${floor}%+. 1 SL + 2 TP. Green tickets hold.` };
+  if (rows.length < 4) return { minConf: floor, note: `Bar ${floor}%+. A+ : ${APLUS_MENU}.` };
   const high = rows.filter((c) => c.conf >= base);
   const highLose = high.filter((c) => c.pnl < 0);
   if ((high.length >= 3 && highLose.length / high.length >= 0.5) || wrBad) {
     const minConf = Math.min(86, Math.max(floor, base + 4));
     return {
       minConf,
-      note: `WR weak. Bar ${minConf}%. Empty slots OK. No flatten on green.`,
+      note: `WR weak. Bar ${minConf}%. A+ : ${APLUS_MENU}.`,
     };
   }
-  return { minConf: floor, note: `Bar ${floor}%+. Volume + BB. 1 SL + 2 TP.` };
+  return { minConf: floor, note: `Bar ${floor}%+. A+ : ${APLUS_MENU}.` };
 }
 
 export function writeDeskNote(opts: {
