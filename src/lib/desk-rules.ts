@@ -445,6 +445,10 @@ export function whyTookTrade(opts: {
                           : raw || "A+ structure.";
   const tape = opts.live
     ? ""
+    : /BTC/i.test(opts.symbol)
+      ? opts.bias === "chop"
+        ? "BTC mixed on 4h/1h."
+        : `BTC ${opts.bias} on 4h+1h.`
     : opts.bias === "chop"
       ? "BTC mixed — structure scalp, not a tape-follow."
       : opts.side === opts.bias

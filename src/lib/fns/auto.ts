@@ -2348,17 +2348,25 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             ...busy,
             ...stillOpen.map((s) => s.weex_symbol),
           ]);
-          const eyeing = ordered
-            .filter((s) => {
-              const conf = s.confidence ?? scoreToConf(s.score);
-              return rules.eliteScalp(s.thesis ?? "", conf, bar.minConf) && !held.has(s.weexSymbol);
-            })
-            .slice(0, 3)
-            .map((s) => {
-              const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
-              return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
-            });
-          const eyeLine = eyeing.length ? `Eying  ${eyeing.join(" · ")}` : "Eying  no A+ this pass.";
+          const aPlusList = ordered.filter((s) => {
+            const conf = s.confidence ?? scoreToConf(s.score);
+            return rules.eliteScalp(s.thesis ?? "", conf, bar.minConf) && !held.has(s.weexSymbol);
+          });
+          const byKind = new Map<string, (typeof aPlusList)[0]>();
+          for (const s of aPlusList) {
+            const k = rules.aPlusKind(s.thesis ?? "") ?? "a+";
+            if (!byKind.has(k)) byKind.set(k, s);
+          }
+          const diverse = [...byKind.values()];
+          const rest = aPlusList.filter((s) => !diverse.includes(s));
+          const eyeing = [...diverse, ...rest].slice(0, 3).map((s) => {
+            const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
+            return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
+          });
+          const eyeLine = eyeing.length
+            ? `Eying  ${eyeing.join(" · ")}`
+            : "Eying  no A+ this pass.";
+          const aPlusLine = `A+  ${rules.APLUS_MENU}. Junk 21h-mean is off.`;
           let veto =
             needS > 0 && needL === 0
               ? "No A+ short this pass."
@@ -2606,7 +2614,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             }
           }
-          huntTape = [huntStatus, ...whyLive, tookLine, eyeLine].filter(Boolean).join("\n");
+          huntTape = [huntStatus, ...whyLive, tookLine, eyeLine, aPlusLine].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {
