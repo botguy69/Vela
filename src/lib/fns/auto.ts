@@ -2443,27 +2443,16 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (sized) break;
           }
 
-          huntTape = [
-            huntStatus,
-            sized
-              ? rules.whyTookTrade({
-                  symbol: sized.weexSymbol,
-                  side: sized.side,
-                  conf: Math.round(sized.confidence),
-                  thesis: sized.thesis ?? "",
-                  bias: compass.bias,
-                })
-              : needS > 0 && needL === 0
-                ? "No A+ short this pass (pin high, engulf, double top, climax, overbought, trend cooling). Slots stay empty."
-                : veto,
-          ]
-            .filter(Boolean)
-            .join("\n");
+          let tookLine =
+            needS > 0 && needL === 0
+              ? "No A+ short this pass (pin high, engulf, double top, climax, overbought, trend cooling). Slots stay empty."
+              : veto;
 
           if (!sized || !spec) {
             notes.push(veto);
           } else if (parked && parked.weex_symbol === sized.weexSymbol && parked.side === sized.side) {
             notes.push(`Keep parked ${parked.weex_symbol} limit — not re-placing the same pair.`);
+            tookLine = `Limit still working ${parked.weex_symbol} ${parked.side} — not a fill yet.`;
           } else {
             if (parked && credsGate2) {
               const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
@@ -2496,6 +2485,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             `;
             if (taken) {
               notes.push(`Skip ${sized.weexSymbol} — already one ticket`);
+              tookLine = `Skip ${sized.weexSymbol.replace("USDT", "")} — already a ticket.`;
             } else {
             const { placeWeexOrder, setCrossMaxLeverage } = await import("@/lib/weex.server");
             const creds = (await credsFrom(settings))!;
@@ -2519,6 +2509,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               ticketId = claim?.id ?? null;
             } catch {
               notes.push(`Skip ${sized.weexSymbol} — already one ticket`);
+              tookLine = `Skip ${sized.weexSymbol.replace("USDT", "")} — already a ticket.`;
             }
             if (!ticketId) {
               /* unique lost the race */
@@ -2541,11 +2532,20 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const weexResp = replies.join(" | ").slice(0, 500);
             const status = sent.ok ? (sized.entryType === "market" ? "filled" : "working") : "error";
             const fillPx = status === "filled" ? sized.entry : null;
-            if (!sent.ok) notes.push(`WEEX reject ${sized.weexSymbol}: ${replies[0]?.slice(0, 80) ?? "empty"}`);
-            else {
+            if (!sent.ok) {
+              notes.push(`WEEX reject ${sized.weexSymbol}: ${replies[0]?.slice(0, 80) ?? "empty"}`);
+              tookLine = `WEEX rejected ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% — ${(replies[0] ?? "empty").slice(0, 90)}`;
+            } else {
               notes.push(
                 `${corrected.name} ${sized.leverage}x ${sized.side} ${sized.weexSymbol} · ${sized.rr.toFixed(1)}R · conf ${sized.confidence}% · $${sized.marginUsd.toFixed(2)}`,
               );
+              tookLine = rules.whyTookTrade({
+                symbol: sized.weexSymbol,
+                side: sized.side,
+                conf: Math.round(sized.confidence),
+                thesis: sized.thesis ?? "",
+                bias: compass.bias,
+              });
             }
 
             const filledAt = status === "filled" ? new Date().toISOString() : null;
@@ -2567,6 +2567,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             }
           }
+          huntTape = [huntStatus, tookLine].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {
