@@ -2331,8 +2331,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const btc4 = await getWeexFourHour("BTCUSDT").catch(() => []);
           const compass = rules.marketBias(btc4, btcBook, btc15);
           const ordered = [...raw].sort((a, b) => {
-            const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf) ? 1 : 0;
-            const bA = rules.eliteScalp(b.thesis ?? "", b.confidence ?? scoreToConf(b.score), bar.minConf) ? 1 : 0;
+            const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf, compass.bias) ? 1 : 0;
+            const bA = rules.eliteScalp(b.thesis ?? "", b.confidence ?? scoreToConf(b.score), bar.minConf, compass.bias) ? 1 : 0;
             if (needS > 0 && needL === 0) {
               const as = a.side === "short" ? 1 : 0;
               const bs = b.side === "short" ? 1 : 0;
@@ -2352,7 +2352,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           ]);
           const aPlusList = ordered.filter((s) => {
             const conf = s.confidence ?? scoreToConf(s.score);
-            return rules.eliteScalp(s.thesis ?? "", conf, bar.minConf) && !held.has(s.weexSymbol);
+            return rules.eliteScalp(s.thesis ?? "", conf, bar.minConf, compass.bias) && !held.has(s.weexSymbol);
           });
           const byKind = new Map<string, (typeof aPlusList)[0]>();
           for (const s of aPlusList) {
@@ -2369,18 +2369,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             ? `Eying  ${eyeing.join(" · ")}`
             : "Eying  no A+ this pass.";
           const aPlusLine = `A+  ${rules.APLUS_MENU}. Junk 21h-mean is off.`;
-          let veto =
-            needS > 0 && needL === 0
-              ? "No A+ short this pass."
-              : "No A+ this pass.";
+          let veto = "No A+ this pass. Slots stay empty.";
           const whyNot: string[] = [];
 
           for (const pick of ordered) {
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
             const confNow = pick.confidence ?? scoreToConf(pick.score);
-            const aPlus = rules.eliteScalp(pick.thesis ?? "", confNow, bar.minConf);
-            if (compass.bias === "chop" && !aPlus) {
-              whyNot.push(`${tag} chop — not an A+ scalp`);
+            const aPlus = rules.eliteScalp(pick.thesis ?? "", confNow, bar.minConf, compass.bias);
+            if (!aPlus) {
+              whyNot.push(`${tag} not an A+ scalp — slot stays empty`);
               continue;
             }
             if (flattened.has(pick.weexSymbol) && !aPlus) {

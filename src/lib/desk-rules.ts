@@ -374,11 +374,21 @@ export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
 }
 
 /** Real A+ scalp — structure, extremes, tape. Not generic 21h mean RSI 48. */
-export function eliteScalp(thesis: string, conf: number, bar: number): boolean {
+export function eliteScalp(
+  thesis: string,
+  conf: number,
+  bar: number,
+  bias?: "long" | "short" | "chop",
+): boolean {
   if (conf < Math.max(82, bar)) return false;
-  return /double (top|bottom)|failed range|vol fade|washout RSI|climax rejection|Dry-up at|Trend cooling|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-8])|Overbought RSI (7[2-9]|8\d)/i.test(
-    thesis,
-  );
+  if (
+    /double (top|bottom)|failed range|vol fade|washout RSI|climax rejection|Dry-up at|Trend cooling|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-8])|Overbought RSI (7[2-9]|8\d)/i.test(
+      thesis,
+    )
+  ) {
+    return true;
+  }
+  return Boolean(bias && bias !== "chop" && /Continuation/i.test(thesis));
 }
 
 export const APLUS_MENU =
