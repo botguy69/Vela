@@ -280,8 +280,13 @@ function parsePosition(row: unknown): {
   const rawPnl = Number(
     r.unrealizedPnl ??
       r.unrealizePnl ??
+      (r as { unrealizedPL?: string | number }).unrealizedPL ??
       r.upl ??
-      (r as { floatProfit?: string | number }).floatProfit,
+      r.profit ??
+      (r as { pnl?: string | number }).pnl ??
+      (r as { floatProfit?: string | number }).floatProfit ??
+      (r as { achievedProfits?: string | number }).achievedProfits ??
+      (r as { uPnL?: string | number }).uPnL,
   );
   const mark = Number(r.markPrice ?? r.marketPrice ?? 0);
   const bePx = Number(

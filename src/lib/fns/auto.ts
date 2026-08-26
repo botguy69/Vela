@@ -1179,6 +1179,18 @@ export const getAutoDesk = createServerFn({ method: "GET" })
         });
       }
     }
+    if (creds) {
+      const { listWeexClosedPnl } = await import("@/lib/weex.server");
+      const closes = await listWeexClosedPnl(creds).catch(() => []);
+      for (const t of mapped) {
+        if (t.liveOnWeex || t.status === "filled" || t.status === "working") continue;
+        const hit = matchWeexClose(
+          { weex_symbol: t.weexSymbol, side: t.side, created_at: t.createdAt, updated_at: t.updatedAt },
+          closes,
+        );
+        if (hit) t.pnl = hit.pnl;
+      }
+    }
     const liveL = mapped.filter((t) => t.liveOnWeex && t.side === "long").length;
     const liveS = mapped.filter((t) => t.liveOnWeex && t.side === "short").length;
     const { whyTookTrade } = await import("@/lib/desk-rules");
@@ -1501,7 +1513,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       where user_id = ${userId}
         and be_moved = true
         and status in ('skipped','stopped','targeted')
-        and close_reason in ('Closed on WEEX', 'Hit stop', 'TP1 then BE', 'BE scratch — not a win or loss')
+        and close_reason like 'BE scratch%'
         and filled_at > now() - interval '14 days'
     `;
     for (const row of botched) {
