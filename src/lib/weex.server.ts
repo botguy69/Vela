@@ -387,15 +387,21 @@ function parseClose(r: Record<string, unknown>): WeexClose | null {
   return { symbol, side, pnl, closePx: Number.isFinite(closePx) ? closePx : 0, qty, ts };
 }
 
-export async function listWeexClosedPnl(creds: WeexCreds): Promise<WeexClose[]> {
+export async function listWeexClosedPnl(creds: WeexCreds, symbol?: string): Promise<WeexClose[]> {
+  const sym = symbol?.replace(/_/g, "").toUpperCase();
+  const q = (extra: Record<string, string> = {}) => ({
+    limit: "100",
+    ...(sym ? { symbol: sym } : {}),
+    ...extra,
+  });
   const paths: { path: string; query?: Record<string, string> }[] = [
-    { path: "/capi/v3/historyPositions", query: { limit: "80" } },
-    { path: "/capi/v3/position/history", query: { limit: "80" } },
-    { path: "/capi/v3/positionHistory", query: { limit: "80" } },
-    { path: "/capi/v3/account/position/history", query: { limit: "80" } },
-    { path: "/capi/v3/income", query: { incomeType: "REALIZED_PNL", limit: "100" } },
-    { path: "/capi/v3/userTrades", query: { limit: "100" } },
-    { path: "/capi/v2/mix/position/history", query: { productType: "USDT-FUTURES", limit: "80" } },
+    { path: "/capi/v2/mix/position/history", query: q({ productType: "USDT-FUTURES" }) },
+    { path: "/capi/v3/historyPositions", query: q() },
+    { path: "/capi/v3/position/history", query: q() },
+    { path: "/capi/v3/positionHistory", query: q() },
+    { path: "/capi/v3/account/position/history", query: q() },
+    { path: "/capi/v3/userTrades", query: q() },
+    { path: "/capi/v3/income", query: { incomeType: "REALIZED_PNL", limit: "100", ...(sym ? { symbol: sym } : {}) } },
   ];
   const out: WeexClose[] = [];
   const seen = new Set<string>();
@@ -405,14 +411,15 @@ export async function listWeexClosedPnl(creds: WeexCreds): Promise<WeexClose[]> 
     for (const row of rowsFrom(res.data)) {
       const hit = parseClose(row as Record<string, unknown>);
       if (!hit) continue;
+      if (sym && hit.symbol.replace(/_/g, "").toUpperCase() !== sym) continue;
       const k = `${hit.symbol}|${hit.ts}|${hit.pnl.toFixed(4)}`;
       if (seen.has(k)) continue;
       seen.add(k);
       out.push(hit);
     }
-    if (out.length >= 100) break;
   }
-  return out;
+  out.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return out.slice(0, 200);
 }
 
 export async function getWeexPositionQty(

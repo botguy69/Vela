@@ -499,7 +499,7 @@ function matchWeexClose(
     if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
     if (c.side && c.side !== side) return false;
     if (!c.ts) return true;
-    return c.ts >= created - 30 * 60_000 && c.ts <= updated + 6 * 3600_000;
+    return c.ts >= created - 30 * 60_000 && c.ts <= Math.max(updated, created) + 12 * 3600_000;
   });
   if (!cands.length) {
     const loose = closes.filter((c) => {
@@ -507,14 +507,10 @@ function matchWeexClose(
       return !c.side || c.side === side;
     });
     if (!loose.length) return null;
-    loose.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    loose.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
     return loose[0] ?? null;
   }
-  cands.sort((a, b) => {
-    const da = a.ts ? Math.abs(a.ts - updated) : 9e15;
-    const db = b.ts ? Math.abs(b.ts - updated) : 9e15;
-    return da - db;
-  });
+  cands.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
   return cands[0] ?? null;
 }
 
@@ -525,16 +521,23 @@ async function restampWeexPnl(
   notes: string[],
 ) {
   const { listWeexClosedPnl } = await import("@/lib/weex.server");
-  const closes = await listWeexClosedPnl(creds).catch(() => []);
-  if (!closes.length) return;
+  let closes = await listWeexClosedPnl(creds).catch(() => []);
   const rows = await sql<SignalRow>`
     select * from auto_signals
     where user_id = ${userId}
       and status in ('stopped','targeted','skipped')
-      and updated_at > now() - interval '14 days'
+      and filled_at > now() - interval '3 days'
   `;
   for (const row of rows) {
-    const hit = matchWeexClose(row, closes);
+    let hit = matchWeexClose(row, closes);
+    const mismatch = !hit || Math.abs(n(row.pnl) - hit.pnl) > 0.4;
+    if (mismatch) {
+      const extra = await listWeexClosedPnl(creds, row.weex_symbol).catch(() => []);
+      if (extra.length) {
+        closes = [...closes, ...extra];
+        hit = matchWeexClose(row, extra) ?? matchWeexClose(row, closes);
+      }
+    }
     if (!hit) continue;
     if (Math.abs(n(row.pnl) - hit.pnl) < 0.08 && (hit.pnl >= 0) === (n(row.pnl) >= 0) && !String(row.close_reason ?? "").startsWith("BE scratch")) continue;
     const st = hit.pnl >= 0.05 ? "targeted" : hit.pnl <= -0.05 ? "stopped" : "skipped";
