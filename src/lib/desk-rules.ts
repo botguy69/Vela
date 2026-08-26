@@ -326,18 +326,13 @@ export function buildLedger(rows: ClosedTicket[]): Ledger {
     if (r.weex) bucket(symbols, r.weex, r.pnl);
   }
   const skipPlans = new Set<string>();
-  for (const p of plans.values()) {
-    if (p.closed >= 8 && p.wins / p.closed < 0.28 && p.pnl <= 0) skipPlans.add(p.plan);
-  }
   const skipSymbols = new Set<string>();
   for (const s of symbols.values()) {
     if (s.closed >= 6 && s.wins / s.closed < 0.25 && s.pnl <= 0) skipSymbols.add(s.plan);
   }
   const bits: string[] = [];
   const best = [...plans.values()].sort((a, b) => b.pnl - a.pnl)[0];
-  const worst = [...plans.values()].filter((p) => p.closed >= 5).sort((a, b) => a.pnl - b.pnl)[0];
   if (best && best.pnl > 0 && best.closed >= 4) bits.push(`keeping ${best.plan} ($${best.pnl.toFixed(1)})`);
-  if (worst && skipPlans.has(worst.plan)) bits.push(`killed ${worst.plan}`);
   if (skipSymbols.size) bits.push(`skip ${[...skipSymbols].slice(0, 3).join(", ")}`);
   return {
     plans: [...plans.values()],
@@ -353,6 +348,7 @@ export function rankSetups(setups: RawSetup[], records: PlanRecord[]): RawSetup[
     .map((s) => {
       const rec = byPlan.get(s.plan);
       if (!rec || rec.closed < 6) return s;
+      if (s.plan === "scale2" || s.plan === "scale3" || s.plan === "single") return s;
       const wr = rec.wins / rec.closed;
       const edge = rec.pnl;
       let adj = 1;
@@ -380,7 +376,7 @@ export function eliteScalp(
   bar: number,
   bias?: "long" | "short" | "chop",
 ): boolean {
-  if (conf < Math.max(82, bar)) return false;
+  if (conf < 80) return false;
   if (
     /double (top|bottom)|failed range|vol fade|washout RSI|climax rejection|Dry-up at|Trend cooling|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-8])|Overbought RSI (7[2-9]|8\d)/i.test(
       thesis,
@@ -476,15 +472,14 @@ export function confidenceBar(
   const recent = rows.slice(-12);
   const recentLoss = recent.filter((c) => c.pnl < 0).length;
   const wrBad = recent.length >= 8 && recentLoss / recent.length >= 0.5;
-  const floor = wrBad ? 82 : Math.max(80, base);
-  if (rows.length < 4) return { minConf: floor, note: `Bar ${floor}%+.` };
+  const floor = 80;
+  if (rows.length < 4) return { minConf: floor, note: `Bar ${floor}%+. A+ longs and shorts.` };
   const high = rows.filter((c) => c.conf >= base);
   const highLose = high.filter((c) => c.pnl < 0);
   if ((high.length >= 3 && highLose.length / high.length >= 0.5) || wrBad) {
-    const minConf = Math.min(86, Math.max(floor, base + 4));
-    return { minConf, note: `WR weak. Bar ${minConf}%.` };
+    return { minConf: floor, note: `WR weak. Still 80%+ A+ — not killing scale2.` };
   }
-  return { minConf: floor, note: `Bar ${floor}%+.` };
+  return { minConf: floor, note: `Bar ${floor}%+. A+ longs and shorts.` };
 }
 
 export function writeDeskNote(opts: {

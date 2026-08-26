@@ -2172,7 +2172,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           notes.push(`Regime: BTC shock wick (ATR ${regime.ratio.toFixed(1)}×). Standing down.`);
         } else {
           const rawAll = rules.applyLedger(
-            scanUniverse(books, corrected.style, corrected.minRr, corrected.method),
+            scanUniverse(books, corrected.style, corrected.minRr, "vela"),
             ledger,
           );
           const raw = corrected.id === "grow"
@@ -2281,7 +2281,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
             const trig = rules.ltfTrigger(pick.side, coin15);
-            if (!trig.ok && !trig.wait) {
+            if (!aPlus && !trig.ok && !trig.wait) {
               veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
               whyNot.push(`${tag} ${trig.reason}`);
               continue;
@@ -2377,8 +2377,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} parked limit better`);
               continue;
             }
-            const timed0 = rules.withLtfEntry(pick, trig.pullback);
-            const timed = trig.wait ? { ...timed0, entryType: "limit" as const } : timed0;
+            const timed0 = rules.withLtfEntry(pick, aPlus ? null : trig.pullback);
+            const timed = !aPlus && trig.wait ? { ...timed0, entryType: "limit" as const } : timed0;
             const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
             if (!sz) continue;
             sized = sz;
