@@ -179,7 +179,15 @@ function withLiveHunt(note: string | null, liveL: number, liveS: number) {
   const head = huntHeader(liveL, liveS);
   const rest = (note ?? "")
     .split("\n")
-    .filter((ln) => !/^Hunting up to 2L/.test(ln) && !/^Not hunting —/.test(ln) && !/^Need \d/.test(ln))
+    .filter(
+      (ln) =>
+        !/^Hunting up to 2L/.test(ln) &&
+        !/^Not hunting —/.test(ln) &&
+        !/^Need \d/.test(ln) &&
+        !/white.?list/i.test(ln) &&
+        !/blocked this server/i.test(ln) &&
+        !/allow any IP/i.test(ln),
+    )
     .join("\n")
     .trim();
   return [head, rest].filter(Boolean).join("\n");
@@ -1348,7 +1356,30 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/auto_signals_one_open|unique/i.test(msg)) {
-      return { opened: 0, closed: 0, note: "" };
+      try {
+        const { getSql } = await import("@/lib/db");
+        const sql = await getSql();
+        const [row] = await sql<{ last_tick_note: string | null }>`
+          select last_tick_note from auto_settings where user_id = ${userId} limit 1
+        `;
+        const cleaned = String(row?.last_tick_note ?? "")
+          .split("\n")
+          .filter((ln) => !/white.?list|blocked this server|allow any IP/i.test(ln))
+          .join("\n")
+          .trim();
+        if (cleaned !== (row?.last_tick_note ?? "")) {
+          await sql`
+            update auto_settings
+            set last_tick_note = ${cleaned || "Hunting. Duplicate ticket skipped."},
+                last_tick_at = now(),
+                updated_at = now()
+            where user_id = ${userId}
+          `;
+        }
+      } catch {
+        /* ignore */
+      }
+      return { opened: 0, closed: 0, note: "Skip duplicate ticket." };
     }
     const note = msg.slice(0, 180);
     try {
