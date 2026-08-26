@@ -2140,22 +2140,24 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       (s) => s.status === "filled" && !s.be_moved && !flattened.has(s.weex_symbol),
     );
     const countAtRisk = (side: "long" | "short") => {
-      const fromLive = liveN.filter(
-        (p) =>
-          (p.side === "short" ? "short" : "long") === side &&
-          !beNames.has(p.symbol.replace(/_/g, "").toUpperCase()),
-      ).length;
-      const fromDb = dbFilled.filter((s) => (s.side === "short" ? "short" : "long") === side).length;
-      const fromWorking = stillOpenRaw.filter(
-        (s) =>
-          (s.status === "working" || s.status === "proposed") &&
-          (s.side === "short" ? "short" : "long") === side,
-      ).length;
-      const filled = weexBook == null ? fromDb : fromLive;
-      return filled + fromWorking;
+      const syms = new Set<string>();
+      for (const p of liveN) {
+        if ((p.side === "short" ? "short" : "long") !== side) continue;
+        const k = p.symbol.replace(/_/g, "").toUpperCase();
+        if (beNames.has(k)) continue;
+        syms.add(k);
+      }
+      for (const s of stillOpenRaw) {
+        if ((s.side === "short" ? "short" : "long") !== side) continue;
+        if (flattened.has(s.weex_symbol)) continue;
+        if (s.status === "filled" && s.be_moved) continue;
+        if (s.status !== "filled" && s.status !== "working" && s.status !== "proposed") continue;
+        syms.add(s.weex_symbol.replace(/_/g, "").toUpperCase());
+      }
+      return syms.size;
     };
-    const riskL = countAtRisk("long");
-    const riskS = countAtRisk("short");
+    let riskL = countAtRisk("long");
+    let riskS = countAtRisk("short");
     const needL = Math.max(0, SIDE_CAP - riskL);
     const needS = Math.max(0, SIDE_CAP - riskS);
     const huntStatus = !settings.armed
@@ -2387,6 +2389,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             if (busy.has(pick.weexSymbol)) continue;
+            if (stillOpen.some((s) => s.weex_symbol === pick.weexSymbol)) continue;
             if (pick.side === "long" && riskL >= SIDE_CAP) {
               whyNot.push(`${tag} long book full`);
               continue;
@@ -2471,6 +2474,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} below ${bar.minConf}%`);
               continue;
             }
+            const [already] = await sql<{ id: number }>`
+              select id from auto_signals
+              where user_id = ${userId}
+                and weex_symbol = ${pick.weexSymbol}
+                and side = ${pick.side}
+                and status in ('proposed','working','filled')
+              limit 1
+            `;
+            if (already) continue;
             if (parked && parked.weex_symbol === pick.weexSymbol && parked.side === pick.side) {
               whyNot.push(`${tag} already parked — leave the limit`);
               continue;
@@ -2486,8 +2498,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             const timed0 = rules.withLtfEntry(pick, trig.pullback);
             const timed = trig.wait ? { ...timed0, entryType: "limit" as const } : timed0;
-            sized = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
-            if (sized) break;
+            const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
+            if (!sz) continue;
+            sized = sz;
+            break;
           }
 
           let tookLine =
@@ -2610,11 +2624,21 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               const [row] = await sql<SignalRow>`select * from auto_signals where id = ${ticketId} limit 1`;
               if (row) await ensureTakes(row, notes, creds);
             }
-            if (status !== "error") opened += 1;
+            if (status !== "error") {
+              opened += 1;
+              if (sized.side === "long") riskL += 1;
+              else riskS += 1;
+            }
             }
             }
           }
-          huntTape = [huntStatus, ...whyLive, tookLine, eyeLine, aPlusLine].filter(Boolean).join("\n");
+          const needL2 = Math.max(0, SIDE_CAP - riskL);
+          const needS2 = Math.max(0, SIDE_CAP - riskS);
+          const huntNow =
+            needL2 === 0 && needS2 === 0
+              ? "Not hunting — 2 longs and 2 shorts already at risk. Next after TP1/BE."
+              : `Hunting up to 2L+2S (${riskL}L/${riskS}S live). Need ${[needL2 ? `${needL2} long` : "", needS2 ? `${needS2} short` : ""].filter(Boolean).join(" + ")}. A+ scalps only — will not fill empty slots.`;
+          huntTape = [huntNow, ...whyLive, tookLine, eyeLine, aPlusLine].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {
