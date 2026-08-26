@@ -1594,54 +1594,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         }
       }
     }
-    const botched = await sql<SignalRow>`
-      select * from auto_signals
-      where user_id = ${userId} and false
-    `;
-    for (const row of botched) {
-      const entry = n(row.fill_px ?? row.entry);
-      const side = row.side === "short" ? "short" : "long";
-      const printed = Boolean(row.tp1_hit) || parseNums(row.targets)[0] != null;
-      const last = n(row.closed_px) || n(row.stop) || entry;
-      const pnl = ticketPnl({
-        side,
-        entry,
-        last,
-        qty: origQty(row),
-        leftover: 0,
-        targets: parseNums(row.targets),
-        beMoved: true,
-        tp1Hit: true,
-      });
-      const why = closeLabel(true, printed, pnl, !printed && pnl < 0, last, parseNums(row.targets), side);
-      const already = row.close_reason === why && Math.abs(n(row.pnl) - pnl) < 0.02;
-      if (already) continue;
-      if (
-        /Hit TP1|TP1 then BE|Hit stop|Closed on WEEX/.test(String(row.close_reason ?? "")) &&
-        Math.abs(n(row.pnl)) > 0.05 &&
-        !String(row.close_reason ?? "").startsWith("BE scratch")
-      )
-        continue;
-      const st = why.startsWith("BE scratch")
-        ? "skipped"
-        : pnl < 0 || why === "Hit stop" || why === "TP1 then leftover stopped"
-          ? "stopped"
-          : "targeted";
-      await sql`
-        update auto_signals
-        set status = ${st},
-            pnl = ${why.startsWith("BE scratch") ? 0 : pnl},
-            close_reason = ${why},
-            tp1_hit = ${printed},
-            updated_at = now()
-        where id = ${row.id} and user_id = ${userId}
-      `;
-      if (why.startsWith("BE scratch")) {
-        notes.push(`${row.weex_symbol} reclassed: BE scratch (TP1 never printed)`);
-      } else if (row.close_reason !== "TP1 then BE") {
-        notes.push(`${row.weex_symbol} restated: ${why} ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`);
-      }
-    }
     const fakeFlat = await sql<SignalRow>`
       select * from auto_signals
       where user_id = ${userId}
