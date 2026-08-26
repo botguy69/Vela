@@ -638,7 +638,7 @@ async function ensureTakes(
   }
 
   if (stopOverride != null) {
-    await cancelWeexStops(creds, pos.weex_symbol);
+    await cancelWeexStops(creds, pos.weex_symbol, { side: sideLc, mark });
     const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
     if (stopPx > 0) {
       await moveWeexStop(creds, {
@@ -649,8 +649,9 @@ async function ensureTakes(
         clientOid: `velasl${pos.id}${Date.now().toString(36)}`.slice(0, 36),
       });
     }
+    await cancelWeexStops(creds, pos.weex_symbol, { side: sideLc, mark, keepPx: stopPx });
     notes.push(
-      `${pos.weex_symbol} SL → WEEX BE ${stopPx.toFixed(4)} on leftover ${Number(qtyStr)}. TPs not re-attached (won't sell TP1 again).`,
+      `${pos.weex_symbol} SL → WEEX BE ${stopPx.toFixed(4)} on leftover ${Number(qtyStr)}. Old SLs cancelled. TPs left.`,
     );
     const stampBe = `${resp.replace(/tps:(lock|ok|swept)@?\d*/g, "").trim()} tps:ok tps:swept@${Date.now()}`.slice(0, 500);
     await sql`update auto_signals set weex_resp = ${stampBe}, stop = ${stopPx}, updated_at = now() where id = ${pos.id}`;
@@ -1752,6 +1753,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       } else if (pos.be_moved) {
         if (reduced && !pos.tp1_hit) {
           await sql`update auto_signals set tp1_hit = true, updated_at = now() where id = ${pos.id} and user_id = ${userId}`;
+        }
+        const credsSweep = await credsFrom(settings);
+        if (credsSweep) {
+          const { cancelWeexStops } = await import("@/lib/weex.server");
+          await cancelWeexStops(credsSweep, pos.weex_symbol, {
+            side,
+            mark: mark || px,
+            keepPx: n(pos.stop),
+          });
         }
         const hourly = await getWeexKlines(pos.weex_symbol, "1h", 40).catch(() => []);
         const fifteenTrail = await getWeexKlines(pos.weex_symbol, "15m", 48).catch(() => []);

@@ -618,6 +618,23 @@ export async function cancelWeexProtective(creds: WeexCreds, symbol: string) {
   }
 }
 
+async function cancelAlgoIds(creds: WeexCreds, symbol: string, ids: string[]) {
+  for (const id of ids) {
+    if (!id || id === "undefined") continue;
+    await weexRequest({ creds, method: "POST", path: "/capi/v3/algoOrder/cancel", body: { symbol, algoId: id } }).catch(() => null);
+    await weexRequest({ creds, method: "DELETE", path: "/capi/v3/tpslOrder", query: { symbol, algoId: id } }).catch(() => null);
+    await weexRequest({ creds, method: "DELETE", path: "/capi/v3/order", query: { symbol, orderId: id } }).catch(() => null);
+    await weexRequest({ creds, method: "POST", path: "/capi/v3/order/tpsl/cancel", body: { symbol, algoId: id } }).catch(() => null);
+    await weexRequest({ creds, method: "POST", path: "/capi/v3/plan/cancel", body: { symbol, algoId: id } }).catch(() => null);
+    await weexRequest({
+      creds,
+      method: "DELETE",
+      path: "/capi/v3/order",
+      query: { symbol, origClientOrderId: id.slice(0, 36) },
+    }).catch(() => null);
+  }
+}
+
 export async function listWeexAlgoRows(
   creds: WeexCreds,
   symbol: string,
@@ -627,7 +644,11 @@ export async function listWeexAlgoRows(
     { path: "/capi/v3/tpslOrder", query: { symbol } },
     { path: "/capi/v3/planOrder/current", query: { symbol } },
     { path: "/capi/v3/ordersPlan", query: { symbol, planType: "profit_loss" } },
+    { path: "/capi/v3/ordersPlan", query: { symbol, planType: "pos_loss" } },
+    { path: "/capi/v3/ordersPlan", query: { symbol, planType: "STOP_LOSS" } },
     { path: "/capi/v3/openOrders", query: { symbol } },
+    { path: "/capi/v3/position/tpsl", query: { symbol } },
+    { path: "/capi/v3/order/tpsl/current", query: { symbol } },
   ];
   const out: { id: string; type: string; trigger: number }[] = [];
   const seen = new Set<string>();
@@ -636,13 +657,13 @@ export async function listWeexAlgoRows(
     if (!res.ok) continue;
     for (const row of rowsFrom(res.data)) {
       const o = row as Record<string, unknown>;
-      const id = String(o.algoId ?? o.orderId ?? o.id ?? o.clientAlgoId ?? "");
+      const id = String(o.algoId ?? o.orderId ?? o.id ?? o.clientAlgoId ?? o.clientOid ?? "");
       if (!id || id === "undefined" || seen.has(id)) continue;
       seen.add(id);
       out.push({
         id,
-        type: String(o.planType ?? o.type ?? o.orderType ?? o.workingType ?? ""),
-        trigger: Number(o.triggerPrice ?? o.stopPrice ?? o.price ?? 0),
+        type: String(o.planType ?? o.type ?? o.orderType ?? o.workingType ?? o.tpslMode ?? ""),
+        trigger: Number(o.triggerPrice ?? o.stopPrice ?? o.executePrice ?? o.price ?? 0),
       });
     }
   }
@@ -653,29 +674,32 @@ export async function listWeexAlgos(creds: WeexCreds, symbol: string): Promise<s
   return (await listWeexAlgoRows(creds, symbol)).map((r) => r.id);
 }
 
-export async function cancelWeexStops(creds: WeexCreds, symbol: string) {
+/** Kill stop-loss tickets. Leaves take-profits. keepPx = the one BE stop to leave. */
+export async function cancelWeexStops(
+  creds: WeexCreds,
+  symbol: string,
+  opts?: { side?: "long" | "short"; mark?: number; keepPx?: number },
+) {
   const rows = await listWeexAlgoRows(creds, symbol);
+  const side = opts?.side;
+  const mark = opts?.mark ?? 0;
+  const keep = opts?.keepPx ?? 0;
+  const ids: string[] = [];
   for (const r of rows) {
-    if (!/STOP|LOSS|^SL$|SL-/i.test(r.type) && !/STOP_LOSS/i.test(r.type)) continue;
-    await weexRequest({
-      creds,
-      method: "POST",
-      path: "/capi/v3/algoOrder/cancel",
-      body: { symbol, algoId: r.id },
-    }).catch(() => null);
-    await weexRequest({
-      creds,
-      method: "DELETE",
-      path: "/capi/v3/tpslOrder",
-      query: { symbol, algoId: r.id },
-    }).catch(() => null);
-    await weexRequest({
-      creds,
-      method: "DELETE",
-      path: "/capi/v3/order",
-      query: { symbol, orderId: r.id },
-    }).catch(() => null);
+    const typed = /STOP|LOSS|^SL$|SL-|pos_loss|STOP_MARKET|STOP_LOSS/i.test(r.type);
+    const tpTyped = /TAKE|PROFIT|^TP$|TP-|pos_profit|TAKE_PROFIT/i.test(r.type);
+    const nearKeep = keep > 0 && r.trigger > 0 && Math.abs(r.trigger - keep) / keep < 0.0015;
+    if (nearKeep) continue;
+    const stopSide =
+      side === "long" && mark > 0 && r.trigger > 0 && r.trigger < mark * 0.9994
+        ? true
+        : side === "short" && mark > 0 && r.trigger > 0 && r.trigger > mark * 1.0006
+          ? true
+          : false;
+    if (tpTyped && !typed) continue;
+    if (typed || stopSide) ids.push(r.id);
   }
+  await cancelAlgoIds(creds, symbol, ids);
 }
 
 export async function placeWeexTake(
