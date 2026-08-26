@@ -214,6 +214,7 @@ function parsePosition(row: unknown): {
   entry: number;
   pnl: number | null;
   mark: number;
+  bePx: number;
 } | null {
   if (!row || typeof row !== "object") return null;
   const r = row as {
@@ -277,6 +278,13 @@ function parsePosition(row: unknown): {
       (r as { floatProfit?: string | number }).floatProfit,
   );
   const mark = Number(r.markPrice ?? r.marketPrice ?? 0);
+  const bePx = Number(
+    (r as { breakEvenPrice?: string | number }).breakEvenPrice ??
+      (r as { breakevenPrice?: string | number }).breakevenPrice ??
+      (r as { breakEven?: string | number }).breakEven ??
+      (r as { avgBreakEvenPrice?: string | number }).avgBreakEvenPrice ??
+      0,
+  );
   if (Number.isFinite(entry) && entry > 0 && q * entry < 0.05) return null;
   return {
     symbol,
@@ -285,6 +293,7 @@ function parsePosition(row: unknown): {
     entry: Number.isFinite(entry) ? entry : 0,
     pnl: Number.isFinite(rawPnl) ? rawPnl : null,
     mark: Number.isFinite(mark) ? mark : 0,
+    bePx: Number.isFinite(bePx) && bePx > 0 ? bePx : 0,
   };
 }
 
@@ -298,7 +307,7 @@ function positionQtyFrom(raw: unknown, symbol: string): number | null {
 
 export async function listWeexPositions(
   creds: WeexCreds,
-): Promise<{ symbol: string; side: "long" | "short"; qty: number; entry: number; pnl: number | null; mark: number }[] | null> {
+): Promise<{ symbol: string; side: "long" | "short"; qty: number; entry: number; pnl: number | null; mark: number; bePx: number }[] | null> {
   const paths = [
     { path: "/capi/v3/account/position/allPosition", query: undefined as Record<string, string> | undefined },
     { path: "/capi/v3/account/position/singlePosition", query: undefined },
@@ -313,7 +322,7 @@ export async function listWeexPositions(
   let sawOk = false;
   const uniq = new Map<
     string,
-    { symbol: string; side: "long" | "short"; qty: number; entry: number; pnl: number | null; mark: number }
+    { symbol: string; side: "long" | "short"; qty: number; entry: number; pnl: number | null; mark: number; bePx: number }
   >();
   for (const p of paths) {
     const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
@@ -324,7 +333,12 @@ export async function listWeexPositions(
       const k = `${pos.symbol}|${pos.side}`;
       const prev = uniq.get(k);
       if (!prev || pos.qty > prev.qty || (pos.pnl != null && prev.pnl == null)) {
-        uniq.set(k, prev && pos.qty < prev.qty ? { ...prev, pnl: pos.pnl ?? prev.pnl, mark: pos.mark || prev.mark } : pos);
+        uniq.set(
+          k,
+          prev && pos.qty < prev.qty
+            ? { ...prev, pnl: pos.pnl ?? prev.pnl, mark: pos.mark || prev.mark, bePx: pos.bePx || prev.bePx }
+            : pos,
+        );
       }
     }
   }
@@ -451,11 +465,8 @@ export async function placeWeexOrder(
     quantity: order.quantity,
     newClientOrderId: order.clientOid.slice(0, 36),
   };
-  if (order.sl) {
-    body.slTriggerPrice = order.sl;
-    body.SlWorkingType = "MARK_PRICE";
-  }
-  // TPs only via placeWeexTake after fill — attaching tp here duplicates TP-Last at full size.
+  if (order.price) body.price = order.price;
+  // SL/TP only via ensureTakes after fill — attaching here duplicates SL-Mark (limit + market).
   if (order.type === "LIMIT") {
     body.timeInForce = "POST_ONLY";
     body.price = order.price ?? "";
@@ -512,7 +523,6 @@ export async function moveWeexStop(
       clientAlgoId: order.clientOid.slice(0, 36),
       planType: "STOP_LOSS",
       triggerPrice: order.stop,
-      executePrice: order.stop,
       quantity: order.quantity && Number(order.quantity) > 0 ? order.quantity : "0",
       positionSide: order.positionSide,
       triggerPriceType: "MARK_PRICE",

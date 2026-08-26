@@ -551,6 +551,28 @@ async function collapseOpenDupes(
   }
 }
 
+async function weexFeeBe(
+  creds: { apiKey: string; apiSecret: string; passphrase: string } | null,
+  symbol: string,
+  side: "long" | "short",
+  entry: number,
+): Promise<number> {
+  const { breakevenPrice } = await import("@/lib/ta");
+  const fallback = breakevenPrice(side, entry);
+  if (!creds) return fallback;
+  const { listWeexPositions } = await import("@/lib/weex.server");
+  const book = await listWeexPositions(creds).catch(() => null);
+  const key = symbol.replace(/_/g, "").toUpperCase();
+  const hit = (book ?? []).find(
+    (p) => p.symbol.replace(/_/g, "").toUpperCase() === key && p.side === side,
+  );
+  if (hit?.bePx && hit.bePx > 0) {
+    if (side === "long" && hit.bePx > entry) return hit.bePx;
+    if (side === "short" && hit.bePx < entry) return hit.bePx;
+  }
+  return fallback;
+}
+
 async function ensureTakes(
   pos: SignalRow,
   notes: string[],
@@ -563,9 +585,9 @@ async function ensureTakes(
   const stacked = (await listWeexAlgos(creds, pos.weex_symbol)).length;
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
   const want = 1 + Math.min(2, parseNums(pos.targets).length || 2);
-  const force = stopOverride != null || stacked > want;
+  const force = stopOverride != null || stacked !== want;
   const resp = pos.weex_resp ?? "";
-  if (!force && stacked <= want && /tps:(ok|swept|lock)/.test(resp)) return;
+  if (!force && stacked === want && /tps:(ok|swept|lock)/.test(resp)) return;
   const { coinByWeex } = await import("@/lib/universe");
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
@@ -1601,8 +1623,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           reduced,
         })
       ) {
-        const be = breakevenPrice(side, entry);
         const creds = await credsFrom(settings);
+        const be = await weexFeeBe(creds, pos.weex_symbol, side, entry);
         let moved = false;
         if (creds) {
           pos.stop = be;
@@ -1717,8 +1739,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           beMoved: Boolean(pos.be_moved),
         });
         if (act === "lockBe" && !pos.be_moved) {
-          const be = breakevenPrice(side, entry);
           const creds = credsNow ?? (await credsFrom(settings));
+          const be = await weexFeeBe(creds, pos.weex_symbol, side, entry);
           if (creds) {
             pos.stop = be;
             await ensureTakes(pos, notes, creds, be);
@@ -2394,7 +2416,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               quantity: fullQty,
               price: formatWeexPx(sized.entry, spec.pricePrecision),
               clientOid: oid,
-              sl: formatWeexPx(sized.stop, spec.pricePrecision),
             });
             const replies = [sent.ok ? JSON.stringify(sent.data).slice(0, 180) : sent.error.slice(0, 180)];
 
