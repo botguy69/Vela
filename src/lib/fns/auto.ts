@@ -724,7 +724,7 @@ async function ensureTakes(
   if (tps.length < 2 && stopPx > 0) {
     const entryPx = n(pos.fill_px) || n(pos.entry) || mark;
     const risk = Math.abs(entryPx - stopPx);
-    if (risk > 0 && entryPx > 0) {
+    if (risk > 0 && entryPx > 0 && risk / entryPx >= 0.004) {
       const t1 = sideLc === "short" ? entryPx - risk : entryPx + risk;
       const t2 = sideLc === "short" ? entryPx - 2 * risk : entryPx + 2 * risk;
       for (const raw of [t1, t2]) {
@@ -2292,6 +2292,17 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             if (busy.has(pick.weexSymbol)) continue;
             if (stillOpen.some((s) => s.weex_symbol === pick.weexSymbol)) continue;
+            if (
+              (weexBook ?? []).some(
+                (p) =>
+                  p.qty > 0 &&
+                  p.symbol.replace(/_/g, "").toUpperCase() === pick.weexSymbol.replace(/_/g, "").toUpperCase() &&
+                  (p.side === "short" ? "short" : "long") === pick.side,
+              )
+            ) {
+              whyNot.push(`${tag} already live on WEEX`);
+              continue;
+            }
             if (pick.side === "long" && (riskL >= SIDE_CAP || roomL <= 0)) {
               whyNot.push(`${tag} long book full`);
               continue;
