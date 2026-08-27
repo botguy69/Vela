@@ -291,12 +291,12 @@ function uniqueFills<T extends {
   const best = new Map<string, T>();
   for (const r of rows) {
     const fill = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
-    const bucket = Number.isFinite(fill) ? Math.floor(fill / (2 * 3600_000)) : r.id ?? 0;
-    const key = String(r.id ?? `${r.weex_symbol ?? "?"}|${r.side ?? "?"}|${bucket}`);
+    const bucket = Number.isFinite(fill) ? Math.floor(fill / (2 * 3600_000)) : 0;
+    const key = `${r.weex_symbol ?? "?"}|${r.side ?? "?"}|${bucket}`;
     const prev = best.get(key);
-    const ru = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
-    const pu = prev ? new Date(prev.filled_at ?? prev.created_at ?? 0).getTime() : 0;
-    if (!prev || ru >= pu) best.set(key, r);
+    const rp = Math.abs(n((r as { pnl?: string | number | null }).pnl));
+    const pp = prev ? Math.abs(n((prev as { pnl?: string | number | null }).pnl)) : -1;
+    if (!prev || rp >= pp) best.set(key, r);
   }
   return [...best.values()];
 }
@@ -561,7 +561,7 @@ function matchWeexClose(
   const top = scored[0]!.c;
   const ed = entry > 0 && top.entry && top.entry > 0 ? Math.abs(top.entry - entry) / entry : -1;
   const td = top.ts && t0 > 0 ? Math.abs(top.ts - t0) / 3600_000 : 9;
-  if (ed >= 0 && ed > 0.0018) return null;
+  if (ed >= 0 && ed > 0.008) return null;
   if (ed < 0 && td > 12) return null;
   used?.add(`${top.symbol}|${top.side ?? "?"}|${top.entry ?? 0}|${top.ts}|${top.pnl}`);
   return top;

@@ -152,22 +152,18 @@ function pickUsdt(rows: unknown[]): { equity: number; available: number; asset: 
   const available = Number(usdt.availableBalance ?? usdt.available ?? 0);
   const has = (x: number) => Number.isFinite(x);
   const wallet = has(rawBal) ? rawBal : 0;
-  const marked = has(rawMar) && rawMar > 0 ? rawMar : NaN;
-
+  // WEEX "Margin balance" is already wallet + uPnL. Never add uPnL twice.
   let equity = 0;
-  if (has(rawEq) && has(wallet) && Math.abs(rawEq - wallet) < 0.05) {
-    equity = wallet + (has(pnl) ? pnl : 0);
-  } else if (has(rawEq) && has(wallet) && has(pnl) && Math.abs(rawEq - (wallet + pnl)) < 1) {
-    equity = rawEq;
-  } else if (has(marked) && marked > 0) {
-    equity = marked;
+  if (has(rawMar) && rawMar > 0) {
+    equity = rawMar;
   } else if (has(rawEq) && rawEq > 0) {
-    equity = rawEq;
-  } else if (has(wallet)) {
+    const unmarked = has(available) && available > rawEq + 1 && has(pnl) && Math.abs(pnl) > 0.05;
+    equity = unmarked ? rawEq + pnl : rawEq;
+  } else {
     equity = wallet + (has(pnl) ? pnl : 0);
   }
-  if (has(wallet) && has(pnl) && equity > wallet + Math.abs(pnl) + 1) {
-    equity = wallet + pnl;
+  if (has(rawEq) && rawEq > 0 && equity > rawEq + Math.abs(has(pnl) ? pnl : 0) + 1) {
+    equity = rawEq;
   }
   return {
     equity: Math.max(0, Number.isFinite(equity) ? equity : 0),
