@@ -1451,7 +1451,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     } = await import("@/lib/weex-market.server");
     const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, taggedTake } = await import("@/lib/ta");
     const { sizeSetup } = await import("@/lib/risk");
-    const { coinByWeex, CORE_SET } = await import("@/lib/universe");
+    const { coinByWeex, CORE_SET, SKIP_WEEX, TOP25_WEEX } = await import("@/lib/universe");
     const rules = await import("@/lib/desk-rules");
     const sql = await getSql();
     await ensureSettings(sql, userId);
@@ -2084,6 +2084,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const extras = stillOpenRaw.filter((s) => {
         if (s.status !== "working" && s.status !== "proposed") return false;
         const sym = s.weex_symbol.replace(/_/g, "").toUpperCase();
+        if (SKIP_WEEX.has(sym) || !TOP25_WEEX.includes(sym)) return true;
         if (filledSym.has(sym)) return true;
         const side = s.side === "short" ? "short" : "long";
         const filledSide = liveN.filter(
@@ -2093,8 +2094,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         ).length;
         return filledSide >= SIDE_CAP;
       });
-      const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
+      const { cancelWeexOrder, cancelWeexProtective, flattenWeex } = await import("@/lib/weex.server");
       for (const row of extras) {
+        const sym = row.weex_symbol.replace(/_/g, "").toUpperCase();
+        const ban = SKIP_WEEX.has(sym) || !TOP25_WEEX.includes(sym);
+        const why = ban ? "Cancelled — off the book (no history)" : "Cancelled — duplicate or side cap (2)";
         if (row.client_oid) {
           await cancelWeexOrder(credsGate2, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
         }
@@ -2102,12 +2106,39 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         await sql`
           update auto_signals
           set status = 'skipped',
-              close_reason = ${"Cancelled — duplicate or side cap (2)"},
+              close_reason = ${why},
               pnl = 0,
               updated_at = now()
           where id = ${row.id} and user_id = ${userId}
         `;
-        notes.push(`${row.weex_symbol} limit cancelled — duplicate or 2 already on that side`);
+        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 2 already on that side`);
+      }
+      for (const row of stillOpenRaw) {
+        const sym = row.weex_symbol.replace(/_/g, "").toUpperCase();
+        if (!SKIP_WEEX.has(sym) || row.status !== "filled") continue;
+        const pos = liveN.find((p) => p.symbol.replace(/_/g, "").toUpperCase() === sym);
+        const qty = pos?.qty || n(row.qty);
+        if (qty > 0) {
+          const specs = await (await import("@/lib/weex-market.server")).getWeexSpecs();
+          const spec = specs.get(sym);
+          await flattenWeex(credsGate2, {
+            symbol: row.weex_symbol,
+            side: row.side === "short" ? "BUY" : "SELL",
+            positionSide: row.side === "short" ? "SHORT" : "LONG",
+            quantity: formatWeexQty(qty, spec?.quantityPrecision ?? 3),
+            clientOid: `velaban${Date.now().toString(36)}`.slice(0, 36),
+          }).catch(() => null);
+        }
+        await cancelWeexProtective(credsGate2, row.weex_symbol).catch(() => null);
+        await sql`
+          update auto_signals
+          set status = 'skipped',
+              close_reason = ${"Flattened — off the book (no history)"},
+              pnl = ${n(row.pnl)},
+              updated_at = now()
+          where id = ${row.id} and user_id = ${userId}
+        `;
+        notes.push(`${row.weex_symbol} flattened — off the book`);
       }
       const leftoverWorking = stillOpenRaw.filter(
         (s) =>
@@ -2283,6 +2314,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not an A+ scalp — slot stays empty`);
               continue;
             }
+            if (SKIP_WEEX.has(pick.weexSymbol) || !TOP25_WEEX.includes(pick.weexSymbol)) continue;
             if (flattened.has(pick.weexSymbol)) {
               whyNot.push(`${tag} just flattened — pause this pair`);
               continue;

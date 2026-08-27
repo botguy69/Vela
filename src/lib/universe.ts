@@ -36,7 +36,6 @@ export const TOP25: AutoCoin[] = [
   { id: "NEAR", weex: "NEARUSDT", name: "NEAR", fallbackMax: 200 },
   { id: "APT", weex: "APTUSDT", name: "Aptos", fallbackMax: 200 },
   { id: "TAO", weex: "TAOUSDT", name: "Bittensor", fallbackMax: 200 },
-  { id: "HYPE", weex: "HYPEUSDT", name: "Hyperliquid", fallbackMax: 100 },
   { id: "INJ", weex: "INJUSDT", name: "Injective", fallbackMax: 200 },
   { id: "ARB", weex: "ARBUSDT", name: "Arbitrum", fallbackMax: 200 },
   { id: "OP", weex: "OPUSDT", name: "Optimism", fallbackMax: 200 },
@@ -54,6 +53,9 @@ export const TOP25: AutoCoin[] = [
 ];
 
 export const TOP25_WEEX = TOP25.map((c) => c.weex);
+
+/** Price-discovery / no history — never hunt, cancel working. */
+export const SKIP_WEEX = new Set(["HYPEUSDT"]);
 
 /** Until $10k: only the tight books. */
 export const CORE_WEEX = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT"] as const;
