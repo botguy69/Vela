@@ -751,7 +751,8 @@ async function ensureTakes(
     pos.weex_resp = stamp;
     return;
   }
-  if (!(trimmed.listed > 0 || trimmed.wiped)) {
+  const armed = /tps:ok/.test(pos.weex_resp ?? "");
+  if (!(trimmed.listed > 0 || trimmed.wiped) && armed) {
     notes.push(`${pos.weex_symbol} TP/SL unread — not stacking extra orders.`);
     return;
   }
@@ -1574,21 +1575,27 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           closed += 1;
           continue;
         }
-        const e = n(pos.entry);
-        const crossed = side === "long" ? px <= e : px >= e;
         const credsFill = await credsFrom(settings);
-        if (crossed && credsFill) {
-          const { getWeexPositionQty } = await import("@/lib/weex.server");
-          const q = await getWeexPositionQty(credsFill, pos.weex_symbol);
-          if (q != null && q > 0) {
+        if (credsFill) {
+          const { listWeexPositions } = await import("@/lib/weex.server");
+          const bookNow = await listWeexPositions(credsFill);
+          const liveFill = (bookNow ?? []).find(
+            (p) =>
+              p.symbol.replace(/_/g, "").toUpperCase() === pos.weex_symbol.replace(/_/g, "").toUpperCase() &&
+              (p.side === "short" ? "short" : "long") === side &&
+              p.qty > 0,
+          );
+          if (liveFill) {
+            const e = n(pos.entry);
+            const fillPx = liveFill.entry && liveFill.entry > 0 ? liveFill.entry : e;
             await sql`
               update auto_signals
-              set status = 'filled', fill_px = ${e}, qty = ${q}, filled_at = now(), updated_at = now()
+              set status = 'filled', fill_px = ${fillPx}, qty = ${liveFill.qty}, filled_at = now(), updated_at = now()
               where id = ${pos.id} and user_id = ${userId}
             `;
             pos.status = "filled";
-            pos.qty = q;
-            pos.fill_px = e;
+            pos.qty = liveFill.qty;
+            pos.fill_px = fillPx;
             notes.push(`Filled ${pos.weex_symbol} limit`);
             await ensureTakes(pos, notes, credsFill);
           }
@@ -1859,6 +1866,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           where id = ${row.id} and user_id = ${userId}
         `;
         notes.push(`Reopened ${lp.symbol} — still live on WEEX`);
+        const [liveRow] = await sql<SignalRow>`select * from auto_signals where id = ${row.id} limit 1`;
+        if (liveRow) await ensureTakes(liveRow, notes, credsLive);
       }
 
       const ghosts = await sql<SignalRow>`
