@@ -687,7 +687,7 @@ async function ensureTakes(
 ) {
   if (pos.status !== "filled") return;
   const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
-  const { placeWeexTake, moveWeexStop, trimWeexTakes, cancelWeexProtective, listWeexPositions } = await import("@/lib/weex.server");
+  const { placeWeexTake, moveWeexStop, trimWeexTakes, listWeexPositions } = await import("@/lib/weex.server");
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
   const { coinByWeex } = await import("@/lib/universe");
   const spec = await specFor(coinByWeex(pos.weex_symbol));
@@ -713,68 +713,55 @@ async function ensureTakes(
     if (mark > 0 && taggedTake(sideLc, mark, px)) continue;
     tps.push(px);
   }
-  const needsWipe = !/tps:v3wipe/.test(pos.weex_resp ?? "");
-  if (needsWipe) {
-    await cancelWeexProtective(creds, pos.weex_symbol);
+  if (tps.length < 2 && stopPx > 0) {
+    const entryPx = n(pos.fill_px) || n(pos.entry) || mark;
+    const risk = Math.abs(entryPx - stopPx);
+    if (risk > 0 && entryPx > 0) {
+      const t1 = sideLc === "short" ? entryPx - risk : entryPx + risk;
+      const t2 = sideLc === "short" ? entryPx - 2 * risk : entryPx + 2 * risk;
+      for (const raw of [t1, t2]) {
+        const px = Number(formatWeexPx(raw, spec.pricePrecision));
+        if (px > 0 && !tps.includes(px) && !(mark > 0 && taggedTake(sideLc, mark, px))) tps.push(px);
+      }
+    }
   }
-  const trimmed = needsWipe
-    ? { kept: 0, killed: 1, haveSl: false, haveTp: 0, listed: 0, wiped: true }
-    : await trimWeexTakes(creds, pos.weex_symbol, {
-        side: sideLc,
-        sl: stopPx,
-        tps,
-        mark,
-      });
+  const trimmed = await trimWeexTakes(creds, pos.weex_symbol, {
+    side: sideLc,
+    sl: stopPx,
+    tps,
+    mark,
+  });
   if (trimmed.killed) {
     notes.push(`${pos.weex_symbol} cancelled ${trimmed.killed} extra TP/SL. Kept ${trimmed.kept} (1 SL + 2 TP max).`);
   }
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
   const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
-  if (stopOverride != null) {
-    const { cancelWeexStops } = await import("@/lib/weex.server");
-    await cancelWeexStops(creds, pos.weex_symbol, { side: sideLc, mark, keepPx: 0 });
-    if (stopPx > 0) {
-      await moveWeexStop(creds, {
-        symbol: pos.weex_symbol,
-        positionSide: side,
-        stop: formatWeexPx(stopPx, spec.pricePrecision),
-        quantity: qtyStr,
-        clientOid: `velabe${pos.id}`.slice(0, 36),
-      });
-    }
-    await trimWeexTakes(creds, pos.weex_symbol, { side: sideLc, sl: stopPx, tps, mark });
-    notes.push(`${pos.weex_symbol} SL → WEEX BE ${stopPx.toFixed(4)} on leftover ${Number(qtyStr)}.`);
-    const stampBe = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept)@?\d*/g, "").trim()} tps:ok`.slice(0, 500);
-    await sql`update auto_signals set weex_resp = ${stampBe}, stop = ${stopPx}, updated_at = now() where id = ${pos.id}`;
-    pos.weex_resp = stampBe;
-    pos.stop = stopPx;
-    return;
-  }
-  if (trimmed.haveSl && trimmed.haveTp >= 2) {
-    const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept)@?\d*/g, "").trim()} tps:ok`.slice(0, 500);
+  const oid = (tag: string) => `vela${tag}${pos.id}${Date.now()}`.slice(0, 36);
+  if (trimmed.haveSl && trimmed.haveTp >= 2 && stopOverride == null) {
+    const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe)@?\d*/g, "").trim()} tps:ok`.slice(0, 500);
     await sql`update auto_signals set weex_resp = ${stamp}, updated_at = now() where id = ${pos.id}`;
     pos.weex_resp = stamp;
     return;
   }
-  const armed = /tps:ok/.test(pos.weex_resp ?? "");
-  if (!(trimmed.listed > 0 || trimmed.wiped) && armed) {
-    notes.push(`${pos.weex_symbol} TP/SL unread — not stacking extra orders.`);
-    return;
+  if (stopOverride != null && stopPx > 0) {
+    const { cancelWeexStops } = await import("@/lib/weex.server");
+    await cancelWeexStops(creds, pos.weex_symbol, { side: sideLc, mark, keepPx: 0 });
   }
-  if (!trimmed.haveSl && stopPx > 0) {
-    await moveWeexStop(creds, {
+  if ((!trimmed.haveSl || stopOverride != null) && stopPx > 0) {
+    const slSent = await moveWeexStop(creds, {
       symbol: pos.weex_symbol,
       positionSide: side,
       stop: formatWeexPx(stopPx, spec.pricePrecision),
       quantity: qtyStr,
-      clientOid: `velasl${pos.id}`.slice(0, 36),
+      clientOid: oid("sl"),
     });
+    if (!slSent.ok) notes.push(`${pos.weex_symbol} SL failed: ${slSent.error.slice(0, 80)}`);
   }
-  let ok = trimmed.haveTp;
-  if (trimmed.haveTp < 2) {
+  let ok = stopOverride != null ? 0 : trimmed.haveTp;
+  if (ok < 2) {
     const slices = takeQtys(liveQty, tps.length, spec.quantityPrecision, formatWeexQty);
-    for (let i = trimmed.haveTp; i < tps.length; i += 1) {
+    for (let i = ok; i < tps.length; i += 1) {
       const slice = slices[i]!;
       if (Number(slice) <= 0) continue;
       const sent = await placeWeexTake(creds, {
@@ -782,15 +769,15 @@ async function ensureTakes(
         positionSide: side,
         tp: formatWeexPx(tps[i]!, spec.pricePrecision),
         quantity: slice,
-        clientOid: `velatp${pos.id}${i}`.slice(0, 36),
+        clientOid: oid(`tp${i}`),
       });
       if (sent.ok) ok += 1;
       else notes.push(`${pos.weex_symbol} TP${i + 1} failed: ${sent.error.slice(0, 80)}`);
     }
   }
   notes.push(`${pos.weex_symbol} 1 SL @ ${stopPx.toFixed(4)} + ${ok} TP`);
-  const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe)@?\d*/g, "").trim()} tps:v3wipe tps:ok`.slice(0, 500);
-  await sql`update auto_signals set weex_resp = ${stamp}, updated_at = now() where id = ${pos.id}`;
+  const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe)@?\d*/g, "").trim()} tps:ok`.slice(0, 500);
+  await sql`update auto_signals set weex_resp = ${stamp}, stop = ${stopPx}, updated_at = now() where id = ${pos.id}`;
   pos.weex_resp = stamp;
   pos.stop = stopPx;
 }
