@@ -1,2 +1,2 @@
 /** Bump this when Home Screen / PWA must drop a stale shell. */
-export const VELA_BUILD = "20260827h";
+export const VELA_BUILD = "20260827i";

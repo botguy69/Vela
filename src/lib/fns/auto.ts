@@ -140,32 +140,6 @@ function oneRUsd(row: {
   return dist * q;
 }
 
-function playbookR(row: {
-  pnl?: string | number | null;
-  close_reason?: string | null;
-  be_moved?: boolean | null;
-  plan?: string | null;
-  rr?: string | number | null;
-  qty?: string | number | null;
-  notional?: string | number | null;
-  fill_px?: string | number | null;
-  entry?: string | number | null;
-  stop?: string | number | null;
-  targets?: string | null;
-  target?: string | number | null;
-}): number | null {
-  const why = String(row.close_reason ?? "");
-  const plan = String(row.plan ?? "scale2");
-  const tp2R = plan === "scale3" ? 1.84 : plan === "scale2" ? 1.75 : n(row.rr) || 1.8;
-  const tp1R = plan === "scale3" ? 0.34 : 0.5;
-  if (/Hit TP2/i.test(why)) return tp2R;
-  if (/TP1 then BE/i.test(why) || /^Hit TP1/i.test(why)) return tp1R;
-  if (/Hit stop/i.test(why)) return row.be_moved ? tp1R : -1;
-  const risk = oneRUsd(row);
-  if (!(risk > 0.01)) return null;
-  return n(row.pnl) / risk;
-}
-
 const OPEN = new Set(["proposed", "working", "filled"]);
 
 async function ensureSettings(
@@ -394,17 +368,23 @@ async function closedStats(
     }
   }
   const closed = window.length;
-  const rs = window.map((r) => playbookR(r)).filter((x): x is number => x != null && Number.isFinite(x));
-  const wins = window.filter((r) => (playbookR(r) ?? n(r.pnl)) > 0).length;
-  const winRs = rs.filter((x) => x > 0);
-  const lossRs = rs.filter((x) => x < 0);
+  const wins = window.filter((r) => n(r.pnl) > 0).length;
+  const win$ = window.map((r) => n(r.pnl)).filter((p) => p > 0);
+  const loss$ = window.map((r) => n(r.pnl)).filter((p) => p < 0);
   const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+  const sls = window.filter(
+    (r) => n(r.pnl) < 0 && (r.status === "stopped" || /Hit stop/i.test(String(r.close_reason ?? ""))),
+  );
+  const slMean = avg(sls.map((r) => Math.abs(n(r.pnl))));
+  const lossMean = avg(loss$.map((p) => Math.abs(p)));
+  const stopMean = avg(window.map((r) => oneRUsd(r)).filter((x) => x > 0.05));
+  const unit = slMean > 0.2 ? slMean : lossMean > 0.2 ? lossMean : stopMean;
   return {
     closed,
     wins,
     winRate: closed > 0 ? (wins / closed) * 100 : 0,
-    avgWinR: avg(winRs),
-    avgLossR: avg(lossRs),
+    avgWinR: unit > 0.05 ? avg(win$) / unit : 0,
+    avgLossR: unit > 0.05 && loss$.length ? -1 : 0,
     names: [...window]
       .reverse()
       .map((r) => {
