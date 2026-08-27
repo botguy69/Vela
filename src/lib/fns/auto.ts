@@ -687,7 +687,7 @@ async function ensureTakes(
 ) {
   if (pos.status !== "filled") return;
   const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
-  const { placeWeexTake, moveWeexStop, trimWeexTakes, cancelWeexProtective, listWeexPositions } = await import("@/lib/weex.server");
+  const { placeWeexTake, moveWeexStop, trimWeexTakes, listWeexPositions } = await import("@/lib/weex.server");
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
   const { coinByWeex } = await import("@/lib/universe");
   const spec = await specFor(coinByWeex(pos.weex_symbol));
@@ -749,6 +749,10 @@ async function ensureTakes(
     const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept)@?\d*/g, "").trim()} tps:ok`.slice(0, 500);
     await sql`update auto_signals set weex_resp = ${stamp}, updated_at = now() where id = ${pos.id}`;
     pos.weex_resp = stamp;
+    return;
+  }
+  if (!(trimmed.listed > 0 || trimmed.wiped)) {
+    notes.push(`${pos.weex_symbol} TP/SL unread — not stacking extra orders.`);
     return;
   }
   if (!trimmed.haveSl && stopPx > 0) {

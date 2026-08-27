@@ -186,7 +186,7 @@ function rowsFrom(raw: unknown): unknown[] {
   if (Array.isArray(o.positions)) return o.positions;
   if (o.data && typeof o.data === "object") {
     const d = o.data as Record<string, unknown>;
-    for (const k of ["balances", "list", "positions", "positionList", "holdList", "records", "result"]) {
+    for (const k of ["balances", "list", "positions", "positionList", "holdList", "records", "result", "entrustedList", "orderList", "orders", "tpslList", "algoOrderList", "planList"]) {
       if (Array.isArray(d[k])) return d[k] as unknown[];
     }
     if ("asset" in d || "coinName" in d || "symbol" in d || "holdVol" in d) return [d];
@@ -626,88 +626,76 @@ export async function cancelWeexOrder(
   });
 }
 
-export async function cancelWeexProtective(creds: WeexCreds, symbol: string) {
-  const tries = [
-    () => weexRequest({ creds, method: "DELETE", path: "/capi/v3/allOpenOrders", query: { symbol } }),
-    () => weexRequest({ creds, method: "DELETE", path: "/capi/v3/openOrders", query: { symbol } }),
-    () => weexRequest({ creds, method: "POST", path: "/capi/v3/algoOrder/cancelAll", body: { symbol } }),
-    () => weexRequest({ creds, method: "DELETE", path: "/capi/v3/tpslOrder", query: { symbol } }),
-    () => weexRequest({ creds, method: "POST", path: "/capi/v3/cancelAllTpSl", body: { symbol } }),
-    () => weexRequest({ creds, method: "POST", path: "/capi/v3/plan/cancelAll", body: { symbol, productType: "USDT-FUTURES" } }),
-    () => weexRequest({ creds, method: "POST", path: "/capi/v3/order/tpsl/cancelAll", body: { symbol } }),
-    () => weexRequest({ creds, method: "POST", path: "/capi/v2/mix/order/cancel-all-plan", body: { symbol, productType: "USDT-FUTURES", planType: "profit_loss", marginCoin: "USDT" } }),
-    () => weexRequest({ creds, method: "POST", path: "/capi/v2/mix/order/cancel-all-plan", body: { symbol, productType: "USDT-FUTURES", planType: "pos_profit", marginCoin: "USDT" } }),
-    () => weexRequest({ creds, method: "POST", path: "/capi/v2/mix/order/cancel-all-plan", body: { symbol, productType: "USDT-FUTURES", planType: "pos_loss", marginCoin: "USDT" } }),
-    () => weexRequest({ creds, method: "POST", path: "/capi/v2/mix/order/cancel-all-tpsl", body: { symbol, productType: "USDT-FUTURES", marginCoin: "USDT" } }),
+export async function cancelWeexProtective(
+  creds: WeexCreds,
+  symbol: string,
+  holdSide?: "long" | "short",
+) {
+  const planTypes = [
+    "profit_loss",
+    "profit_plan",
+    "loss_plan",
+    "pos_profit",
+    "pos_loss",
+    "normal_plan",
+    "TAKE_PROFIT",
+    "STOP_LOSS",
   ];
-  for (const t of tries) await t().catch(() => null);
-  const listed = await listWeexAlgos(creds, symbol);
-  for (const id of listed) {
+  const sides = holdSide ? [holdSide] : ["long", "short"];
+  for (const planType of planTypes) {
+    for (const side of sides) {
+      await weexRequest({
+        creds,
+        method: "POST",
+        path: "/capi/v2/mix/order/cancel-all-plan",
+        body: {
+          symbol,
+          productType: "USDT-FUTURES",
+          planType,
+          marginCoin: "USDT",
+          holdSide: side,
+        },
+      }).catch(() => null);
+    }
+  }
+  await weexRequest({
+    creds,
+    method: "POST",
+    path: "/capi/v2/mix/order/cancel-all-tpsl",
+    body: { symbol, productType: "USDT-FUTURES", marginCoin: "USDT" },
+  }).catch(() => null);
+  if (!holdSide) {
+    await weexRequest({ creds, method: "POST", path: "/capi/v3/algoOrder/cancelAll", body: { symbol } }).catch(() => null);
+    await weexRequest({ creds, method: "POST", path: "/capi/v3/cancelAllTpSl", body: { symbol } }).catch(() => null);
     await weexRequest({
       creds,
       method: "POST",
-      path: "/capi/v3/algoOrder/cancel",
-      body: { symbol, algoId: id },
-    }).catch(() => null);
-    await weexRequest({
-      creds,
-      method: "DELETE",
-      path: "/capi/v3/tpslOrder",
-      query: { symbol, algoId: id },
-    }).catch(() => null);
-    await weexRequest({
-      creds,
-      method: "DELETE",
-      path: "/capi/v3/order",
-      query: { symbol, orderId: id },
+      path: "/capi/v3/plan/cancelAll",
+      body: { symbol, productType: "USDT-FUTURES" },
     }).catch(() => null);
   }
-  const books = [
-    { path: "/capi/v3/openOrders", query: { symbol } as Record<string, string> },
-    { path: "/capi/v3/openOrders", query: { symbol, productType: "USDT-FUTURES" } },
-    { path: "/capi/v3/tpslOrder", query: { symbol } },
-  ];
-  for (const p of books) {
-    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
-    if (!res.ok) continue;
-    for (const row of rowsFrom(res.data)) {
-      const o = row as Record<string, unknown>;
-      const type = String(o.type ?? o.orderType ?? o.planType ?? o.workingType ?? "").toUpperCase();
-      const reduce = o.reduceOnly === true || String(o.reduceOnly ?? "") === "true";
-      const tpish = reduce || /TAKE|STOP|TP|SL|PROFIT|LOSS|MARK|LAST/.test(type);
-      const limitEntry = type === "LIMIT" && !reduce && !tpish;
-      if (limitEntry) continue;
-      const orderId = String(o.orderId ?? o.algoId ?? o.id ?? "");
-      const oid = String(o.clientOid ?? o.clientOrderId ?? o.origClientOrderId ?? o.clientAlgoId ?? "");
-      if (orderId && orderId !== "undefined") {
-        await weexRequest({
-          creds,
-          method: "DELETE",
-          path: "/capi/v3/order",
-          query: { symbol, orderId },
-        }).catch(() => null);
-        await weexRequest({
-          creds,
-          method: "POST",
-          path: "/capi/v3/algoOrder/cancel",
-          body: { symbol, algoId: orderId },
-        }).catch(() => null);
-      }
-      if (oid && oid !== "undefined") {
-        await weexRequest({
-          creds,
-          method: "DELETE",
-          path: "/capi/v3/order",
-          query: { symbol, origClientOrderId: oid.slice(0, 36) },
-        }).catch(() => null);
-      }
-    }
-  }
+  const listed = await listWeexAlgoRows(creds, symbol);
+  const ids = listed
+    .filter((r) => !holdSide || r.posSide === holdSide.toUpperCase() || !r.posSide)
+    .map((r) => r.id);
+  await cancelAlgoIds(creds, symbol, ids);
 }
 
 async function cancelAlgoIds(creds: WeexCreds, symbol: string, ids: string[]) {
   for (const id of ids) {
     if (!id || id === "undefined") continue;
+    await weexRequest({
+      creds,
+      method: "POST",
+      path: "/capi/v2/mix/order/cancel-plan",
+      body: {
+        symbol,
+        productType: "USDT-FUTURES",
+        marginCoin: "USDT",
+        orderIdList: [{ orderId: id, clientOid: id }],
+      },
+    }).catch(() => null);
+    await weexRequest({ creds, method: "POST", path: "/capi/v3/cancelTpSlOrder", body: { symbol, algoId: id, clientAlgoId: id } }).catch(() => null);
     await weexRequest({ creds, method: "POST", path: "/capi/v3/algoOrder/cancel", body: { symbol, algoId: id } }).catch(() => null);
     await weexRequest({ creds, method: "DELETE", path: "/capi/v3/tpslOrder", query: { symbol, algoId: id } }).catch(() => null);
     await weexRequest({ creds, method: "DELETE", path: "/capi/v3/order", query: { symbol, orderId: id } }).catch(() => null);
@@ -726,21 +714,33 @@ export async function listWeexAlgoRows(
   creds: WeexCreds,
   symbol: string,
 ): Promise<{ id: string; type: string; trigger: number; posSide: string }[]> {
-  const paths = [
-    { path: "/capi/v3/algoOrder/open", query: { symbol } as Record<string, string> },
+  const planTypes = [
+    "profit_loss",
+    "profit_plan",
+    "loss_plan",
+    "pos_profit",
+    "pos_loss",
+    "TAKE_PROFIT",
+    "STOP_LOSS",
+    "normal_plan",
+  ];
+  const paths: { path: string; query: Record<string, string> }[] = [
+    { path: "/capi/v3/algoOrder/open", query: { symbol } },
     { path: "/capi/v3/tpslOrder", query: { symbol } },
+    { path: "/capi/v3/pendingTpSlOrder", query: { symbol } },
+    { path: "/capi/v3/openTpSlOrders", query: { symbol } },
     { path: "/capi/v3/planOrder/current", query: { symbol } },
-    { path: "/capi/v3/ordersPlan", query: { symbol, planType: "profit_loss" } },
-    { path: "/capi/v3/ordersPlan", query: { symbol, planType: "pos_loss" } },
-    { path: "/capi/v3/ordersPlan", query: { symbol, planType: "STOP_LOSS" } },
-    { path: "/capi/v3/openOrders", query: { symbol } },
     { path: "/capi/v3/position/tpsl", query: { symbol } },
     { path: "/capi/v3/order/tpsl/current", query: { symbol } },
-    { path: "/capi/v2/mix/order/orders-plan-pending", query: { symbol, productType: "USDT-FUTURES", planType: "profit_loss" } },
-    { path: "/capi/v2/mix/order/orders-plan-pending", query: { symbol, productType: "USDT-FUTURES", planType: "pos_profit" } },
-    { path: "/capi/v2/mix/order/orders-plan-pending", query: { symbol, productType: "USDT-FUTURES", planType: "pos_loss" } },
     { path: "/capi/v2/mix/order/orders-tpsl-pending", query: { symbol, productType: "USDT-FUTURES" } },
-    { path: "/capi/v2/mix/order/orders-pending", query: { symbol, productType: "USDT-FUTURES" } },
+    ...planTypes.map((planType) => ({
+      path: "/capi/v2/mix/order/orders-plan-pending",
+      query: { symbol, productType: "USDT-FUTURES", planType },
+    })),
+    ...planTypes.map((planType) => ({
+      path: "/capi/v3/ordersPlan",
+      query: { symbol, planType },
+    })),
   ];
   const out: { id: string; type: string; trigger: number; posSide: string }[] = [];
   const seen = new Set<string>();
@@ -752,14 +752,22 @@ export async function listWeexAlgoRows(
       const id = String(o.algoId ?? o.orderId ?? o.id ?? o.clientAlgoId ?? o.clientOid ?? "");
       if (!id || id === "undefined" || seen.has(id)) continue;
       seen.add(id);
-      const posSide = String(o.positionSide ?? o.holdSide ?? o.posSide ?? o.tdPositionSide ?? "")
+      let pos = String(o.positionSide ?? o.holdSide ?? o.posSide ?? o.tdPositionSide ?? o.holdSide ?? "")
         .toUpperCase()
         .replace(/_USDT|_BOTH/g, "");
+      if (!pos.includes("LONG") && !pos.includes("SHORT")) {
+        const reduce = o.reduceOnly === true || String(o.reduceOnly ?? "") === "true";
+        const sd = String(o.side ?? o.tradeSide ?? "").toUpperCase();
+        if (reduce && (sd === "SELL" || sd.includes("CLOSE_LONG"))) pos = "LONG";
+        else if (reduce && (sd === "BUY" || sd.includes("CLOSE_SHORT"))) pos = "SHORT";
+        else if (/CLOSE.?LONG|CLOSE_LONG/i.test(String(o.planType ?? o.type ?? ""))) pos = "LONG";
+        else if (/CLOSE.?SHORT|CLOSE_SHORT/i.test(String(o.planType ?? o.type ?? ""))) pos = "SHORT";
+      }
       out.push({
         id,
         type: String(o.planType ?? o.type ?? o.orderType ?? o.workingType ?? o.tpslMode ?? ""),
         trigger: Number(o.triggerPrice ?? o.stopPrice ?? o.executePrice ?? o.price ?? 0),
-        posSide: posSide.includes("SHORT") ? "SHORT" : posSide.includes("LONG") ? "LONG" : "",
+        posSide: pos.includes("SHORT") ? "SHORT" : pos.includes("LONG") ? "LONG" : "",
       });
     }
   }
@@ -770,28 +778,31 @@ export async function trimWeexTakes(
   creds: WeexCreds,
   symbol: string,
   opts: { side: "long" | "short"; sl: number; tps: number[]; mark?: number },
-): Promise<{ kept: number; killed: number; haveSl: boolean; haveTp: number }> {
+): Promise<{ kept: number; killed: number; haveSl: boolean; haveTp: number; listed: number; wiped: boolean }> {
+  const live = opts.side === "short" ? "SHORT" : "LONG";
+  const opp = opts.side === "short" ? "long" : "short";
+  await cancelWeexProtective(creds, symbol, opp);
   const rows = await listWeexAlgoRows(creds, symbol);
   const mark = opts.mark ?? 0;
   const sl = opts.sl;
   const tps = opts.tps.filter((p) => p > 0).slice(0, 2);
-  const live = opts.side === "short" ? "SHORT" : "LONG";
   const wrong = rows.filter((r) => r.posSide && r.posSide !== live);
   if (wrong.length || rows.length > 3) {
-    await cancelWeexProtective(creds, symbol);
-    return { kept: 0, killed: rows.length, haveSl: false, haveTp: 0 };
+    if (wrong.length) await cancelAlgoIds(creds, symbol, wrong.map((r) => r.id));
+    if (rows.length > 3) await cancelWeexProtective(creds, symbol, opts.side);
+    return { kept: 0, killed: rows.length, haveSl: false, haveTp: 0, listed: rows.length, wiped: true };
   }
   const isStop = (r: { type: string; trigger: number; posSide: string }) => {
     if (r.posSide && r.posSide !== live) return false;
-    if (/TAKE|PROFIT|^TP$|TP-|pos_profit/i.test(r.type) && !/STOP|LOSS/i.test(r.type)) return false;
-    if (/STOP|LOSS|^SL$|SL-|pos_loss|STOP_MARKET/i.test(r.type)) return true;
+    if (/TAKE|PROFIT|^TP$|TP-|pos_profit|profit_plan/i.test(r.type) && !/STOP|LOSS/i.test(r.type)) return false;
+    if (/STOP|LOSS|^SL$|SL-|pos_loss|loss_plan|STOP_MARKET/i.test(r.type)) return true;
     if (!(r.trigger > 0) || !(mark > 0)) return false;
     return opts.side === "long" ? r.trigger < mark * 0.9995 : r.trigger > mark * 1.0005;
   };
   const isTp = (r: { type: string; trigger: number; posSide: string }) => {
     if (r.posSide && r.posSide !== live) return false;
-    if (/STOP|LOSS|^SL$|SL-|pos_loss/i.test(r.type) && !/TAKE|PROFIT/i.test(r.type)) return false;
-    if (/TAKE|PROFIT|^TP$|TP-|pos_profit/i.test(r.type)) {
+    if (/STOP|LOSS|^SL$|SL-|pos_loss|loss_plan/i.test(r.type) && !/TAKE|PROFIT/i.test(r.type)) return false;
+    if (/TAKE|PROFIT|^TP$|TP-|pos_profit|profit_plan/i.test(r.type)) {
       if (!(r.trigger > 0) || !(mark > 0)) return true;
       return opts.side === "long" ? r.trigger > mark : r.trigger < mark;
     }
@@ -812,7 +823,7 @@ export async function trimWeexTakes(
   if (kill.length) await cancelAlgoIds(creds, symbol, kill);
   const haveSl = [...keep].some((id) => slRows.some((r) => r.id === id));
   const haveTp = Math.max(0, keep.size - (haveSl ? 1 : 0));
-  return { kept: keep.size, killed: kill.length, haveSl, haveTp };
+  return { kept: keep.size, killed: kill.length, haveSl, haveTp, listed: rows.length, wiped: false };
 }
 
 export async function listWeexAlgos(creds: WeexCreds, symbol: string): Promise<string[]> {
