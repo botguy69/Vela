@@ -687,7 +687,7 @@ async function ensureTakes(
 ) {
   if (pos.status !== "filled") return;
   const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
-  const { placeWeexTake, moveWeexStop, trimWeexTakes, listWeexPositions } = await import("@/lib/weex.server");
+  const { placeWeexTake, moveWeexStop, trimWeexTakes, cancelWeexProtective, listWeexPositions } = await import("@/lib/weex.server");
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
   const { coinByWeex } = await import("@/lib/universe");
   const spec = await specFor(coinByWeex(pos.weex_symbol));
@@ -713,12 +713,18 @@ async function ensureTakes(
     if (mark > 0 && taggedTake(sideLc, mark, px)) continue;
     tps.push(px);
   }
-  const trimmed = await trimWeexTakes(creds, pos.weex_symbol, {
-    side: sideLc,
-    sl: stopPx,
-    tps,
-    mark,
-  });
+  const needsWipe = !/tps:v3wipe/.test(pos.weex_resp ?? "");
+  if (needsWipe) {
+    await cancelWeexProtective(creds, pos.weex_symbol);
+  }
+  const trimmed = needsWipe
+    ? { kept: 0, killed: 1, haveSl: false, haveTp: 0, listed: 0, wiped: true }
+    : await trimWeexTakes(creds, pos.weex_symbol, {
+        side: sideLc,
+        sl: stopPx,
+        tps,
+        mark,
+      });
   if (trimmed.killed) {
     notes.push(`${pos.weex_symbol} cancelled ${trimmed.killed} extra TP/SL. Kept ${trimmed.kept} (1 SL + 2 TP max).`);
   }
@@ -783,7 +789,7 @@ async function ensureTakes(
     }
   }
   notes.push(`${pos.weex_symbol} 1 SL @ ${stopPx.toFixed(4)} + ${ok} TP`);
-  const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept)@?\d*/g, "").trim()} tps:ok`.slice(0, 500);
+  const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe)@?\d*/g, "").trim()} tps:v3wipe tps:ok`.slice(0, 500);
   await sql`update auto_signals set weex_resp = ${stamp}, updated_at = now() where id = ${pos.id}`;
   pos.weex_resp = stamp;
   pos.stop = stopPx;

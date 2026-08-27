@@ -631,13 +631,18 @@ export async function cancelWeexProtective(
   symbol: string,
   holdSide?: "long" | "short",
 ) {
+  await weexRequest({
+    creds,
+    method: "DELETE",
+    path: "/capi/v3/algoOpenOrders",
+    query: { symbol },
+  }).catch(() => null);
   const planTypes = [
     "profit_loss",
     "profit_plan",
     "loss_plan",
     "pos_profit",
     "pos_loss",
-    "normal_plan",
     "TAKE_PROFIT",
     "STOP_LOSS",
   ];
@@ -658,22 +663,6 @@ export async function cancelWeexProtective(
       }).catch(() => null);
     }
   }
-  await weexRequest({
-    creds,
-    method: "POST",
-    path: "/capi/v2/mix/order/cancel-all-tpsl",
-    body: { symbol, productType: "USDT-FUTURES", marginCoin: "USDT" },
-  }).catch(() => null);
-  if (!holdSide) {
-    await weexRequest({ creds, method: "POST", path: "/capi/v3/algoOrder/cancelAll", body: { symbol } }).catch(() => null);
-    await weexRequest({ creds, method: "POST", path: "/capi/v3/cancelAllTpSl", body: { symbol } }).catch(() => null);
-    await weexRequest({
-      creds,
-      method: "POST",
-      path: "/capi/v3/plan/cancelAll",
-      body: { symbol, productType: "USDT-FUTURES" },
-    }).catch(() => null);
-  }
   const listed = await listWeexAlgoRows(creds, symbol);
   const ids = listed
     .filter((r) => !holdSide || r.posSide === holdSide.toUpperCase() || !r.posSide)
@@ -686,6 +675,18 @@ async function cancelAlgoIds(creds: WeexCreds, symbol: string, ids: string[]) {
     if (!id || id === "undefined") continue;
     await weexRequest({
       creds,
+      method: "DELETE",
+      path: "/capi/v3/algoOrder",
+      query: { orderId: id },
+    }).catch(() => null);
+    await weexRequest({
+      creds,
+      method: "DELETE",
+      path: "/capi/v3/algoOpenOrders",
+      query: { symbol, orderId: id },
+    }).catch(() => null);
+    await weexRequest({
+      creds,
       method: "POST",
       path: "/capi/v2/mix/order/cancel-plan",
       body: {
@@ -695,12 +696,7 @@ async function cancelAlgoIds(creds: WeexCreds, symbol: string, ids: string[]) {
         orderIdList: [{ orderId: id, clientOid: id }],
       },
     }).catch(() => null);
-    await weexRequest({ creds, method: "POST", path: "/capi/v3/cancelTpSlOrder", body: { symbol, algoId: id, clientAlgoId: id } }).catch(() => null);
     await weexRequest({ creds, method: "POST", path: "/capi/v3/algoOrder/cancel", body: { symbol, algoId: id } }).catch(() => null);
-    await weexRequest({ creds, method: "DELETE", path: "/capi/v3/tpslOrder", query: { symbol, algoId: id } }).catch(() => null);
-    await weexRequest({ creds, method: "DELETE", path: "/capi/v3/order", query: { symbol, orderId: id } }).catch(() => null);
-    await weexRequest({ creds, method: "POST", path: "/capi/v3/order/tpsl/cancel", body: { symbol, algoId: id } }).catch(() => null);
-    await weexRequest({ creds, method: "POST", path: "/capi/v3/plan/cancel", body: { symbol, algoId: id } }).catch(() => null);
     await weexRequest({
       creds,
       method: "DELETE",
@@ -725,6 +721,7 @@ export async function listWeexAlgoRows(
     "normal_plan",
   ];
   const paths: { path: string; query: Record<string, string> }[] = [
+    { path: "/capi/v3/algoOpenOrders", query: { symbol } },
     { path: "/capi/v3/algoOrder/open", query: { symbol } },
     { path: "/capi/v3/tpslOrder", query: { symbol } },
     { path: "/capi/v3/pendingTpSlOrder", query: { symbol } },
@@ -780,16 +777,13 @@ export async function trimWeexTakes(
   opts: { side: "long" | "short"; sl: number; tps: number[]; mark?: number },
 ): Promise<{ kept: number; killed: number; haveSl: boolean; haveTp: number; listed: number; wiped: boolean }> {
   const live = opts.side === "short" ? "SHORT" : "LONG";
-  const opp = opts.side === "short" ? "long" : "short";
-  await cancelWeexProtective(creds, symbol, opp);
   const rows = await listWeexAlgoRows(creds, symbol);
   const mark = opts.mark ?? 0;
   const sl = opts.sl;
   const tps = opts.tps.filter((p) => p > 0).slice(0, 2);
   const wrong = rows.filter((r) => r.posSide && r.posSide !== live);
   if (wrong.length || rows.length > 3) {
-    if (wrong.length) await cancelAlgoIds(creds, symbol, wrong.map((r) => r.id));
-    if (rows.length > 3) await cancelWeexProtective(creds, symbol, opts.side);
+    await cancelWeexProtective(creds, symbol);
     return { kept: 0, killed: rows.length, haveSl: false, haveTp: 0, listed: rows.length, wiped: true };
   }
   const isStop = (r: { type: string; trigger: number; posSide: string }) => {
