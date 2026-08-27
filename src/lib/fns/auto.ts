@@ -307,7 +307,9 @@ async function closedStats(
   userId: string,
   statsFrom?: string | Date | null,
 ) {
-  const from = statsFrom ?? new Date(0).toISOString();
+  const from = statsFrom
+    ? new Date(statsFrom).toISOString()
+    : new Date(Date.now() - 21 * 86400_000).toISOString();
   const rows = await sql<{
     id: number;
     pnl: string | number | null;
@@ -328,14 +330,24 @@ async function closedStats(
     select id, pnl, entry, stop, qty, fill_px, risk_usd, notional, targets, be_moved,
            weex_symbol, side, filled_at, updated_at, created_at
     from auto_signals
-    where user_id = ${userId} and status in ('stopped','targeted')
+    where user_id = ${userId}
+      and status in ('stopped','targeted','skipped')
       and filled_at is not null
       and client_oid is not null
       and abs(coalesce(pnl, 0)) > 0.15
-      and close_reason in (
-        'Hit TP1','Hit TP2','TP1 then BE','Hit stop','Closed on WEEX','Closed in green','TP1 then leftover stopped'
+      and filled_at >= ${from}
+      and (
+        close_reason is null
+        or (
+          close_reason not like 'Replaced by%'
+          and close_reason not like 'Cancelled%'
+          and close_reason not like 'Ghost%'
+          and close_reason not like 'Limit never%'
+          and close_reason not like 'Stale claim%'
+          and close_reason not like 'Duplicate%'
+          and close_reason not like 'off the book%'
+        )
       )
-      and filled_at > now() - interval '21 days'
   `;
   const uniq = uniqueFills(rows).sort(
     (a, b) => new Date(a.filled_at ?? 0).getTime() - new Date(b.filled_at ?? 0).getTime(),
@@ -1044,16 +1056,6 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       settings.peak_usd = peak;
     }
     let stats = await closedStats(sql, context.userId, settings?.stats_from);
-    const board = weexScoreboard(weexCloses);
-    if (board.closed > 0) {
-      stats = {
-        ...stats,
-        closed: board.closed,
-        wins: board.wins,
-        winRate: board.winRate,
-        names: board.names,
-      };
-    }
     const byId = new Map<number, SignalRow>();
     const openRows = await sql<SignalRow>`
       select * from auto_signals
@@ -1527,16 +1529,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         bookedFlat = flat.booked;
         flattenedTick = flat.flattened;
         await restampWeexPnl(sql, userId, creds, notes, weexCloses);
-        const board = weexScoreboard(weexCloses);
-        if (board.closed > 0) {
-          stats = {
-            ...stats,
-            closed: board.closed,
-            wins: board.wins,
-            winRate: board.winRate,
-            names: board.names,
-          };
-        }
+        stats = await closedStats(sql, userId, settings.stats_from);
       }
     }
 
