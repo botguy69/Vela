@@ -116,7 +116,7 @@ function throughStop(side: string, last: number, stop: number): boolean {
   return side === "short" ? last >= stop * 0.997 : last <= stop * 1.003;
 }
 
-/** 1R in dollars: original stop distance × full size. Ignore the BE stop. */
+/** 1R in dollars: original stop × full size. BE stop is not 1R. */
 function oneRUsd(row: {
   qty?: string | number | null;
   notional?: string | number | null;
@@ -125,16 +125,45 @@ function oneRUsd(row: {
   stop?: string | number | null;
   targets?: string | null;
   be_moved?: boolean | null;
+  rr?: string | number | null;
+  target?: string | number | null;
 }): number {
   const e = n(row.fill_px) || n(row.entry);
   const q = origQty(row);
   if (!(e > 0) || !(q > 0)) return 0;
-  let dist = Math.abs(e - n(row.stop));
+  const stop = n(row.stop);
+  const beLike = Boolean(row.be_moved) || (stop > 0 && Math.abs(stop - e) / e < 0.004);
+  let dist = !beLike && stop > 0 ? Math.abs(e - stop) : 0;
   const tp1 = parseNums(row.targets)[0];
-  if ((row.be_moved || (e > 0 && dist / e < 0.004)) && tp1 != null) {
-    dist = Math.abs(tp1 - e);
-  }
+  if (!(dist > 0) && tp1 != null) dist = Math.abs(tp1 - e);
+  if (!(dist > 0) && n(row.rr) > 0.2 && n(row.target) > 0) dist = Math.abs(n(row.target) - e) / n(row.rr);
   return dist * q;
+}
+
+function playbookR(row: {
+  pnl?: string | number | null;
+  close_reason?: string | null;
+  be_moved?: boolean | null;
+  plan?: string | null;
+  rr?: string | number | null;
+  qty?: string | number | null;
+  notional?: string | number | null;
+  fill_px?: string | number | null;
+  entry?: string | number | null;
+  stop?: string | number | null;
+  targets?: string | null;
+  target?: string | number | null;
+}): number | null {
+  const why = String(row.close_reason ?? "");
+  const plan = String(row.plan ?? "scale2");
+  const tp2R = plan === "scale3" ? 1.84 : plan === "scale2" ? 1.75 : n(row.rr) || 1.8;
+  const tp1R = plan === "scale3" ? 0.34 : 0.5;
+  if (/Hit TP2/i.test(why)) return tp2R;
+  if (/TP1 then BE/i.test(why) || /^Hit TP1/i.test(why)) return tp1R;
+  if (/Hit stop/i.test(why)) return row.be_moved ? tp1R : -1;
+  const risk = oneRUsd(row);
+  if (!(risk > 0.01)) return null;
+  return n(row.pnl) / risk;
 }
 
 const OPEN = new Set(["proposed", "working", "filled"]);
@@ -316,15 +345,20 @@ async function closedStats(
     risk_usd: string | number | null;
     notional: string | number | null;
     targets: string | null;
+    target: string | number | null;
     be_moved: boolean | null;
     weex_symbol: string | null;
     side: string | null;
     filled_at: string | null;
     updated_at: string | null;
     created_at: string | null;
+    close_reason: string | null;
+    plan: string | null;
+    rr: string | number | null;
+    status: string | null;
   }>`
-    select id, pnl, entry, stop, qty, fill_px, risk_usd, notional, targets, be_moved,
-           weex_symbol, side, filled_at, updated_at, created_at
+    select id, pnl, entry, stop, qty, fill_px, risk_usd, notional, targets, target, be_moved,
+           weex_symbol, side, filled_at, updated_at, created_at, close_reason, plan, rr, status
     from auto_signals
     where user_id = ${userId}
       and status in ('stopped','targeted','skipped')
@@ -360,14 +394,8 @@ async function closedStats(
     }
   }
   const closed = window.length;
-  const wins = window.filter((r) => n(r.pnl) > 0).length;
-  const rs = window
-    .map((r) => {
-      const risk = oneRUsd(r);
-      if (!(risk > 0.01)) return null;
-      return n(r.pnl) / risk;
-    })
-    .filter((x): x is number => x != null);
+  const rs = window.map((r) => playbookR(r)).filter((x): x is number => x != null && Number.isFinite(x));
+  const wins = window.filter((r) => (playbookR(r) ?? n(r.pnl)) > 0).length;
   const winRs = rs.filter((x) => x > 0);
   const lossRs = rs.filter((x) => x < 0);
   const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
