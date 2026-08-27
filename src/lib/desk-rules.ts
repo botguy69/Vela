@@ -187,17 +187,13 @@ export function fillMaxAgeMs(style: Style): number {
   return style === "scalp" ? 5 * 3600_000 : 12 * 3600_000;
 }
 
-export function chopTakeMs(style: Style): number {
-  return style === "scalp" ? 12 * 3600_000 : 28 * 3600_000;
-}
-
 export function shouldCancelStaleLimit(createdAt: string | Date, style: Style): boolean {
   const t = new Date(createdAt).getTime();
   if (!Number.isFinite(t)) return false;
   return Date.now() - t > limitMaxAgeMs(style);
 }
 
-/** Dead loser after 5h → flatten. Green tickets hold or lock fee-BE. BE leftovers trail. */
+/** Dead loser after 5h → flatten. Green tickets hold. BE leftovers trail. */
 export function chopAction(opts: {
   since: string | Date;
   style: Style;
@@ -206,7 +202,7 @@ export function chopAction(opts: {
   last: number;
   stop: number;
   beMoved: boolean;
-}): "hold" | "flatten" | "lockBe" {
+}): "hold" | "flatten" {
   if (opts.beMoved) return "hold";
   const t = new Date(opts.since).getTime();
   if (!Number.isFinite(t)) return "hold";
@@ -305,7 +301,6 @@ export type ClosedTicket = {
 
 export type Ledger = {
   plans: PlanRecord[];
-  skipPlans: Set<string>;
   skipSymbols: Set<string>;
   note: string;
 };
@@ -325,7 +320,6 @@ export function buildLedger(rows: ClosedTicket[]): Ledger {
     bucket(plans, r.plan || "vela", r.pnl);
     if (r.weex) bucket(symbols, r.weex, r.pnl);
   }
-  const skipPlans = new Set<string>();
   const skipSymbols = new Set<string>();
   for (const s of symbols.values()) {
     if (s.closed >= 6 && s.wins / s.closed < 0.25 && s.pnl <= 0) skipSymbols.add(s.plan);
@@ -336,7 +330,6 @@ export function buildLedger(rows: ClosedTicket[]): Ledger {
   if (skipSymbols.size) bits.push(`skip ${[...skipSymbols].slice(0, 3).join(", ")}`);
   return {
     plans: [...plans.values()],
-    skipPlans,
     skipSymbols,
     note: skipSymbols.size
       ? `Sitting out ${[...skipSymbols].slice(0, 3).join(", ")}.`
@@ -344,31 +337,9 @@ export function buildLedger(rows: ClosedTicket[]): Ledger {
   };
 }
 
-export function rankSetups(setups: RawSetup[], records: PlanRecord[]): RawSetup[] {
-  const byPlan = new Map(records.map((r) => [r.plan, r]));
-  return [...setups]
-    .map((s) => {
-      const rec = byPlan.get(s.plan);
-      if (!rec || rec.closed < 6) return s;
-      if (s.plan === "scale2" || s.plan === "scale3" || s.plan === "single") return s;
-      const wr = rec.wins / rec.closed;
-      const edge = rec.pnl;
-      let adj = 1;
-      if (wr < 0.28 || edge < 0) adj = 0.45;
-      else if (wr > 0.55 && edge > 0) adj = 1.35;
-      else if (wr > 0.45) adj = 1.12;
-      return { ...s, score: s.score * adj };
-    })
-    .sort((a, b) => b.score - a.score);
-}
-
 export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
-  const ranked = rankSetups(setups, ledger.plans);
-  const filtered = ranked.filter(
-    (s) => !ledger.skipPlans.has(s.plan) && !ledger.skipSymbols.has(s.weexSymbol),
-  );
-  if (filtered.length) return filtered;
-  return ranked;
+  const filtered = setups.filter((s) => !ledger.skipSymbols.has(s.weexSymbol));
+  return filtered.length ? filtered : setups;
 }
 
 /** Real A+ scalp — structure, extremes, tape. Not generic 21h mean RSI 48. */
@@ -464,14 +435,6 @@ export function whyTookTrade(opts: {
         : `Fading BTC ${opts.bias} — this coin is doing the other side.`;
   const verb = opts.working ? "Limit" : opts.live ? "Live" : "Took";
   return `${verb} ${pair} ${opts.side} · ${opts.conf}% confidence. ${setup}${tape ? ` ${tape}` : ""}`;
-}
-
-export function confidenceBar(
-  closed: { conf: number; pnl: number }[],
-  _base: number,
-): { minConf: number; note: string } {
-  void closed;
-  return { minConf: 80, note: "A+ longs and shorts · 80%+." };
 }
 
 export function writeDeskNote(opts: {

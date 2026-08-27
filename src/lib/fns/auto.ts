@@ -194,8 +194,7 @@ function composePass(note: string | null, liveL: number, liveS: number, liveLine
   const fromTick = (note ?? "")
     .split("\n")
     .map((ln) => ln.trim())
-    .filter((ln) => /^(Eying |Took |A\+|BTC )/i.test(ln))
-    .filter((ln) => !/killed|Bar 84|Setups:|WR weak/i.test(ln));
+    .filter((ln) => /^(Eying |Took |A\+|BTC )/i.test(ln));
   const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
   if (!uniq.some((ln) => /^A\+/.test(ln))) {
     uniq.push(
@@ -566,37 +565,6 @@ function matchWeexClose(
   if (ed < 0 && td > 12) return null;
   used?.add(`${top.symbol}|${top.side ?? "?"}|${top.entry ?? 0}|${top.ts}|${top.pnl}`);
   return top;
-}
-
-function weexScoreboard(
-  closes: { symbol: string; side?: "long" | "short"; pnl: number; entry?: number; ts: number }[],
-) {
-  const cut = Date.now() - 21 * 86400_000;
-  const best = new Map<string, { symbol: string; pnl: number; ts: number }>();
-  for (const c of closes) {
-    if (!Number.isFinite(c.pnl) || Math.abs(c.pnl) < 0.08) continue;
-    if (c.ts && c.ts < cut) continue;
-    const entryK = c.entry && c.entry > 0 ? c.entry.toPrecision(5) : "x";
-    const bucket = c.ts ? Math.floor(c.ts / (10 * 60_000)) : 0;
-    const k = `${c.symbol}|${c.side ?? "?"}|${entryK}|${bucket}`;
-    const prev = best.get(k);
-    if (!prev || Math.abs(c.pnl) > Math.abs(prev.pnl)) best.set(k, { symbol: c.symbol, pnl: c.pnl, ts: c.ts });
-  }
-  const uniq = [...best.values()].sort((a, b) => a.ts - b.ts);
-  const wins = uniq.filter((c) => c.pnl > 0);
-  const names = uniq
-    .slice(-20)
-    .reverse()
-    .map((c) => {
-      const coin = c.symbol.replace("USDT", "").replace(/^1000/, "");
-      return `${coin} ${c.pnl >= 0 ? "+" : ""}${c.pnl.toFixed(2)}`;
-    });
-  return {
-    closed: uniq.length,
-    wins: wins.length,
-    winRate: uniq.length ? Math.round((100 * wins.length) / uniq.length) : 0,
-    names,
-  };
 }
 
 async function restampWeexPnl(
@@ -1972,14 +1940,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const LIVE_CAP = 6;
     const SIDE_CAP = 2;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
-    const closedConf = await sql<{ confidence: string | number | null; pnl: string | number | null }>`
-      select confidence, pnl from auto_signals
-      where user_id = ${userId} and status in ('stopped','targeted','skipped')
-    `;
-    const bar = rules.confidenceBar(
-      closedConf.map((r) => ({ conf: n(r.confidence), pnl: n(r.pnl) })),
-      corrected.minConf,
-    );
+    const bar = { minConf: 80, note: "A+ longs and shorts · 80%+." };
 
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
     const beFree = new Set(
@@ -2550,8 +2511,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     } else {
       huntTape = huntTape || huntStatus;
     }
-
-    if (!huntTape) huntTape = huntStatus;
 
     const learned = "A+ longs and shorts · 80%+ · will not fill empty slots.";
     const manage = notes

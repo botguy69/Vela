@@ -244,10 +244,6 @@ export function analyzeMarket(
     });
   }
 
-  const lastRange = lastBar.high - lastBar.low;
-  const exhausted = lastRange > 2.15 * a;
-  const thinBreak = medVol > 0 && lastBar.volume < 0.75 * medVol;
-
   const rAgo = rsi(closes.slice(0, -4), 14);
   if (rAgo != null && r >= 64 && r <= rAgo + 0.5 && last > mid * 0.997) {
     const bearBar = lastBar.close <= lastBar.open;
@@ -263,38 +259,6 @@ export function analyzeMarket(
         plan: "scale2",
       });
     }
-  }
-
-  const brokeHigh = !exhausted && !thinBreak && last > hi && fast > mid && r > 50 && r < 72;
-  if (brokeHigh) {
-    const entry = last;
-    const stop = mid - 0.4 * a;
-    ideas.push({
-      side: "long",
-      entry,
-      stop,
-      entryType: "market",
-      score: 66,
-      thesis: `Range high taken, fast still leading`,
-      invalidation: `Failed break — back inside the 20-hour range.`,
-      plan: "scale3",
-    });
-  }
-
-  const brokeLow = !exhausted && !thinBreak && last < lo && fast < mid && r < 50 && r > 28;
-  if (brokeLow) {
-    const entry = last;
-    const stop = mid + 0.4 * a;
-    ideas.push({
-      side: "short",
-      entry,
-      stop,
-      entryType: "market",
-      score: 66,
-      thesis: `Range low lost, fast still leading`,
-      invalidation: `Failed break — back inside the 20-hour range.`,
-      plan: "scale3",
-    });
   }
 
   const prior = hourly.slice(0, -1);
@@ -621,19 +585,6 @@ export function breakevenPrice(side: Side, entry: number): number {
   return side === "long" ? entry * (1 + roundTrip) : entry * (1 - roundTrip);
 }
 
-/** Place BE under/above the market. Never null — leftover stays, SL moves. */
-export function lockBePx(side: Side, entry: number, mark: number, weexBe: number): number {
-  const raw = weexBe > 0 ? weexBe : breakevenPrice(side, entry);
-  if (side === "long") {
-    const want = Math.max(raw, entry * 1.0004);
-    if (mark > 0 && want >= mark * 0.999) return Math.min(want, mark * 0.9985);
-    return want;
-  }
-  const want = Math.min(raw, entry * 0.9996);
-  if (mark > 0 && want <= mark * 1.001) return Math.max(want, mark * 1.0015);
-  return want;
-}
-
 export function taggedTake(side: Side, last: number, target: number): boolean {
   if (!(target > 0) || !(last > 0)) return false;
   return side === "long" ? last >= target * 0.999 : last <= target * 1.001;
@@ -650,54 +601,4 @@ export function shouldLockBreakeven(opts: {
 }): boolean {
   if (opts.already || opts.entry <= 0) return false;
   return Boolean(opts.reduced);
-}
-
-/** Realized takes + mark on leftover. Full flatten at last prints the whole ticket at that price. */
-export function ticketPnl(opts: {
-  side: Side;
-  entry: number;
-  last: number;
-  qty: number;
-  leftover?: number | null;
-  targets: number[];
-  beMoved: boolean;
-  tp1Hit?: boolean;
-}): number {
-  const orig = opts.qty;
-  if (!(orig > 0) || !(opts.entry > 0)) return 0;
-  const favor = (px: number, q: number) =>
-    opts.side === "short" ? (opts.entry - px) * q : (px - opts.entry) * q;
-  const tp1 = opts.targets[0];
-  const tp2 = opts.targets[1];
-  const reduced =
-    opts.leftover != null && Number.isFinite(opts.leftover) && orig > 0 && opts.leftover < orig * 0.72;
-  const tagged = tp1 != null && taggedTake(opts.side, opts.last, tp1);
-  const hitTp2 = tp2 != null && taggedTake(opts.side, opts.last, tp2);
-  const tp1Hit = Boolean(opts.tp1Hit) || reduced || tagged || (opts.beMoved && tp1 != null);
-  if (hitTp2 && opts.leftover === 0) {
-    return favor(tp1 ?? opts.last, orig * 0.5) + favor(opts.last, orig * 0.5);
-  }
-  if (tp1Hit && tp1 != null && opts.leftover === 0) {
-    const nearEntry = opts.entry > 0 && Math.abs(opts.last - opts.entry) / opts.entry < 0.006;
-    if (nearEntry) return favor(tp1, orig * 0.5) + favor(opts.last, orig * 0.5);
-    return favor(opts.last, orig);
-  }
-  const half = orig * 0.5;
-  if (tp1Hit && tp1 != null) {
-    const left =
-      opts.leftover != null && Number.isFinite(opts.leftover) && opts.leftover >= 0
-        ? opts.leftover
-        : opts.leftover === 0
-          ? half
-          : half;
-    const closed = Math.max(0, orig - (opts.leftover === 0 ? half : left));
-    const takeQty = closed > 0 ? closed : half;
-    const rest = opts.leftover === 0 ? orig - takeQty : left;
-    return favor(tp1, takeQty) + favor(opts.last, rest);
-  }
-  const left =
-    opts.leftover != null && Number.isFinite(opts.leftover) && opts.leftover >= 0
-      ? opts.leftover
-      : orig;
-  return favor(opts.last, left > 0 ? left : orig);
 }
