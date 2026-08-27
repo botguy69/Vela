@@ -50,6 +50,16 @@ export const TOP25: AutoCoin[] = [
   { id: "ETC", weex: "ETCUSDT", name: "Ethereum Classic", fallbackMax: 200 },
   { id: "JUP", weex: "JUPUSDT", name: "Jupiter", fallbackMax: 200 },
   { id: "PENDLE", weex: "PENDLEUSDT", name: "Pendle", fallbackMax: 125 },
+  { id: "ONDO", weex: "ONDOUSDT", name: "Ondo", fallbackMax: 200 },
+  { id: "ENA", weex: "ENAUSDT", name: "Ethena", fallbackMax: 200 },
+  { id: "LDO", weex: "LDOUSDT", name: "Lido", fallbackMax: 200 },
+  { id: "POL", weex: "POLUSDT", name: "Polygon", fallbackMax: 125 },
+  { id: "PYTH", weex: "PYTHUSDT", name: "Pyth", fallbackMax: 200 },
+  { id: "WLD", weex: "WLDUSDT", name: "Worldcoin", fallbackMax: 200 },
+  { id: "GRT", weex: "GRTUSDT", name: "The Graph", fallbackMax: 200 },
+  { id: "ORDI", weex: "ORDIUSDT", name: "ORDI", fallbackMax: 200 },
+  { id: "APE", weex: "APEUSDT", name: "ApeCoin", fallbackMax: 200 },
+  { id: "PENGU", weex: "PENGUUSDT", name: "Pudgy Penguins", fallbackMax: 125 },
 ];
 
 export const TOP25_WEEX = TOP25.map((c) => c.weex);
