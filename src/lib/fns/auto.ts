@@ -87,11 +87,7 @@ function origQty(row: {
 }): number {
   const e = n(row.fill_px) || n(row.entry);
   const fromNotional = e > 0 ? n(row.notional) / e : 0;
-  const tp1 = parseNums(row.targets)[0];
-  const risk = n(row.risk_usd);
-  const rDist = tp1 != null && e > 0 ? Math.abs(tp1 - e) / 2.5 : 0;
-  const fromR = rDist > 0 && risk > 0 ? risk / rDist : 0;
-  return Math.max(n(row.qty), fromNotional, fromR);
+  return Math.max(n(row.qty), fromNotional);
 }
 
 function takeQtys(
@@ -710,7 +706,6 @@ async function ensureTakes(
   stopOverride?: number,
 ) {
   if (pos.status !== "filled") return;
-  const already = /tps:ok/.test(pos.weex_resp ?? "");
   const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
   const { placeWeexTake, moveWeexStop, trimWeexTakes, cancelWeexProtective, getWeexPositionQty, listWeexPositions } = await import("@/lib/weex.server");
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
@@ -742,10 +737,6 @@ async function ensureTakes(
   });
   if (trimmed.killed) {
     notes.push(`${pos.weex_symbol} cancelled ${trimmed.killed} extra TP/SL. Kept ${trimmed.kept} (1 SL + 2 TP max).`);
-  }
-  if (already && stopOverride == null) {
-    notes.push(`${pos.weex_symbol} 1 SL + 2 TP already armed. Not adding.`);
-    return;
   }
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
@@ -1624,23 +1615,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       let mark = px;
       let reduced = false;
       if (pos.status === "filled" && !beLocked) {
-        const sinceMs = new Date(pos.filled_at ?? pos.created_at).getTime();
-        const minutes = await getWeexKlines(pos.weex_symbol, "1m", 120).catch(() => []);
-        const after = minutes.filter((c) => {
-          const t = c.time > 1e12 ? c.time : c.time * 1000;
-          return t >= sinceMs - 60_000;
-        });
-        if (after.length) {
-          mark = side === "long"
-            ? Math.max(px, ...after.map((c) => c.high))
-            : Math.min(px, ...after.map((c) => c.low));
-        }
         const credsForPos = await credsFrom(settings);
         if (credsForPos) {
           const { getWeexPositionQty } = await import("@/lib/weex.server");
           const left = await getWeexPositionQty(credsForPos, pos.weex_symbol);
           const orig = origQty(pos);
-          if (left != null && orig > 0 && left < orig * 0.72) reduced = true;
+          if (left != null && orig > 0 && left < orig * 0.62) reduced = true;
         }
       }
       if (
@@ -1657,8 +1637,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const creds = await credsFrom(settings);
         const rawBe = await weexFeeBe(creds, pos.weex_symbol, side, entry);
         const be = feeBePx(side, entry, mark || px, rawBe);
-        const hitFirst = tps[0] != null && taggedTake(side, mark, tps[0]!);
-        const printed = Boolean(reduced || hitFirst);
         if (be > 0 && creds) {
           pos.stop = be;
           await ensureTakes(pos, notes, creds, be);
@@ -1667,11 +1645,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             set stop = ${be}, be_moved = true, tp1_hit = true, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
-          notes.push(
-            printed
-              ? `${pos.weex_symbol} TP1 · SL → WEEX BE ${be.toFixed(4)}`
-              : `${pos.weex_symbol} size cut · SL → WEEX BE ${be.toFixed(4)}`,
-          );
+          notes.push(`${pos.weex_symbol} TP1 filled · SL → WEEX BE ${be.toFixed(4)}`);
         }
       } else if (pos.be_moved) {
         if (reduced && !pos.tp1_hit) {
@@ -1761,21 +1735,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           stop,
           beMoved: Boolean(pos.be_moved),
         });
-        if (act === "lockBe" && !pos.be_moved) {
-          const creds = credsNow ?? (await credsFrom(settings));
-          const be = await weexFeeBe(creds, pos.weex_symbol, side, entry);
-          if (creds) {
-            pos.stop = be;
-            await ensureTakes(pos, notes, creds, be);
-          }
-          await sql`
-            update auto_signals
-            set stop = ${be}, be_moved = true, tp1_hit = false, updated_at = now()
-            where id = ${pos.id} and user_id = ${userId}
-          `;
-          notes.push(`${pos.weex_symbol} chop → fee BE ${be.toFixed(4)}. Slot free.`);
-          continue;
-        }
         if (act === "flatten") {
         if (credsNow && (left == null || left > 0)) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));

@@ -649,10 +649,7 @@ export function shouldLockBreakeven(opts: {
   reduced?: boolean;
 }): boolean {
   if (opts.already || opts.entry <= 0) return false;
-  if (opts.reduced) return true;
-  const firstTake = opts.targets[0];
-  if (firstTake == null || !(firstTake > 0)) return false;
-  return taggedTake(opts.side, opts.last, firstTake);
+  return Boolean(opts.reduced);
 }
 
 /** Realized takes + mark on leftover. Full flatten at last prints the whole ticket at that price. */
