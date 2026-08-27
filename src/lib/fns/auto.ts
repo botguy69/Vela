@@ -373,7 +373,7 @@ async function closedStats(
   const loss$ = window.map((r) => n(r.pnl)).filter((p) => p < 0);
   const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
   const sls = window.filter(
-    (r) => n(r.pnl) < 0 && (r.status === "stopped" || /Hit stop/i.test(String(r.close_reason ?? ""))),
+    (r) => n(r.pnl) < 0 && /Hit stop/i.test(String(r.close_reason ?? "")),
   );
   const slMean = avg(sls.map((r) => Math.abs(n(r.pnl))));
   const lossMean = avg(loss$.map((p) => Math.abs(p)));
@@ -501,26 +501,51 @@ function whyFromWeex(
   row: {
     side: string;
     be_moved?: boolean | null;
+    tp1_hit?: boolean | null;
     targets?: string | null;
     filled_at?: string | null;
     created_at?: string;
+    fill_px?: string | number | null;
+    entry?: string | number | null;
+    stop?: string | number | null;
   },
   px: number,
 ): string {
   const tps = parseNums(row.targets);
+  const tp1 = tps[0];
   const tp2 = tps[1];
   const sd = row.side === "short" ? "short" : "long";
-  const near = (level: number) =>
-    sd === "short" ? px <= level * 1.006 : px >= level * 0.994;
-  if (tp2 != null && px > 0 && near(tp2)) return "Hit TP2";
-  if (hit.pnl <= -0.15) return "Hit stop";
+  const entry = n(row.fill_px) || n(row.entry);
+  const stopNow = n(row.stop);
+  const beLike =
+    Boolean(row.be_moved) || (entry > 0 && stopNow > 0 && Math.abs(stopNow - entry) / entry < 0.004);
+  const origStop =
+    !beLike && stopNow > 0
+      ? stopNow
+      : tp1 != null && entry > 0
+        ? sd === "short"
+          ? entry + Math.abs(entry - tp1)
+          : entry - Math.abs(tp1 - entry)
+        : 0;
+  const near = (level: number, tol = 0.007) =>
+    px > 0 && level > 0 && Math.abs(px - level) / level <= tol;
+  const throughTp2 =
+    tp2 != null && px > 0 && (sd === "short" ? px <= tp2 * 1.006 : px >= tp2 * 0.994);
+  const throughTp1 =
+    tp1 != null && px > 0 && (sd === "short" ? px <= tp1 * 1.004 : px >= tp1 * 0.996);
+  const throughSl =
+    origStop > 0 && px > 0 && (sd === "short" ? px >= origStop * 0.997 : px <= origStop * 1.003);
+  if (throughTp2 || near(tp2 ?? 0)) return "Hit TP2";
+  if (throughTp1) return hit.pnl >= 0 && beLike && (near(entry, 0.01) || near(stopNow, 0.008)) ? "TP1 then BE" : "Hit TP1";
+  if (hit.pnl >= 0 && beLike && Boolean(row.tp1_hit) && (near(entry, 0.01) || near(stopNow, 0.008))) {
+    return "TP1 then BE";
+  }
+  if (throughSl || (origStop > 0 && near(origStop, 0.008) && hit.pnl < 0)) return "Hit stop";
   const t0 = new Date(row.filled_at ?? row.created_at ?? 0).getTime();
   const heldH = t0 > 0 && hit.ts ? (hit.ts - t0) / 3600_000 : 0;
   if (heldH >= 5 && Math.abs(hit.pnl) < 0.5) return "Time stop — flattened";
-  if (hit.pnl >= 0.15 && Boolean(row.be_moved)) return "TP1 then BE";
-  if (hit.pnl >= 1) return "Hit TP1";
   if (hit.pnl >= 0.15) return "Closed in green";
-  if (hit.pnl <= -0.05) return "Hit stop";
+  if (hit.pnl <= -0.05) return "Flattened";
   return "Closed on WEEX";
 }
 
