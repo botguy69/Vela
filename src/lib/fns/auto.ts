@@ -306,9 +306,6 @@ async function closedStats(
   userId: string,
   statsFrom?: string | Date | null,
 ) {
-  const from = statsFrom
-    ? new Date(statsFrom).toISOString()
-    : new Date(Date.now() - 21 * 86400_000).toISOString();
   const rows = await sql<{
     id: number;
     pnl: string | number | null;
@@ -334,7 +331,6 @@ async function closedStats(
       and filled_at is not null
       and client_oid is not null
       and abs(coalesce(pnl, 0)) > 0.15
-      and filled_at >= ${from}
       and (
         close_reason is null
         or (
@@ -348,12 +344,24 @@ async function closedStats(
         )
       )
   `;
-  const uniq = uniqueFills(rows).sort(
-    (a, b) => new Date(a.filled_at ?? 0).getTime() - new Date(b.filled_at ?? 0).getTime(),
-  );
-  const closed = uniq.length;
-  const wins = uniq.filter((r) => n(r.pnl) > 0).length;
-  const rs = uniq
+  const closeAt = (r: { filled_at?: string | null; updated_at?: string | null }) => {
+    const u = new Date(r.updated_at ?? 0).getTime();
+    const f = new Date(r.filled_at ?? 0).getTime();
+    return Number.isFinite(u) && u > f ? u : f;
+  };
+  const uniq = uniqueFills(rows).sort((a, b) => closeAt(a) - closeAt(b));
+  const tFrom = statsFrom ? new Date(statsFrom).getTime() : 0;
+  let window = tFrom > 0 ? uniq.filter((r) => closeAt(r) >= tFrom) : uniq;
+  if (window.length >= 40 || tFrom <= 0) {
+    window = uniq.slice(-15);
+    const pin = window[0] ? new Date(closeAt(window[0])).toISOString() : null;
+    if (pin) {
+      await sql`update auto_settings set stats_from = ${pin} where user_id = ${userId}`;
+    }
+  }
+  const closed = window.length;
+  const wins = window.filter((r) => n(r.pnl) > 0).length;
+  const rs = window
     .map((r) => {
       const risk = oneRUsd(r);
       if (!(risk > 0.01)) return null;
@@ -369,14 +377,14 @@ async function closedStats(
     winRate: closed > 0 ? (wins / closed) * 100 : 0,
     avgWinR: avg(winRs),
     avgLossR: avg(lossRs),
-    names: [...uniq]
+    names: [...window]
       .reverse()
       .map((r) => {
         const p = n(r.pnl);
         const pair = (r.weex_symbol ?? "").replace("USDT", "");
         return `${pair} ${p >= 0 ? "+" : ""}${p.toFixed(2)}`;
       })
-      .slice(0, 20),
+      .slice(0, 15),
   };
 }
 
