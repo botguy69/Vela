@@ -195,16 +195,12 @@ function huntHeader(liveL: number, liveS: number) {
 
 function composePass(note: string | null, liveL: number, liveS: number, liveLines: string[]) {
   const head = huntHeader(liveL, liveS);
-  const keep = (note ?? "")
+  const fromTick = (note ?? "")
     .split("\n")
     .map((ln) => ln.trim())
-    .filter(
-      (ln) =>
-        /^(Eying |Took |Live |Limit )/i.test(ln) ||
-        /^A\+ /.test(ln),
-    )
+    .filter((ln) => /^(Eying |Took |A\+)/i.test(ln))
     .filter((ln) => !/killed|Bar 84|Setups:|WR weak/i.test(ln));
-  const uniq = [...new Set([...liveLines.filter(Boolean), ...keep])];
+  const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
   if (!uniq.some((ln) => /^A\+/.test(ln))) {
     uniq.push(
       "A+ double · pin · engulf · climax · dry-up · washout · failed range · trend cooling · continuation (with BTC). Longs and shorts both hunt. Junk 21h-mean is off.",
@@ -1184,11 +1180,11 @@ export const getAutoDesk = createServerFn({ method: "GET" })
         t.pnl = t.side === "short" ? (entry - last) * qty : (last - entry) * qty;
       }
     }
-    const liveL = mapped.filter((t) => t.liveOnWeex && t.side === "long").length;
-    const liveS = mapped.filter((t) => t.liveOnWeex && t.side === "short").length;
+    const liveL = mapped.filter((t) => (t.liveOnWeex || t.status === "working") && t.side === "long").length;
+    const liveS = mapped.filter((t) => (t.liveOnWeex || t.status === "working") && t.side === "short").length;
     const { whyTookTrade } = await import("@/lib/desk-rules");
     const liveLines = mapped
-      .filter((t) => t.liveOnWeex || t.status === "filled" || t.status === "working")
+      .filter((t) => t.liveOnWeex || t.status === "working")
       .map((t) =>
         whyTookTrade({
           symbol: t.weexSymbol,
@@ -2287,9 +2283,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not an A+ scalp — slot stays empty`);
               continue;
             }
-            if (flattened.has(pick.weexSymbol) && !aPlus) {
-              veto = `You flattened ${pick.weexSymbol}. Pause on that pair.`;
-              whyNot.push(`${tag} flatten pause`);
+            if (flattened.has(pick.weexSymbol)) {
+              whyNot.push(`${tag} just flattened — pause this pair`);
               continue;
             }
             if (busy.has(pick.weexSymbol)) continue;
