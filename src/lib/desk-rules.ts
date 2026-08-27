@@ -133,8 +133,8 @@ export function marketBias(
     return {
       bias: "long",
       note: ltf
-        ? "BTC 4h+1h+15m bid — longs only unless a coin is fading."
-        : "BTC 4h+1h bid, 15m pausing — longs on pullback, shorts only if a coin fades.",
+        ? "BTC pumping — leaning long. Still take A+ shorts if a coin fades vs BTC."
+        : "BTC pumping, 15m pausing — leaning long. A+ shorts still ok if a coin diverges.",
     };
   }
   if (h4S && h1S) {
@@ -142,11 +142,11 @@ export function marketBias(
     return {
       bias: "short",
       note: ltf
-        ? "BTC 4h+1h+15m offer — shorts only unless a coin is fading."
-        : "BTC 4h+1h offer, 15m pausing — shorts on bounce, longs only if a coin fades.",
+        ? "BTC bleeding — leaning short. Still take A+ longs if a coin holds vs BTC."
+        : "BTC bleeding, 15m pausing — leaning short. A+ longs still ok if a coin diverges.",
     };
   }
-  return { bias: "chop", note: "BTC mixed — A+ scalps only (structure, pin, engulf, climax, washout). 15m must be clean." };
+  return { bias: "chop", note: "BTC mixed / chopping. A+ both ways if the coin’s structure is clean." };
 }
 
 /** Snap limit to the 15m mean. Stop / targets stay — breathing room is unchanged. */

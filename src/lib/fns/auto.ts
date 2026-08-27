@@ -194,7 +194,7 @@ function composePass(note: string | null, liveL: number, liveS: number, liveLine
   const fromTick = (note ?? "")
     .split("\n")
     .map((ln) => ln.trim())
-    .filter((ln) => /^(Eying |Took |A\+)/i.test(ln))
+    .filter((ln) => /^(Eying |Took |A\+|BTC )/i.test(ln))
     .filter((ln) => !/killed|Bar 84|Setups:|WR weak/i.test(ln));
   const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
   if (!uniq.some((ln) => /^A\+/.test(ln))) {
@@ -707,18 +707,22 @@ async function ensureTakes(
 ) {
   if (pos.status !== "filled") return;
   const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
-  const { placeWeexTake, moveWeexStop, trimWeexTakes, cancelWeexProtective, getWeexPositionQty, listWeexPositions } = await import("@/lib/weex.server");
+  const { placeWeexTake, moveWeexStop, trimWeexTakes, cancelWeexProtective, listWeexPositions } = await import("@/lib/weex.server");
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
   const { coinByWeex } = await import("@/lib/universe");
   const spec = await specFor(coinByWeex(pos.weex_symbol));
-  const liveQty = (await getWeexPositionQty(creds, pos.weex_symbol)) ?? origQty(pos);
-  if (!(liveQty > 0)) return;
   const book = await listWeexPositions(creds).catch(() => null);
   const key = pos.weex_symbol.replace(/_/g, "").toUpperCase();
-  const live = (book ?? []).find((p) => p.symbol.replace(/_/g, "").toUpperCase() === key);
-  const mark = live?.mark ?? 0;
-  const side = pos.side === "short" ? "SHORT" : "LONG";
   const sideLc = pos.side === "short" ? "short" : "long";
+  const live = (book ?? []).find(
+    (p) =>
+      p.symbol.replace(/_/g, "").toUpperCase() === key &&
+      (p.side === "short" ? "short" : "long") === sideLc,
+  );
+  if (!live || !(live.qty > 0)) return;
+  const liveQty = live.qty;
+  const mark = live.mark ?? 0;
+  const side = pos.side === "short" ? "SHORT" : "LONG";
   const { taggedTake } = await import("@/lib/ta");
   const rawTps = parseNums(pos.targets).slice(0, 2);
   const tps: number[] = [];
@@ -1561,6 +1565,27 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     for (const pos of open) {
       const px = await getWeexLast(pos.weex_symbol);
       const side = pos.side === "short" ? "short" : "long";
+      const keyPos = pos.weex_symbol.replace(/_/g, "").toUpperCase();
+      const weexLive = (weexBook ?? []).find(
+        (p) =>
+          p.symbol.replace(/_/g, "").toUpperCase() === keyPos &&
+          (p.side === "short" ? "short" : "long") === side &&
+          p.qty > 0,
+      );
+      if (pos.status === "filled" && !weexLive) {
+        const other = (weexBook ?? []).find(
+          (p) => p.symbol.replace(/_/g, "").toUpperCase() === keyPos && p.qty > 0,
+        );
+        if (other) {
+          await sql`
+            update auto_signals
+            set status = 'skipped', close_reason = ${"Ghost opposite side"}, pnl = 0, updated_at = now()
+            where id = ${pos.id} and user_id = ${userId}
+          `;
+          notes.push(`${pos.weex_symbol} ${side} ghost — WEEX is ${(other.side === "short" ? "short" : "long")}, skipped`);
+          continue;
+        }
+      }
       const stop = n(pos.stop);
       const target = n(pos.target);
       const entry = n(pos.fill_px ?? pos.entry);
@@ -2520,7 +2545,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             needL2 === 0 && needS2 === 0
               ? "Not hunting — 2 longs and 2 shorts already at risk. Next after TP1/BE."
               : `Hunting up to 2L+2S (${riskL}L/${riskS}S live). Need ${[needL2 ? `${needL2} long` : "", needS2 ? `${needS2} short` : ""].filter(Boolean).join(" + ")}. A+ scalps only — will not fill empty slots.`;
-          huntTape = [huntNow, ...whyLive, tookLine, eyeLine, aPlusLine].filter(Boolean).join("\n");
+          huntTape = [huntNow, compass.note, ...whyLive, tookLine, eyeLine, aPlusLine].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {

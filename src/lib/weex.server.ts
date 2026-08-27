@@ -725,7 +725,7 @@ async function cancelAlgoIds(creds: WeexCreds, symbol: string, ids: string[]) {
 export async function listWeexAlgoRows(
   creds: WeexCreds,
   symbol: string,
-): Promise<{ id: string; type: string; trigger: number }[]> {
+): Promise<{ id: string; type: string; trigger: number; posSide: string }[]> {
   const paths = [
     { path: "/capi/v3/algoOrder/open", query: { symbol } as Record<string, string> },
     { path: "/capi/v3/tpslOrder", query: { symbol } },
@@ -742,7 +742,7 @@ export async function listWeexAlgoRows(
     { path: "/capi/v2/mix/order/orders-tpsl-pending", query: { symbol, productType: "USDT-FUTURES" } },
     { path: "/capi/v2/mix/order/orders-pending", query: { symbol, productType: "USDT-FUTURES" } },
   ];
-  const out: { id: string; type: string; trigger: number }[] = [];
+  const out: { id: string; type: string; trigger: number; posSide: string }[] = [];
   const seen = new Set<string>();
   for (const p of paths) {
     const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
@@ -752,10 +752,14 @@ export async function listWeexAlgoRows(
       const id = String(o.algoId ?? o.orderId ?? o.id ?? o.clientAlgoId ?? o.clientOid ?? "");
       if (!id || id === "undefined" || seen.has(id)) continue;
       seen.add(id);
+      const posSide = String(o.positionSide ?? o.holdSide ?? o.posSide ?? o.tdPositionSide ?? "")
+        .toUpperCase()
+        .replace(/_USDT|_BOTH/g, "");
       out.push({
         id,
         type: String(o.planType ?? o.type ?? o.orderType ?? o.workingType ?? o.tpslMode ?? ""),
         trigger: Number(o.triggerPrice ?? o.stopPrice ?? o.executePrice ?? o.price ?? 0),
+        posSide: posSide.includes("SHORT") ? "SHORT" : posSide.includes("LONG") ? "LONG" : "",
       });
     }
   }
@@ -771,15 +775,26 @@ export async function trimWeexTakes(
   const mark = opts.mark ?? 0;
   const sl = opts.sl;
   const tps = opts.tps.filter((p) => p > 0).slice(0, 2);
-  const isStop = (r: { type: string; trigger: number }) => {
+  const live = opts.side === "short" ? "SHORT" : "LONG";
+  const wrong = rows.filter((r) => r.posSide && r.posSide !== live);
+  if (wrong.length || rows.length > 3) {
+    await cancelWeexProtective(creds, symbol);
+    return { kept: 0, killed: rows.length, haveSl: false, haveTp: 0 };
+  }
+  const isStop = (r: { type: string; trigger: number; posSide: string }) => {
+    if (r.posSide && r.posSide !== live) return false;
     if (/TAKE|PROFIT|^TP$|TP-|pos_profit/i.test(r.type) && !/STOP|LOSS/i.test(r.type)) return false;
     if (/STOP|LOSS|^SL$|SL-|pos_loss|STOP_MARKET/i.test(r.type)) return true;
     if (!(r.trigger > 0) || !(mark > 0)) return false;
     return opts.side === "long" ? r.trigger < mark * 0.9995 : r.trigger > mark * 1.0005;
   };
-  const isTp = (r: { type: string; trigger: number }) => {
+  const isTp = (r: { type: string; trigger: number; posSide: string }) => {
+    if (r.posSide && r.posSide !== live) return false;
     if (/STOP|LOSS|^SL$|SL-|pos_loss/i.test(r.type) && !/TAKE|PROFIT/i.test(r.type)) return false;
-    if (/TAKE|PROFIT|^TP$|TP-|pos_profit/i.test(r.type)) return true;
+    if (/TAKE|PROFIT|^TP$|TP-|pos_profit/i.test(r.type)) {
+      if (!(r.trigger > 0) || !(mark > 0)) return true;
+      return opts.side === "long" ? r.trigger > mark : r.trigger < mark;
+    }
     if (!(r.trigger > 0) || !(mark > 0)) return false;
     return opts.side === "long" ? r.trigger > mark * 1.0005 : r.trigger < mark * 0.9995;
   };
@@ -791,7 +806,7 @@ export async function trimWeexTakes(
     const cand = tpRows
       .filter((r) => !keep.has(r.id))
       .sort((a, b) => Math.abs(a.trigger - tp) - Math.abs(b.trigger - tp))[0];
-    if (cand) keep.add(cand.id);
+    if (cand && Math.abs(cand.trigger - tp) / tp < 0.01) keep.add(cand.id);
   }
   const kill = rows.filter((r) => !keep.has(r.id)).map((r) => r.id);
   if (kill.length) await cancelAlgoIds(creds, symbol, kill);
