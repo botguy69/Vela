@@ -2286,7 +2286,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           ]);
           const aPlusList = ordered.filter((s) => {
             const conf = s.confidence ?? scoreToConf(s.score);
-            return rules.eliteScalp(s.thesis ?? "", conf, bar.minConf, compass.bias) && !held.has(s.weexSymbol);
+            if (!rules.eliteScalp(s.thesis ?? "", conf, bar.minConf, compass.bias)) return false;
+            if (held.has(s.weexSymbol)) return false;
+            if (s.side === "long" && needL <= 0) return false;
+            if (s.side === "short" && needS <= 0) return false;
+            return true;
           });
           const byKind = new Map<string, (typeof aPlusList)[0]>();
           for (const s of aPlusList) {
@@ -2435,9 +2439,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
 
           let tookLine =
-            needS > 0 && needL === 0
-              ? "No A+ short this pass (pin high, engulf, double top, climax, overbought, trend cooling). Slots stay empty."
-              : veto;
+            needL > 0 && needS === 0
+              ? "No A+ long this pass (double bottom, pin low, washout, bull engulf). Short book is full. Slots stay empty."
+              : needS > 0 && needL === 0
+                ? "No A+ short this pass (pin high, engulf, double top, climax, overbought, trend cooling). Slots stay empty."
+                : veto;
 
           if (!batch.length) {
             notes.push(veto);
