@@ -255,6 +255,7 @@ function TicketsTable({
     confidence: number | null;
     liveOnWeex?: boolean;
     closeReason?: string | null;
+    closedPx?: number | null;
   }>;
   refresh: () => void;
 }) {
@@ -328,6 +329,7 @@ function TicketSheet({
     confidence: number | null;
     liveOnWeex?: boolean;
     closeReason?: string | null;
+    closedPx?: number | null;
   }>;
   refresh: () => void;
   faded?: boolean;
@@ -388,14 +390,23 @@ function TicketSheet({
                     {t.entryType} {formatPx(t.fillPx ?? t.entry)}
                   </td>
                   <td className="px-4 py-2.5 font-mono text-xs tabular-nums">
-                    SL {formatPx(t.stop)}
-                    <div className="text-subtle">
-                      {(t.targets.length ? t.targets : [t.target]).map((px, i) => (
-                        <span key={`${px}-${i}`}>
-                          {i ? " · " : ""}TP{i + 1} {formatPx(px)}
-                        </span>
-                      ))}
-                    </div>
+                    {live ? (
+                      <>
+                        SL {formatPx(t.stop)}
+                        <div className="text-subtle">
+                          {(t.targets.length ? t.targets : [t.target]).map((px, i) => (
+                            <span key={`${px}-${i}`}>
+                              {i ? " · " : ""}TP{i + 1} {formatPx(px)}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        Closed {t.closedPx ? formatPx(t.closedPx) : "—"}
+                        <div className="text-subtle">WEEX {t.closeReason || t.status}</div>
+                      </>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 font-mono tabular-nums">{t.leverage}x</td>
                   <td className={cn("px-4 py-2.5 font-mono tabular-nums", signedClass(t.pnl ?? 0))}>

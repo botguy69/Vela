@@ -567,6 +567,7 @@ function matchWeexClose(
     fill_px?: string | number | null;
     entry?: string | number | null;
     qty?: string | number | null;
+    notional?: string | number | null;
   },
   closes: { symbol: string; side?: "long" | "short"; pnl: number; closePx: number; entry?: number; ts: number; qty?: number }[],
   used?: Set<string>,
@@ -576,29 +577,19 @@ function matchWeexClose(
   const t0 = new Date(row.filled_at ?? row.created_at).getTime();
   const t1 = new Date(row.updated_at ?? row.filled_at ?? row.created_at).getTime();
   const entry = n(row.fill_px) || n(row.entry);
-  const wantQty = n(row.qty);
   const cands = closes.filter((c) => {
     if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
     if (c.side && c.side !== side) return false;
     const id = `${c.symbol}|${c.side ?? "?"}|${c.entry ?? 0}|${c.ts}|${c.pnl}`;
     if (used?.has(id)) return false;
     if (c.ts && t0 > 0 && (c.ts < t0 - 4 * 3600_000 || c.ts > t1 + 48 * 3600_000)) return false;
+    const ed = entry > 0 && c.entry && c.entry > 0 ? Math.abs(c.entry - entry) / entry : 0;
+    if (c.entry && c.entry > 0 && ed > 0.008) return false;
     return true;
   });
   if (!cands.length) return null;
-  const scored = cands.map((c) => {
-    const ed =
-      entry > 0 && c.entry && c.entry > 0 ? Math.abs(c.entry - entry) / entry : 0.5;
-    const qd = wantQty > 0 && c.qty && c.qty > 0 ? Math.abs(c.qty - wantQty) / wantQty : 0.4;
-    const td = c.ts && t0 > 0 ? Math.abs(c.ts - t0) / 3600_000 : 9;
-    return { c, score: ed * 8000 + qd * 40 - Math.abs(c.pnl) * 2 + td * 0.02 };
-  });
-  scored.sort((a, b) => a.score - b.score);
-  const top = scored[0]!.c;
-  const ed = entry > 0 && top.entry && top.entry > 0 ? Math.abs(top.entry - entry) / entry : -1;
-  const td = top.ts && t0 > 0 ? Math.abs(top.ts - t0) / 3600_000 : 9;
-  if (ed >= 0 && ed > 0.008) return null;
-  if (ed < 0 && td > 12) return null;
+  cands.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
+  const top = cands[0]!;
   used?.add(`${top.symbol}|${top.side ?? "?"}|${top.entry ?? 0}|${top.ts}|${top.pnl}`);
   return top;
 }
@@ -634,10 +625,11 @@ async function restampWeexPnl(
       update auto_signals
       set pnl = ${book.pnl},
           closed_px = ${book.px || null},
+          fill_px = ${hit.entry && hit.entry > 0 ? hit.entry : n(row.fill_px)},
           status = ${book.st},
           close_reason = ${book.why},
-          tp1_hit = ${book.pnl > 0.3},
-          qty = ${hit.qty && hit.qty > n(row.qty) ? hit.qty : n(row.qty)},
+          tp1_hit = ${book.pnl > 0.3 || Boolean(row.be_moved)},
+          qty = ${Math.max(origQty(row), hit.qty ?? 0)},
           updated_at = now()
       where id = ${row.id} and user_id = ${userId}
     `;

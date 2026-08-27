@@ -446,33 +446,37 @@ export async function listWeexClosedPnl(creds: WeexCreds, symbol?: string): Prom
 }
 
 function collapseCloses(closes: WeexClose[]): WeexClose[] {
-  const m = new Map<string, WeexClose>();
+  const m = new Map<string, WeexClose[]>();
   for (const c of closes) {
     const ek = c.entry > 0 ? c.entry.toPrecision(5) : "x";
     const k = `${c.symbol}|${c.side ?? "?"}|${ek}`;
-    const prev = m.get(k);
-    if (!prev) {
-      m.set(k, { ...c });
+    const arr = m.get(k) ?? [];
+    arr.push(c);
+    m.set(k, arr);
+  }
+  const out: WeexClose[] = [];
+  for (const arr of m.values()) {
+    if (arr.length === 1) {
+      out.push(arr[0]!);
       continue;
     }
-    const bigger = Math.max(Math.abs(c.pnl), Math.abs(prev.pnl));
-    const smaller = Math.min(Math.abs(c.pnl), Math.abs(prev.pnl));
-    const ratio = bigger > 0 ? smaller / bigger : 1;
-    const sameSign = Math.sign(c.pnl) === Math.sign(prev.pnl) || prev.pnl === 0 || c.pnl === 0;
-    if (sameSign && (ratio > 0.82 || ratio < 0.4)) {
-      m.set(k, Math.abs(c.pnl) > Math.abs(prev.pnl) ? c : prev);
+    const maxP = arr.reduce((a, c) => (Math.abs(c.pnl) > Math.abs(a.pnl) ? c : a));
+    const sumP = arr.reduce((s, c) => s + c.pnl, 0);
+    if (Math.abs(maxP.pnl) >= Math.abs(sumP) * 0.82) {
+      out.push(maxP);
       continue;
     }
-    m.set(k, {
-      ...prev,
-      pnl: prev.pnl + c.pnl,
-      qty: Math.max(prev.qty, c.qty),
-      closePx: (c.ts || 0) >= (prev.ts || 0) ? c.closePx || prev.closePx : prev.closePx,
-      ts: Math.max(prev.ts || 0, c.ts || 0),
-      entry: prev.entry > 0 ? prev.entry : c.entry,
+    const last = arr.reduce((a, c) => ((c.ts || 0) >= (a.ts || 0) ? c : a));
+    out.push({
+      ...last,
+      pnl: sumP,
+      qty: Math.max(...arr.map((c) => c.qty)),
+      closePx: last.closePx || maxP.closePx,
+      entry: arr.find((c) => c.entry > 0)?.entry ?? last.entry,
+      ts: Math.max(...arr.map((c) => c.ts || 0)),
     });
   }
-  return [...m.values()];
+  return out;
 }
 
 export async function getWeexPositionQty(
