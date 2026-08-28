@@ -1009,6 +1009,22 @@ async function closeFlatOnWeex(
   }
 
   if (creds) {
+    const liveKeys = new Set(
+      (livePos ?? []).filter((p) => p.qty > 0).map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
+    );
+    const idle = await sql<{ weex_symbol: string }>`
+      select distinct weex_symbol from auto_signals
+      where user_id = ${userId} and weex_symbol is not null
+    `;
+    const { cancelWeexProtective } = await import("@/lib/weex.server");
+    for (const row of idle) {
+      const k = row.weex_symbol.replace(/_/g, "").toUpperCase();
+      if (liveKeys.has(k)) continue;
+      await cancelWeexProtective(creds, row.weex_symbol).catch(() => null);
+    }
+  }
+
+  if (creds) {
     const hanging = await sql<SignalRow>`
       select * from auto_signals
       where user_id = ${userId} and status in ('proposed','working')
