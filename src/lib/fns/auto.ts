@@ -182,13 +182,19 @@ function feeBePx(side: "long" | "short", entry: number, mark: number, weexBe: nu
   return want;
 }
 
-function huntHeader(liveL: number, liveS: number) {
+function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
   const at = liveL + liveS;
-  const room = Math.max(0, 4 - at);
-  if (room === 0) {
-    return `Not hunting — ${at} at-risk (${liveL}L/${liveS}S). Any mix; next after TP1/BE (max 6).`;
+  const live = liveTotal ?? at + beN;
+  if (live >= 3) {
+    return `Not hunting — ${live} live (${at} at-risk, ${beN} BE). Cap 3.`;
   }
-  return `Hunting 1 A+ per tick, any side (${liveL}L/${liveS}S at-risk, cap 4). Empty slots stay empty. Extra 2 after 2× TP1/BE.`;
+  if (at >= 2) {
+    return `Not hunting — 2 at-risk (${liveL}L/${liveS}S). Need 2× TP1/BE for the 3rd.`;
+  }
+  if (live >= 2 && beN < 2) {
+    return `Not hunting — ${at} at-risk, ${beN} BE. 3rd only after 2 are at BE.`;
+  }
+  return `Hunting 1 A+ per tick, any side (${liveL}L/${liveS}S at-risk). Cap 2, 3rd after 2× TP1/BE. 3% size.`;
 }
 
 function composePass(note: string | null, liveL: number, liveS: number, liveLines: string[]) {
@@ -226,7 +232,7 @@ function publicSettings(
     armed: Boolean(row.armed),
     hasKeys: Boolean(row.api_key_enc && row.api_secret_enc && row.api_pass_enc),
     keyHint: row.key_hint,
-    riskPct: liveEq != null ? phase.marginPct : 2,
+    riskPct: liveEq != null ? phase.marginPct : 3,
     accountUsd: equity,
     availableUsd: live?.available ?? 0,
     weexLive: Boolean(live),
@@ -1069,7 +1075,7 @@ async function trimToTwoPct(
     const spec = await specFor(coinByWeex(pos.weex_symbol));
     const entry = n(pos.fill_px ?? pos.entry);
     if (!(entry > 0) || !(equity > 0)) continue;
-    const wantQty = (equity * 0.02 * spec.maxLeverage) / entry;
+    const wantQty = (equity * 0.03 * spec.maxLeverage) / entry;
     const key = pos.weex_symbol.replace(/_/g, "").toUpperCase();
     const live =
       livePos?.find((p) => p.symbol.replace(/_/g, "").toUpperCase() === key || p.symbol === pos.weex_symbol)
@@ -1085,7 +1091,7 @@ async function trimToTwoPct(
       });
       notes.push(
         sent.ok
-          ? `Trimmed ${pos.weex_symbol} to ~2% margin`
+          ? `Trimmed ${pos.weex_symbol} to ~3% margin`
           : `Trim ${pos.weex_symbol} failed: ${sent.error.slice(0, 80)}`,
       );
       if (sent.ok) {
@@ -2054,8 +2060,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const atRisk = stillOpen.filter(
       (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
     );
-    const LIVE_CAP = 6;
-    const AT_RISK = 4;
+    const LIVE_CAP = 3;
+    const AT_RISK = 2;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 80, note: "A+ any side · 80%+." };
 
@@ -2102,12 +2108,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     let riskL = countAtRisk("long");
     let riskS = countAtRisk("short");
     const atRiskN = riskL + riskS;
-    const roomN = Math.max(0, AT_RISK - atRiskN);
+    const beNLive = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
+    const blocked =
+      atRiskN >= AT_RISK ||
+      liveN.length >= LIVE_CAP ||
+      (liveN.length >= 2 && beNLive < 2);
+    const roomN = blocked ? 0 : 1;
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
-      : roomN === 0
-        ? `Not hunting — ${atRiskN} at-risk (${riskL}L/${riskS}S). Any mix; next after TP1/BE (max 6).`
-        : `Hunting 1 A+ per tick, any side (${riskL}L/${riskS}S at-risk, cap 4). Empty slots stay empty. Extra 2 after 2× TP1/BE.`;
+      : huntHeader(riskL, riskS, beNLive, liveN.length);
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -2163,7 +2172,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               updated_at = now()
           where id = ${row.id} and user_id = ${userId}
         `;
-        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 4 at-risk`);
+        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 2 at-risk`);
       }
       for (const row of stillOpenRaw) {
         const sym = row.weex_symbol.replace(/_/g, "").toUpperCase();
@@ -2210,12 +2219,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           await sql`
             update auto_signals
             set status = 'skipped',
-                close_reason = ${"Cancelled — 4 at-risk already"},
+                close_reason = ${"Cancelled — 2 at-risk already"},
                 pnl = 0,
                 updated_at = now()
             where id = ${row.id} and user_id = ${userId}
           `;
-          notes.push(`${row.weex_symbol} limit cancelled — 4 at-risk already`);
+          notes.push(`${row.weex_symbol} limit cancelled — 2 at-risk already`);
           continue;
         }
         slotN += 1;
@@ -2239,15 +2248,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       }
     }
 
-    if (atRiskN >= AT_RISK) {
+    if (blocked) {
       const names = [
         ...liveN.map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
         ...dbFilled.map((s) => s.weex_symbol),
       ];
-      const beN = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
       huntTape = [huntStatus, ...whyLive].filter(Boolean).join("\n");
       notes.push(
-        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk any mix. Next after TP1/BE. ${beN} leftover(s) · cap 6.`,
+        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk, ${beNLive} BE · cap 3.`,
       );
     } else if (settings.armed && liveN.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
@@ -2365,7 +2373,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             if (room <= 0) {
-              whyNot.push(`${tag} 4 at-risk already`);
+              whyNot.push(`${tag} book full`);
               continue;
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
@@ -2580,11 +2588,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (tookLines.length) tookLine = tookLines.join("\n");
           }
           const at2 = riskL + riskS;
-          const room2 = Math.max(0, AT_RISK - at2);
-          const huntNow =
-            room2 === 0
-              ? `Not hunting — ${at2} at-risk (${riskL}L/${riskS}S). Any mix; next after TP1/BE (max 6).`
-              : `Hunting 1 A+ per tick, any side (${riskL}L/${riskS}S at-risk, cap 4). Empty slots stay empty. Extra 2 after 2× TP1/BE.`;
+          const be2 = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
+          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened);
           huntTape = [huntNow, compass.note, ...whyLive, tookLine, eyeLine, aPlusLine].filter(Boolean).join("\n");
         }
       }
@@ -2592,8 +2597,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       huntTape = huntStatus;
       notes.push("Disarmed. No new orders.");
     } else if (stillOpen.length >= LIVE_CAP) {
-      huntTape = `${huntStatus}\nLive cap (6 names). Waiting on an exit.`;
-      notes.push("Live cap (6 names). Waiting on an exit.");
+      huntTape = `${huntStatus}\nLive cap (3 names). Waiting on an exit.`;
+      notes.push("Live cap (3 names). Waiting on an exit.");
     } else {
       huntTape = huntTape || huntStatus;
     }
