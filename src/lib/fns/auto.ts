@@ -767,16 +767,18 @@ async function ensureTakes(
   const mark = live.mark ?? 0;
   const side = pos.side === "short" ? "SHORT" : "LONG";
   const { taggedTake } = await import("@/lib/ta");
+  const afterTp1 = Boolean(pos.tp1_hit) || Boolean(pos.be_moved);
   const rawTps = parseNums(pos.targets).slice(0, 2);
   const tps: number[] = [];
-  for (const p of rawTps) {
-    const px = Number(formatWeexPx(p, spec.pricePrecision));
+  for (let i = 0; i < rawTps.length; i += 1) {
+    if (afterTp1 && i === 0) continue;
+    const px = Number(formatWeexPx(rawTps[i]!, spec.pricePrecision));
     if (!(px > 0)) continue;
     if (tps.some((t) => t === px)) continue;
     if (mark > 0 && taggedTake(sideLc, mark, px)) continue;
     tps.push(px);
   }
-  if (tps.length < 2 && stopPx > 0) {
+  if (!afterTp1 && tps.length < 2 && stopPx > 0) {
     const entryPx = n(pos.fill_px) || n(pos.entry) || mark;
     const risk = Math.abs(entryPx - stopPx);
     if (risk > 0 && entryPx > 0 && risk / entryPx >= 0.004) {
@@ -801,8 +803,9 @@ async function ensureTakes(
   const sql = await getSql();
   const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
   const oid = (tag: string) => `vela${tag}${pos.id}`.slice(0, 36);
-  const needTp = Math.min(2, Math.max(1, tps.length));
-  if (trimmed.haveSl && trimmed.haveTp >= needTp && stopOverride == null) {
+  const needTp = afterTp1 ? Math.min(1, Math.max(0, tps.length)) : Math.min(2, Math.max(1, tps.length));
+  const maxProtect = afterTp1 ? 2 : 3;
+  if (trimmed.haveSl && trimmed.haveTp >= needTp && trimmed.listed <= maxProtect && stopOverride == null) {
     const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set)@?\d*/g, "").trim()} tps:set`.slice(0, 500);
     await sql`update auto_signals set weex_resp = ${stamp}, updated_at = now() where id = ${pos.id}`;
     pos.weex_resp = stamp;
@@ -824,7 +827,7 @@ async function ensureTakes(
     pos.stop = stopPx;
     return;
   }
-  const extras = trimmed.listed > 3 || trimmed.wiped;
+  const extras = trimmed.listed > maxProtect || trimmed.wiped;
   if (extras) {
     const { cancelWeexOpenLimits } = await import("@/lib/weex.server");
     await cancelWeexProtective(creds, pos.weex_symbol);
