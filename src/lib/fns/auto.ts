@@ -2094,7 +2094,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         if ((s.side === "short" ? "short" : "long") !== side) continue;
         if (flattened.has(s.weex_symbol)) continue;
         if (s.status === "filled" && s.be_moved && s.tp1_hit) continue;
-        if (s.status !== "filled" && s.status !== "working" && s.status !== "proposed") continue;
+        if (s.status === "filled") {
+          const k = s.weex_symbol.replace(/_/g, "").toUpperCase();
+          if (!liveN.some((p) => p.qty > 0 && p.symbol.replace(/_/g, "").toUpperCase() === k)) continue;
+        } else if (s.status !== "working" && s.status !== "proposed") continue;
         syms.add(s.weex_symbol.replace(/_/g, "").toUpperCase());
       }
       return syms.size;
