@@ -188,7 +188,7 @@ function huntHeader(liveL: number, liveS: number) {
   if (room === 0) {
     return `Not hunting — ${at} at-risk (${liveL}L/${liveS}S). Any mix; next after TP1/BE (max 6).`;
   }
-  return `Hunting ${room} A+ slot(s) any side (${liveL}L/${liveS}S at-risk, cap 4). 4L, 4S, or a mix — best A+ only. Extra 2 after 2× TP1/BE (max 6).`;
+  return `Hunting 1 A+ per tick, any side (${liveL}L/${liveS}S at-risk, cap 4). Empty slots stay empty. Extra 2 after 2× TP1/BE.`;
 }
 
 function composePass(note: string | null, liveL: number, liveS: number, liveLines: string[]) {
@@ -2084,7 +2084,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ? "Disarmed. Not hunting."
       : roomN === 0
         ? `Not hunting — ${atRiskN} at-risk (${riskL}L/${riskS}S). Any mix; next after TP1/BE (max 6).`
-        : `Hunting ${roomN} A+ slot(s) any side (${riskL}L/${riskS}S at-risk, cap 4). 4L, 4S, or a mix — best A+ only. Extra 2 after 2× TP1/BE (max 6).`;
+        : `Hunting 1 A+ per tick, any side (${riskL}L/${riskS}S at-risk, cap 4). Empty slots stay empty. Extra 2 after 2× TP1/BE.`;
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -2255,6 +2255,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             spec: Awaited<ReturnType<typeof specFor>>;
           }[] = [];
           let room = roomN;
+          const [burst] = await sql<{ n: number }>`
+            select count(*)::int as n from auto_signals
+            where user_id = ${userId}
+              and created_at > now() - interval '4 minutes'
+              and status in ('proposed','working','filled')
+          `;
+          if ((burst?.n ?? 0) >= 1) room = 0;
           let openLimits = stillOpenRaw.filter(
             (s) => s.status === "working" || s.status === "proposed",
           ).length;
@@ -2431,10 +2438,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             batch.push({ sized: sz, spec });
             if (sz.entryType === "limit") openLimits += 1;
             room -= 1;
-            if (room <= 0) break;
+            break;
           }
 
           let tookLine = veto;
+          if (!batch.length && (burst?.n ?? 0) >= 1) {
+            tookLine = "One A+ per tick — just placed. Empty slots stay empty.";
+          }
 
           if (!batch.length) {
             notes.push(veto);
@@ -2551,7 +2561,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const huntNow =
             room2 === 0
               ? `Not hunting — ${at2} at-risk (${riskL}L/${riskS}S). Any mix; next after TP1/BE (max 6).`
-              : `Hunting ${room2} A+ slot(s) any side (${riskL}L/${riskS}S at-risk, cap 4). 4L, 4S, or a mix — best A+ only. Extra 2 after 2× TP1/BE (max 6).`;
+              : `Hunting 1 A+ per tick, any side (${riskL}L/${riskS}S at-risk, cap 4). Empty slots stay empty. Extra 2 after 2× TP1/BE.`;
           huntTape = [huntNow, compass.note, ...whyLive, tookLine, eyeLine, aPlusLine].filter(Boolean).join("\n");
         }
       }

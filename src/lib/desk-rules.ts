@@ -348,15 +348,14 @@ export function eliteScalp(
   bar: number,
   bias?: "long" | "short" | "chop",
 ): boolean {
-  if (conf < 80) return false;
-  if (
+  if (conf < Math.max(80, bar)) return false;
+  const structure =
     /double (top|bottom)|failed range|vol fade|washout RSI|climax rejection|Dry-up at|Trend cooling|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-8])|Overbought RSI (7[2-9]|8\d)/i.test(
       thesis,
-    )
-  ) {
-    return true;
-  }
-  return Boolean(bias && bias !== "chop" && /Continuation/i.test(thesis));
+    );
+  if (structure) return true;
+  if (bias && bias !== "chop" && /Continuation/i.test(thesis)) return conf >= 86;
+  return false;
 }
 
 export const APLUS_MENU =
