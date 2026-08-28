@@ -351,15 +351,14 @@ async function closedStats(
         )
       )
   `;
-  const closeAt = (r: { filled_at?: string | null; updated_at?: string | null }) => {
-    const u = new Date(r.updated_at ?? 0).getTime();
-    const f = new Date(r.filled_at ?? 0).getTime();
-    return Number.isFinite(u) && u > f ? u : f;
+  const closeAt = (r: { filled_at?: string | null; created_at?: string | null }) => {
+    const f = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
+    return Number.isFinite(f) ? f : 0;
   };
   const uniq = uniqueFills(rows).sort((a, b) => closeAt(a) - closeAt(b));
   const tFrom = statsFrom ? new Date(statsFrom).getTime() : 0;
-  let window = tFrom > 0 ? uniq.filter((r) => closeAt(r) >= tFrom) : uniq;
-  if (window.length >= 40 || tFrom <= 0) {
+  let window = tFrom > 0 ? uniq.filter((r) => closeAt(r) >= tFrom - 2000) : uniq;
+  if (tFrom <= 0) {
     window = uniq.slice(-15);
     const pin = window[0] ? new Date(closeAt(window[0])).toISOString() : null;
     if (pin) {
@@ -368,22 +367,20 @@ async function closedStats(
   }
   const closed = window.length;
   const wins = window.filter((r) => n(r.pnl) > 0).length;
-  const win$ = window.map((r) => n(r.pnl)).filter((p) => p > 0);
-  const loss$ = window.map((r) => n(r.pnl)).filter((p) => p < 0);
+  const rOf = (r: (typeof window)[number]) => {
+    const unit = oneRUsd(r);
+    if (!(unit > 0.05)) return null;
+    return n(r.pnl) / unit;
+  };
+  const winR = window.map(rOf).filter((x): x is number => x != null && x > 0);
+  const lossR = window.map(rOf).filter((x): x is number => x != null && x < 0);
   const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
-  const sls = window.filter(
-    (r) => n(r.pnl) < 0 && /Hit stop/i.test(String(r.close_reason ?? "")),
-  );
-  const slMean = avg(sls.map((r) => Math.abs(n(r.pnl))));
-  const lossMean = avg(loss$.map((p) => Math.abs(p)));
-  const stopMean = avg(window.map((r) => oneRUsd(r)).filter((x) => x > 0.05));
-  const unit = slMean > 0.2 ? slMean : lossMean > 0.2 ? lossMean : stopMean;
   return {
     closed,
     wins,
     winRate: closed > 0 ? (wins / closed) * 100 : 0,
-    avgWinR: unit > 0.05 ? avg(win$) / unit : 0,
-    avgLossR: unit > 0.05 && loss$.length ? -1 : 0,
+    avgWinR: avg(winR),
+    avgLossR: avg(lossR),
     names: [...window]
       .reverse()
       .map((r) => {
