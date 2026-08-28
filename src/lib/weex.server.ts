@@ -873,12 +873,43 @@ export async function placeWeexTake(
       clientAlgoId: order.clientOid.slice(0, 36),
       planType: "TAKE_PROFIT",
       triggerPrice: order.tp,
-      executePrice: order.tp,
       quantity: order.quantity,
       positionSide: order.positionSide,
       triggerPriceType: "MARK_PRICE",
     },
   });
+}
+
+export async function cancelWeexOpenLimits(
+  creds: WeexCreds,
+  symbol: string,
+  keepOid?: string | null,
+) {
+  const paths = [
+    { path: "/capi/v3/openOrders", query: { symbol } as Record<string, string> },
+    { path: "/capi/v3/openOrders", query: { symbol, productType: "USDT-FUTURES" } },
+  ];
+  const keep = (keepOid ?? "").slice(0, 36);
+  const seen = new Set<string>();
+  for (const p of paths) {
+    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
+    if (!res.ok) continue;
+    for (const row of rowsFrom(res.data)) {
+      const o = row as Record<string, unknown>;
+      const oid = String(o.clientOid ?? o.clientOrderId ?? o.origClientOrderId ?? "");
+      const id = String(o.orderId ?? o.id ?? oid);
+      if (!id || seen.has(id)) continue;
+      if (keep && (oid === keep || id === keep)) continue;
+      seen.add(id);
+      await weexRequest({
+        creds,
+        method: "DELETE",
+        path: "/capi/v3/order",
+        query: { symbol, orderId: id, origClientOrderId: oid.slice(0, 36) },
+      }).catch(() => null);
+    }
+    if (seen.size) break;
+  }
 }
 
 export async function hasWeexWorkingOrder(
