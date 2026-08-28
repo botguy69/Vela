@@ -66,7 +66,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1 · 2% · 2L+2S.",
+      note: "Stage 1 · 2% · 4 at-risk any mix.",
     };
   }
   if (equity < 1000) {

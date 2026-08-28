@@ -30,12 +30,11 @@ export function sameSideBeta(open: { weex: string; side: Side }[], side: Side): 
 }
 
 export function blocksBeta(
-  open: { weex: string; side: Side }[],
-  next: { weex: string; side: Side },
-  opts?: { diverges?: boolean },
+  _open: { weex: string; side: Side }[],
+  _next: { weex: string; side: Side },
+  _opts?: { diverges?: boolean },
 ): boolean {
-  const same = open.filter((p) => p.side === next.side && p.weex !== next.weex);
-  return same.length >= 2;
+  return false;
 }
 
 export function sma(values: number[], period: number): number | null {
@@ -461,7 +460,7 @@ export function writeDeskNote(opts: {
     `${opts.phase}. Equity $${eq.toFixed(2)}. Margin cap ${opts.marginPct.toFixed(1)}% of the WEEX wallet, coin-max lev, cross. The stop is the SL — not isolated-style “liq in 0.25%.” Unused wallet backs the ticket. Residual risk is a gap through the SL, not liquidation before it.`,
   );
   if (!opts.tickets.length) {
-    lines.push("Nothing on. Waiting for a 1h idea that tags the 15m mean, clears spread, and fits 2L+2S.");
+    lines.push("Nothing on. Waiting for an A+ 1h idea that tags the 15m, clears spread, and fits 4 at-risk any mix.");
     if (opts.correction) lines.push(opts.correction);
     return lines.join(" ");
   }

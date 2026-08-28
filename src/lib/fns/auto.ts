@@ -183,13 +183,12 @@ function feeBePx(side: "long" | "short", entry: number, mark: number, weexBe: nu
 }
 
 function huntHeader(liveL: number, liveS: number) {
-  const needL = Math.max(0, 2 - liveL);
-  const needS = Math.max(0, 2 - liveS);
-  if (needL === 0 && needS === 0) {
-    return "Not hunting — 2 longs and 2 shorts already at risk. Next after TP1/BE.";
+  const at = liveL + liveS;
+  const room = Math.max(0, 4 - at);
+  if (room === 0) {
+    return `Not hunting — ${at} at-risk (${liveL}L/${liveS}S). Any mix; next after TP1/BE (max 6).`;
   }
-  const need = [needL ? `${needL} long` : "", needS ? `${needS} short` : ""].filter(Boolean).join(" + ");
-  return `Hunting up to 2L+2S (${liveL}L/${liveS}S live). Need ${need}. A+ scalps only — will not fill empty slots.`;
+  return `Hunting ${room} A+ slot(s) any side (${liveL}L/${liveS}S at-risk, cap 4). 4L, 4S, or a mix — best A+ only. Extra 2 after 2× TP1/BE (max 6).`;
 }
 
 function composePass(note: string | null, liveL: number, liveS: number, liveLines: string[]) {
@@ -445,6 +444,7 @@ function mapSignal(row: SignalRow) {
     review: row.review,
     targets: parseNums(row.targets),
     beMoved: Boolean(row.be_moved),
+    tp1Hit: Boolean(row.tp1_hit),
     plan: row.plan,
     score: row.score == null ? null : n(row.score),
     confidence: row.confidence == null ? null : n(row.confidence),
@@ -581,19 +581,27 @@ function matchWeexClose(
   const side = row.side === "short" ? "short" : "long";
   const t0 = new Date(row.filled_at ?? row.created_at).getTime();
   const t1 = new Date(row.updated_at ?? row.filled_at ?? row.created_at).getTime();
+  const tClose = t1 > t0 ? t1 : t0;
   const entry = n(row.fill_px) || n(row.entry);
   const cands = closes.filter((c) => {
     if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
     if (c.side && c.side !== side) return false;
     const id = `${c.symbol}|${c.side ?? "?"}|${c.entry ?? 0}|${c.ts}|${c.pnl}`;
     if (used?.has(id)) return false;
-    if (c.ts && t0 > 0 && (c.ts < t0 - 4 * 3600_000 || c.ts > t1 + 48 * 3600_000)) return false;
+    if (c.ts && t0 > 0 && (c.ts < t0 - 30 * 60_000 || c.ts > tClose + 12 * 3600_000)) return false;
     const ed = entry > 0 && c.entry && c.entry > 0 ? Math.abs(c.entry - entry) / entry : 0;
     if (c.entry && c.entry > 0 && ed > 0.008) return false;
     return true;
   });
   if (!cands.length) return null;
-  cands.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
+  cands.sort((a, b) => {
+    const da = Math.abs((a.ts || 0) - tClose);
+    const db = Math.abs((b.ts || 0) - tClose);
+    if (Math.abs(da - db) > 60_000) return da - db;
+    const ea = entry > 0 && (a.entry ?? 0) > 0 ? Math.abs((a.entry ?? 0) - entry) / entry : 1;
+    const eb = entry > 0 && (b.entry ?? 0) > 0 ? Math.abs((b.entry ?? 0) - entry) / entry : 1;
+    return ea - eb;
+  });
   const top = cands[0]!;
   used?.add(`${top.symbol}|${top.side ?? "?"}|${top.entry ?? 0}|${top.ts}|${top.pnl}`);
   return top;
@@ -618,7 +626,27 @@ async function restampWeexPnl(
   for (const row of rows) {
     if (/^Limit |^Duplicate|^Replaced by|^Cancelled/.test(String(row.close_reason ?? ""))) continue;
     const hit = matchWeexClose(row, closes, used);
-    if (!hit) continue;
+    if (!hit) {
+      const entry = n(row.fill_px) || n(row.entry);
+      const ghost = closes.find((c) => {
+        if (c.symbol.replace(/_/g, "").toUpperCase() !== row.weex_symbol.replace(/_/g, "").toUpperCase()) return false;
+        if (c.side && c.side !== (row.side === "short" ? "short" : "long")) return false;
+        const ed = entry > 0 && (c.entry ?? 0) > 0 ? Math.abs((c.entry ?? 0) - entry) / entry : 1;
+        return ed <= 0.008;
+      });
+      if (ghost && Math.abs(n(row.pnl) - ghost.pnl) > 1) {
+        await sql`
+          update auto_signals
+          set pnl = 0,
+              close_reason = ${"Duplicate WEEX fill"},
+              status = 'skipped',
+              updated_at = now()
+          where id = ${row.id} and user_id = ${userId}
+        `;
+        notes.push(`${row.weex_symbol} duplicate ticket — dropped from WR`);
+      }
+      continue;
+    }
     const book = applyWeexHit(hit, row);
     if (
       Math.abs(book.pnl - n(row.pnl)) < 0.05 &&
@@ -906,15 +934,28 @@ async function closeFlatOnWeex(
     const q = await getWeexPositionQty(creds, pos.weex_symbol);
     if (q == null || q > 0) continue;
     const { listWeexClosedPnl } = await import("@/lib/weex.server");
-    const hit = matchWeexClose(pos, await listWeexClosedPnl(creds, pos.weex_symbol).catch(() => []));
+    let hit = matchWeexClose(pos, await listWeexClosedPnl(creds, pos.weex_symbol).catch(() => []));
+    if (!hit) hit = matchWeexClose(pos, await listWeexClosedPnl(creds).catch(() => []));
     const last = await getWeexLast(pos.weex_symbol).catch(() => n(pos.fill_px ?? pos.entry));
+    const entry = n(pos.fill_px) || n(pos.entry);
+    const qty = origQty(pos);
+    const guess =
+      entry > 0 && last > 0 && qty > 0
+        ? pos.side === "short"
+          ? (entry - last) * qty
+          : (last - entry) * qty
+        : 0;
     const book = hit
       ? applyWeexHit(hit, pos)
       : {
-          pnl: 0,
+          pnl: guess,
           px: last,
-          why: "Closed on WEEX",
-          st: "skipped" as const,
+          why:
+            guess <= -0.05 ? "Flattened" : guess >= 0.15 ? "Closed in green" : "Closed on WEEX",
+          st: (guess >= 0.05 ? "targeted" : guess <= -0.05 ? "stopped" : "skipped") as
+            | "targeted"
+            | "stopped"
+            | "skipped",
         };
     await sql`
       update auto_signals
@@ -1191,8 +1232,10 @@ export const getAutoDesk = createServerFn({ method: "GET" })
         t.pnl = t.side === "short" ? (entry - last) * qty : (last - entry) * qty;
       }
     }
-    const liveL = mapped.filter((t) => (t.liveOnWeex || t.status === "working") && t.side === "long").length;
-    const liveS = mapped.filter((t) => (t.liveOnWeex || t.status === "working") && t.side === "short").length;
+    const atRiskTick = (t: (typeof mapped)[number]) =>
+      (t.liveOnWeex || t.status === "working") && !(t.beMoved && t.tp1Hit);
+    const liveL = mapped.filter((t) => atRiskTick(t) && t.side === "long").length;
+    const liveS = mapped.filter((t) => atRiskTick(t) && t.side === "short").length;
     const { whyTookTrade } = await import("@/lib/desk-rules");
     const liveLines = mapped
       .filter((t) => t.liveOnWeex || t.status === "working")
@@ -1992,9 +2035,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
     );
     const LIVE_CAP = 6;
-    const SIDE_CAP = 2;
+    const AT_RISK = 4;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
-    const bar = { minConf: 80, note: "A+ longs and shorts · 80%+." };
+    const bar = { minConf: 80, note: "A+ any side · 80%+." };
 
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
     const beFree = new Set(
@@ -2035,13 +2078,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     };
     let riskL = countAtRisk("long");
     let riskS = countAtRisk("short");
-    const needL = Math.max(0, SIDE_CAP - riskL);
-    const needS = Math.max(0, SIDE_CAP - riskS);
+    const atRiskN = riskL + riskS;
+    const roomN = Math.max(0, AT_RISK - atRiskN);
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
-      : needL === 0 && needS === 0
-        ? "Not hunting — 2 longs and 2 shorts already at risk. Next after TP1/BE."
-        : `Hunting up to 2L+2S (${riskL}L/${riskS}S live). Need ${[needL ? `${needL} long` : "", needS ? `${needS} short` : ""].filter(Boolean).join(" + ")}. A+ scalps only — will not fill empty slots.`;
+      : roomN === 0
+        ? `Not hunting — ${atRiskN} at-risk (${riskL}L/${riskS}S). Any mix; next after TP1/BE (max 6).`
+        : `Hunting ${roomN} A+ slot(s) any side (${riskL}L/${riskS}S at-risk, cap 4). 4L, 4S, or a mix — best A+ only. Extra 2 after 2× TP1/BE (max 6).`;
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -2078,19 +2121,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const sym = s.weex_symbol.replace(/_/g, "").toUpperCase();
         if (SKIP_WEEX.has(sym) || !TOP25_WEEX.includes(sym)) return true;
         if (filledSym.has(sym)) return true;
-        const side = s.side === "short" ? "short" : "long";
-        const filledSide = liveN.filter(
-          (p) =>
-            (p.side === "short" ? "short" : "long") === side &&
-            !beFree.has(p.symbol.replace(/_/g, "").toUpperCase()),
-        ).length;
-        return filledSide >= SIDE_CAP;
+        return atRiskN >= AT_RISK;
       });
       const { cancelWeexOrder, cancelWeexProtective, flattenWeex } = await import("@/lib/weex.server");
       for (const row of extras) {
         const sym = row.weex_symbol.replace(/_/g, "").toUpperCase();
         const ban = SKIP_WEEX.has(sym) || !TOP25_WEEX.includes(sym);
-        const why = ban ? "Cancelled — off the book (no history)" : "Cancelled — duplicate or side cap (2)";
+        const why = ban ? "Cancelled — off the book (no history)" : "Cancelled — duplicate or at-risk full";
         if (row.client_oid) {
           await cancelWeexOrder(credsGate2, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
         }
@@ -2103,7 +2140,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               updated_at = now()
           where id = ${row.id} and user_id = ${userId}
         `;
-        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 2 already on that side`);
+        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 4 at-risk`);
       }
       for (const row of stillOpenRaw) {
         const sym = row.weex_symbol.replace(/_/g, "").toUpperCase();
@@ -2139,13 +2176,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       );
       leftoverWorking.sort((a, b) => n(b.confidence) - n(a.confidence));
       const keyOf = (sym: string) => sym.replace(/_/g, "").toUpperCase();
-      let slotL = liveN.filter((p) => p.side !== "short" && !beFree.has(keyOf(p.symbol))).length;
-      let slotS = liveN.filter((p) => p.side === "short" && !beFree.has(keyOf(p.symbol))).length;
+      let slotN = liveN.filter((p) => !beFree.has(keyOf(p.symbol))).length;
       parked = null;
       for (const row of leftoverWorking) {
-        const side = row.side === "short" ? "short" : "long";
-        const full = side === "short" ? slotS >= SIDE_CAP : slotL >= SIDE_CAP;
-        if (full) {
+        if (slotN >= AT_RISK) {
           if (row.client_oid) {
             await cancelWeexOrder(credsGate2, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
           }
@@ -2153,16 +2187,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           await sql`
             update auto_signals
             set status = 'skipped',
-                close_reason = ${"Cancelled — 2 already on that side"},
+                close_reason = ${"Cancelled — 4 at-risk already"},
                 pnl = 0,
                 updated_at = now()
             where id = ${row.id} and user_id = ${userId}
           `;
-          notes.push(`${row.weex_symbol} limit cancelled — 2 already on that side`);
+          notes.push(`${row.weex_symbol} limit cancelled — 4 at-risk already`);
           continue;
         }
-        if (side === "short") slotS += 1;
-        else slotL += 1;
+        slotN += 1;
         if (!parked) parked = row;
       }
       if (parked) {
@@ -2183,7 +2216,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       }
     }
 
-    if (riskL >= SIDE_CAP && riskS >= SIDE_CAP) {
+    if (atRiskN >= AT_RISK) {
       const names = [
         ...liveN.map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
         ...dbFilled.map((s) => s.weex_symbol),
@@ -2191,7 +2224,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const beN = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
       huntTape = [huntStatus, ...whyLive].filter(Boolean).join("\n");
       notes.push(
-        `${[...new Set(names)].join(" ")} · 2 long + 2 short at-risk. Next after TP1/BE. ${beN} leftover(s) · cap 6.`,
+        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk any mix. Next after TP1/BE. ${beN} leftover(s) · cap 6.`,
       );
     } else if (settings.armed && liveN.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
@@ -2216,27 +2249,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const busy = new Set(
             stillOpen.filter((s) => s.status === "filled").map((s) => s.weex_symbol),
           );
-          const betaBook = (weexBook ?? [])
-            .filter((p) => {
-              const sym = p.symbol.replace(/_/g, "").toUpperCase();
-              return (
-                p.qty > 0 &&
-                !flattened.has(p.symbol) &&
-                !flattened.has(sym) &&
-                !beFree.has(sym)
-              );
-            })
-            .map((p) => ({
-              weex: p.symbol.replace(/_/g, "").toUpperCase(),
-              side: ((p as { side?: string }).side === "short" ? "short" : "long") as "long" | "short",
-            }));
 
           const batch: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
             spec: Awaited<ReturnType<typeof specFor>>;
           }[] = [];
-          let roomL = needL;
-          let roomS = needS;
+          let room = roomN;
           let openLimits = stillOpenRaw.filter(
             (s) => s.status === "working" || s.status === "proposed",
           ).length;
@@ -2259,16 +2277,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const ordered = [...raw].sort((a, b) => {
             const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf, compass.bias) ? 1 : 0;
             const bA = rules.eliteScalp(b.thesis ?? "", b.confidence ?? scoreToConf(b.score), bar.minConf, compass.bias) ? 1 : 0;
-            if (needS > 0 && needL === 0) {
-              const as = a.side === "short" ? 1 : 0;
-              const bs = b.side === "short" ? 1 : 0;
-              if (as !== bs) return bs - as;
-            }
-            if (needL > 0 && needS === 0) {
-              const al = a.side === "long" ? 1 : 0;
-              const bl = b.side === "long" ? 1 : 0;
-              if (al !== bl) return bl - al;
-            }
             if (aA !== bA) return bA - aA;
             return (b.confidence ?? b.score) - (a.confidence ?? a.score);
           });
@@ -2280,8 +2288,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const conf = s.confidence ?? scoreToConf(s.score);
             if (!rules.eliteScalp(s.thesis ?? "", conf, bar.minConf, compass.bias)) return false;
             if (held.has(s.weexSymbol)) return false;
-            if (s.side === "long" && needL <= 0) return false;
-            if (s.side === "short" && needS <= 0) return false;
             return true;
           });
           const byKind = new Map<string, (typeof aPlusList)[0]>();
@@ -2328,12 +2334,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} already live on WEEX`);
               continue;
             }
-            if (pick.side === "long" && (riskL >= SIDE_CAP || roomL <= 0)) {
-              whyNot.push(`${tag} long book full`);
-              continue;
-            }
-            if (pick.side === "short" && (riskS >= SIDE_CAP || roomS <= 0)) {
-              whyNot.push(`${tag} short book full`);
+            if (room <= 0) {
+              whyNot.push(`${tag} 4 at-risk already`);
               continue;
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
@@ -2357,14 +2359,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             } else if (!diverges) {
               veto = `${pick.weexSymbol} ${pick.side} — BTC chop, not A+`;
               whyNot.push(`${tag} BTC chop`);
-              continue;
-            }
-            if (rules.blocksBeta(betaBook, { weex: pick.weexSymbol, side: pick.side }, { diverges })) {
-              const same = betaBook.find((p) => p.side === pick.side);
-              veto = same
-                ? `Already ${riskL}L/${riskS}S at risk. ${pick.weexSymbol} ${pick.side} would be a 3rd same-side.`
-                : "Same-side book is full.";
-              whyNot.push(`${tag} 2 already on that side`);
               continue;
             }
             const fadeVsBook =
@@ -2436,17 +2430,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             batch.push({ sized: sz, spec });
             if (sz.entryType === "limit") openLimits += 1;
-            if (sz.side === "long") roomL -= 1;
-            else roomS -= 1;
-            if (roomL <= 0 && roomS <= 0) break;
+            room -= 1;
+            if (room <= 0) break;
           }
 
-          let tookLine =
-            needL > 0 && needS === 0
-              ? "No A+ long this pass (double bottom, pin low, washout, bull engulf). Short book is full. Slots stay empty."
-              : needS > 0 && needL === 0
-                ? "No A+ short this pass (pin high, engulf, double top, climax, overbought, trend cooling). Slots stay empty."
-                : veto;
+          let tookLine = veto;
 
           if (!batch.length) {
             notes.push(veto);
@@ -2558,12 +2546,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             if (tookLines.length) tookLine = tookLines.join("\n");
           }
-          const needL2 = Math.max(0, SIDE_CAP - riskL);
-          const needS2 = Math.max(0, SIDE_CAP - riskS);
+          const at2 = riskL + riskS;
+          const room2 = Math.max(0, AT_RISK - at2);
           const huntNow =
-            needL2 === 0 && needS2 === 0
-              ? "Not hunting — 2 longs and 2 shorts already at risk. Next after TP1/BE."
-              : `Hunting up to 2L+2S (${riskL}L/${riskS}S live). Need ${[needL2 ? `${needL2} long` : "", needS2 ? `${needS2} short` : ""].filter(Boolean).join(" + ")}. A+ scalps only — will not fill empty slots.`;
+            room2 === 0
+              ? `Not hunting — ${at2} at-risk (${riskL}L/${riskS}S). Any mix; next after TP1/BE (max 6).`
+              : `Hunting ${room2} A+ slot(s) any side (${riskL}L/${riskS}S at-risk, cap 4). 4L, 4S, or a mix — best A+ only. Extra 2 after 2× TP1/BE (max 6).`;
           huntTape = [huntNow, compass.note, ...whyLive, tookLine, eyeLine, aPlusLine].filter(Boolean).join("\n");
         }
       }

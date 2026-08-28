@@ -446,32 +446,37 @@ export async function listWeexClosedPnl(creds: WeexCreds, symbol?: string): Prom
 }
 
 function collapseCloses(closes: WeexClose[]): WeexClose[] {
-  const m = new Map<string, WeexClose[]>();
-  for (const c of closes) {
-    const ek = c.entry > 0 ? c.entry.toPrecision(5) : "x";
-    const k = `${c.symbol}|${c.side ?? "?"}|${ek}`;
-    const arr = m.get(k) ?? [];
-    arr.push(c);
-    m.set(k, arr);
+  const sorted = [...closes].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const bucket = (c: WeexClose) =>
+    `${c.symbol}|${c.side ?? "?"}|${c.entry > 0 ? c.entry.toPrecision(5) : "x"}`;
+  const groups: WeexClose[][] = [];
+  for (const c of sorted) {
+    const k = bucket(c);
+    let g: WeexClose[] | undefined;
+    for (let i = groups.length - 1; i >= 0; i -= 1) {
+      const arr = groups[i]!;
+      if (bucket(arr[0]!) !== k) continue;
+      const latest = Math.max(...arr.map((x) => x.ts || 0));
+      if (Math.abs((c.ts || 0) - latest) <= 2 * 3600_000) {
+        g = arr;
+        break;
+      }
+    }
+    if (g) g.push(c);
+    else groups.push([c]);
   }
   const out: WeexClose[] = [];
-  for (const arr of m.values()) {
+  for (const arr of groups) {
     if (arr.length === 1) {
       out.push(arr[0]!);
-      continue;
-    }
-    const maxP = arr.reduce((a, c) => (Math.abs(c.pnl) > Math.abs(a.pnl) ? c : a));
-    const sumP = arr.reduce((s, c) => s + c.pnl, 0);
-    if (Math.abs(maxP.pnl) >= Math.abs(sumP) * 0.82) {
-      out.push(maxP);
       continue;
     }
     const last = arr.reduce((a, c) => ((c.ts || 0) >= (a.ts || 0) ? c : a));
     out.push({
       ...last,
-      pnl: sumP,
+      pnl: arr.reduce((s, c) => s + c.pnl, 0),
       qty: Math.max(...arr.map((c) => c.qty)),
-      closePx: last.closePx || maxP.closePx,
+      closePx: last.closePx,
       entry: arr.find((c) => c.entry > 0)?.entry ?? last.entry,
       ts: Math.max(...arr.map((c) => c.ts || 0)),
     });
