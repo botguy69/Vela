@@ -202,13 +202,12 @@ function composePass(note: string | null, liveL: number, liveS: number, liveLine
   const fromTick = (note ?? "")
     .split("\n")
     .map((ln) => ln.trim())
-    .filter((ln) => /^(Eying |Took |A\+|BTC )/i.test(ln));
+    .filter((ln) => /^(Eying |Took |BTC )/i.test(ln))
+    .filter((ln) => !/continuation|trend cooling|80%\+|21h-mean/i.test(ln));
   const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
-  if (!uniq.some((ln) => /^A\+/.test(ln))) {
-    uniq.push(
-      "A++ double · pin · engulf · climax · dry-up · washout ≤25 · failed range · overbought ≥75. Continuation and trend-cooling are off.",
-    );
-  }
+  uniq.push(
+    "A++ double · pin · engulf · climax · dry-up · washout ≤25 · failed range · overbought ≥75. Continuation and trend-cooling are off.",
+  );
   return [head, ...uniq].filter(Boolean).join("\n");
 }
 

@@ -132,8 +132,8 @@ export function marketBias(
     return {
       bias: "long",
       note: ltf
-        ? "BTC pumping — leaning long. Still take A+ shorts if a coin fades vs BTC."
-        : "BTC pumping, 15m pausing — leaning long. A+ shorts still ok if a coin diverges.",
+        ? "BTC pumping — leaning long. Still take A++ shorts if a coin fades vs BTC."
+        : "BTC pumping, 15m pausing — leaning long. A++ shorts still ok if a coin diverges.",
     };
   }
   if (h4S && h1S) {
@@ -141,11 +141,11 @@ export function marketBias(
     return {
       bias: "short",
       note: ltf
-        ? "BTC bleeding — leaning short. Still take A+ longs if a coin holds vs BTC."
-        : "BTC bleeding, 15m pausing — leaning short. A+ longs still ok if a coin diverges.",
+        ? "BTC bleeding — leaning short. Still take A++ longs if a coin holds vs BTC."
+        : "BTC bleeding, 15m pausing — leaning short. A++ longs still ok if a coin diverges.",
     };
   }
-  return { bias: "chop", note: "BTC mixed / chopping. A+ both ways if the coin’s structure is clean." };
+  return { bias: "chop", note: "BTC mixed / chopping. A++ both ways if the coin’s structure is clean." };
 }
 
 /** Snap limit to the 15m mean. Stop / targets stay — breathing room is unchanged. */
@@ -368,7 +368,7 @@ export function aPlusKind(thesis: string): string | null {
   if (/washout RSI/i.test(t)) return "washout";
   if (/Trend cooling/i.test(t)) return "trend cooling";
   if (/Oversold bounce RSI (1\d|2[0-8])/i.test(t)) return "oversold";
-  if (/Overbought RSI (7[2-9]|8\d)/i.test(t)) return "overbought";
+  if (/Overbought RSI (7[5-9]|8\d)/i.test(t)) return "overbought";
   if (/Continuation/i.test(t)) return "continuation";
   return null;
 }
