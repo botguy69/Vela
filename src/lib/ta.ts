@@ -78,7 +78,7 @@ function swingBar(candles: Candle[], lookback: number, kind: "high" | "low"): Ca
 }
 
 export function scoreToConf(score: number): number {
-  return Math.round(Math.min(86, Math.max(58, score)));
+  return Math.round(Math.min(94, Math.max(58, score)));
 }
 
 function stdev(values: number[]): number {
@@ -201,7 +201,7 @@ export function analyzeMarket(
     });
   }
 
-  if (r <= 32 && last > (slow ?? last) * 0.96) {
+  if (r <= 25 && last > (slow ?? last) * 0.96) {
     const entry = last;
     const stop = lo - 0.8 * a;
     ideas.push({
@@ -209,27 +209,27 @@ export function analyzeMarket(
       entry,
       stop,
       entryType: "market",
-      score: 70 + (32 - r),
+      score: 86 + (25 - r) * 0.4,
       thesis: `Washout RSI ${r.toFixed(0)}, slow mean intact`,
       invalidation: `Break of the local swing low.`,
       plan: "scale2",
     });
   }
 
-  if (r <= 42 && last < mid && last > (slow ?? last) * 0.93) {
+  if (r <= 28 && last < mid && last > (slow ?? last) * 0.93) {
     ideas.push({
       side: "long",
       entry: last,
       stop: lo - stopPad * a * 0.35,
       entryType: "market",
-      score: 71 + Math.min(6, 42 - r) * 0.5,
+      score: 84 + Math.min(6, 28 - r) * 0.5,
       thesis: `Oversold bounce RSI ${r.toFixed(0)} under 21h`,
       invalidation: `Hourly close through the swing low.`,
       plan: "scale2",
     });
   }
 
-  if (r >= 72 && last < (slow ?? last) * 1.08) {
+  if (r >= 75 && last < (slow ?? last) * 1.08) {
     const entry = last;
     const stop = hi + 0.8 * a;
     ideas.push({
@@ -237,7 +237,7 @@ export function analyzeMarket(
       entry,
       stop,
       entryType: "market",
-      score: 83 + Math.min(6, r - 72) * 0.4,
+      score: 86 + Math.min(6, r - 75) * 0.4,
       thesis: `Overbought RSI ${r.toFixed(0)}`,
       invalidation: `Break of the local swing high.`,
       plan: "scale2",
@@ -273,7 +273,7 @@ export function analyzeMarket(
         entry: last,
         stop: lastBar.high + stopPad * a * 0.35,
         entryType: "market",
-        score: 83,
+        score: 85,
         thesis: `Failed range high, RSI ${r.toFixed(0)}`,
         invalidation: `Hourly close back above the failed high.`,
         plan: "scale2",
@@ -287,7 +287,7 @@ export function analyzeMarket(
         entry: last,
         stop: lastBar.low - stopPad * a * 0.35,
         entryType: "market",
-        score: 83,
+        score: 85,
         thesis: `Failed range low, RSI ${r.toFixed(0)}`,
         invalidation: `Hourly close back below the failed low.`,
         plan: "scale2",
@@ -313,7 +313,7 @@ export function analyzeMarket(
             entry: rejected ? last : firstHighBar.high,
             stop: Math.max(lastBar.high, firstHighBar.high) + stopPad * a * 0.35,
             entryType: rejected ? "market" : "limit",
-            score: 82,
+            score: 86,
             thesis: fading
               ? `Double top, vol fade ${firstHighBar.volume > 0 ? (lastBar.volume / firstHighBar.volume).toFixed(2) : "?"}× vs first peak, RSI ${r.toFixed(0)}`
               : `Double top, supply on 2nd test ${volRatio.toFixed(1)}× + reject, RSI ${r.toFixed(0)}`,
@@ -337,7 +337,7 @@ export function analyzeMarket(
             entry: rejected ? last : firstLowBar.low,
             stop: Math.min(lastBar.low, firstLowBar.low) - stopPad * a * 0.35,
             entryType: rejected ? "market" : "limit",
-            score: 82,
+            score: 86,
             thesis: fading
               ? `Double bottom, vol fade ${firstLowBar.volume > 0 ? (lastBar.volume / firstLowBar.volume).toFixed(2) : "?"}× vs first trough, RSI ${r.toFixed(0)}`
               : `Double bottom, buyers on 2nd test ${volRatio.toFixed(1)}× + reject, RSI ${r.toFixed(0)}`,
@@ -355,7 +355,7 @@ export function analyzeMarket(
       entry: last,
       stop: Math.max(hi, lastBar.high) + stopPad * a * 0.35,
       entryType: "limit",
-      score: 83,
+      score: 85,
       thesis: `Dry-up at high, vol ${volRatio.toFixed(1)}× RSI ${r.toFixed(0)}`,
       invalidation: `Hourly close makes a new high on volume.`,
       plan: "scale2",
@@ -367,7 +367,7 @@ export function analyzeMarket(
       entry: last,
       stop: Math.min(lo, lastBar.low) - stopPad * a * 0.35,
       entryType: "limit",
-      score: 83,
+      score: 85,
       thesis: `Dry-up at low, vol ${volRatio.toFixed(1)}× RSI ${r.toFixed(0)}`,
       invalidation: `Hourly close makes a new low on volume.`,
       plan: "scale2",
@@ -379,7 +379,7 @@ export function analyzeMarket(
       entry: last,
       stop: lastBar.high + stopPad * a * 0.4,
       entryType: lastBar.close < lastBar.open ? "market" : "limit",
-      score: 83,
+      score: 85,
       thesis: `Volume climax rejection at highs, ${volRatio.toFixed(1)}× RSI ${r.toFixed(0)}`,
       invalidation: `Hourly close back through the wick high.`,
       plan: "scale2",
@@ -391,7 +391,7 @@ export function analyzeMarket(
       entry: last,
       stop: lastBar.low - stopPad * a * 0.4,
       entryType: lastBar.close > lastBar.open ? "market" : "limit",
-      score: 83,
+      score: 85,
       thesis: `Volume climax rejection at lows, ${volRatio.toFixed(1)}× RSI ${r.toFixed(0)}`,
       invalidation: `Hourly close back through the wick low.`,
       plan: "scale2",
@@ -407,7 +407,7 @@ export function analyzeMarket(
       entry: last,
       stop: lastBar.low - stopPad * a * 0.3,
       entryType: "market",
-      score: 83,
+      score: 85,
       thesis: `Pin bar at lows, RSI ${r.toFixed(0)}`,
       invalidation: `Hourly close through the pin low.`,
       plan: "scale2",
@@ -419,7 +419,7 @@ export function analyzeMarket(
       entry: last,
       stop: lastBar.high + stopPad * a * 0.3,
       entryType: "market",
-      score: 83,
+      score: 85,
       thesis: `Pin bar at highs, RSI ${r.toFixed(0)}`,
       invalidation: `Hourly close through the pin high.`,
       plan: "scale2",
@@ -449,7 +449,7 @@ export function analyzeMarket(
         entry: last,
         stop: Math.min(lastBar.low, prevBar.low) - stopPad * a * 0.3,
         entryType: "market",
-        score: 83,
+        score: 85,
         thesis: `Bull engulf 21h, RSI ${r.toFixed(0)}`,
         invalidation: `Hourly close back through the engulf low.`,
         plan: "scale2",
@@ -461,7 +461,7 @@ export function analyzeMarket(
         entry: last,
         stop: Math.max(lastBar.high, prevBar.high) + stopPad * a * 0.3,
         entryType: "market",
-        score: 83,
+        score: 85,
         thesis: `Bear engulf 21h, RSI ${r.toFixed(0)}`,
         invalidation: `Hourly close back through the engulf high.`,
         plan: "scale2",
@@ -510,7 +510,7 @@ export function analyzeMarket(
     } else if (volRatio >= 1.15) {
       score += 3;
     }
-    if (score < 76) return null;
+    if (score < 82) return null;
     const conf = scoreToConf(score);
     const planTag = best.plan === "scale2" ? "hold" : best.plan === "scale3" ? "break" : "fade";
     const thesis = `${best.side} ${planTag} · RSI ${r.toFixed(0)} · vol ${tape} ${volRatio.toFixed(1)}× · ${rr.toFixed(1)}R · conf ${conf}% · ${best.thesis}`;

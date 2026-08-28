@@ -194,7 +194,7 @@ function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
   if (live >= 2 && beN < 2) {
     return `Not hunting — ${at} at-risk, ${beN} BE. 3rd only after 2 are at BE.`;
   }
-  return `Hunting 1 A+ per tick, any side (${liveL}L/${liveS}S at-risk). Cap 2, 3rd after 2× TP1/BE. 3% size.`;
+  return `Hunting 1 A++ per tick, any side (${liveL}L/${liveS}S at-risk). Cap 2, 3rd after 2× TP1/BE. 3% size.`;
 }
 
 function composePass(note: string | null, liveL: number, liveS: number, liveLines: string[]) {
@@ -206,7 +206,7 @@ function composePass(note: string | null, liveL: number, liveS: number, liveLine
   const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
   if (!uniq.some((ln) => /^A\+/.test(ln))) {
     uniq.push(
-      "A+ double · pin · engulf · climax · dry-up · washout · failed range · trend cooling · continuation (with BTC). Longs and shorts both hunt. Junk 21h-mean is off.",
+      "A++ double · pin · engulf · climax · dry-up · washout ≤25 · failed range · overbought ≥75. Continuation and trend-cooling are off.",
     );
   }
   return [head, ...uniq].filter(Boolean).join("\n");
@@ -2063,7 +2063,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const LIVE_CAP = 3;
     const AT_RISK = 2;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
-    const bar = { minConf: 80, note: "A+ any side · 80%+." };
+    const bar = { minConf: 86, note: "A++ any side · 86%+." };
 
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
     const beFree = new Set(
@@ -2341,9 +2341,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           });
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")}`
-            : "Eying  no A+ this pass.";
-          const aPlusLine = `A+  ${rules.APLUS_MENU}. Junk 21h-mean is off.`;
-          let veto = "No A+ this pass. Slots stay empty.";
+            : "Eying  no A++ this pass.";
+          const aPlusLine = `A++  ${rules.APLUS_MENU}. Junk 21h-mean / continuation / cooling is off.`;
+          let veto = "No A++ this pass. Slots stay empty.";
           const whyNot: string[] = [];
 
           for (const pick of ordered) {
@@ -2351,7 +2351,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const confNow = pick.confidence ?? scoreToConf(pick.score);
             const aPlus = rules.eliteScalp(pick.thesis ?? "", confNow, bar.minConf, compass.bias);
             if (!aPlus) {
-              whyNot.push(`${tag} not an A+ scalp — slot stays empty`);
+              whyNot.push(`${tag} not an A++ scalp — slot stays empty`);
               continue;
             }
             if (SKIP_WEEX.has(pick.weexSymbol) || !TOP25_WEEX.includes(pick.weexSymbol)) continue;
@@ -2474,7 +2474,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
           let tookLine = veto;
           if (!batch.length && (burst?.n ?? 0) >= 1) {
-            tookLine = "One A+ per tick — just placed. Empty slots stay empty.";
+            tookLine = "One A++ per tick — just placed. Empty slots stay empty.";
           }
 
           if (!batch.length) {
@@ -2603,7 +2603,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       huntTape = huntTape || huntStatus;
     }
 
-    const learned = "A+ longs and shorts · 80%+ · will not fill empty slots.";
+    const learned = "A++ only · 86%+ structure · will not fill empty slots.";
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))

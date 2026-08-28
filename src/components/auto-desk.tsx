@@ -104,7 +104,7 @@ export function AutoDesk() {
             <p className="text-xs uppercase tracking-[0.18em] text-subtle">Goal · $1,000,000 · live WEEX · no paper</p>
             <h1 className="mt-2 font-display text-4xl font-medium tracking-tight">Auto</h1>
             <p className="mt-2 max-w-xl text-sm text-muted">
-              Live WEEX equity (wallet + unrealized, once). 3% margin, coin-max leverage. 2 at-risk any mix. 3rd only after 2× TP1/BE. 1 A+ per tick.
+              Live WEEX equity (wallet + unrealized, once). 3% margin, coin-max leverage. 2 at-risk any mix. 3rd only after 2× TP1/BE. 1 A++ per tick.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

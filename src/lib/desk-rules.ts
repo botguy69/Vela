@@ -332,7 +332,7 @@ export function buildLedger(rows: ClosedTicket[]): Ledger {
     skipSymbols,
     note: skipSymbols.size
       ? `Sitting out ${[...skipSymbols].slice(0, 3).join(", ")}.`
-      : "Hunting A+ longs and shorts this tick.",
+      : "Hunting A++ longs and shorts this tick.",
   };
 }
 
@@ -341,25 +341,21 @@ export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
   return filtered.length ? filtered : setups;
 }
 
-/** Real A+ scalp — structure, extremes, tape. Not generic 21h mean RSI 48. */
+/** A++ scalp — only the best structure. No continuation, no trend-cooling, no RSI 48 mean. */
 export function eliteScalp(
   thesis: string,
   conf: number,
   bar: number,
-  bias?: "long" | "short" | "chop",
+  _bias?: "long" | "short" | "chop",
 ): boolean {
-  if (conf < Math.max(80, bar)) return false;
-  const structure =
-    /double (top|bottom)|failed range|vol fade|washout RSI|climax rejection|Dry-up at|Trend cooling|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-8])|Overbought RSI (7[2-9]|8\d)/i.test(
-      thesis,
-    );
-  if (structure) return true;
-  if (bias && bias !== "chop" && /Continuation/i.test(thesis)) return conf >= 86;
-  return false;
+  if (conf < Math.max(86, bar)) return false;
+  return /double (top|bottom)|failed range|vol fade|washout RSI (1\d|2[0-5])|climax rejection|Dry-up at|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-5])|Overbought RSI (7[5-9]|8\d)/i.test(
+    thesis,
+  );
 }
 
 export const APLUS_MENU =
-  "double · pin · engulf · climax · dry-up · washout · failed range · trend cooling · continuation (with BTC)";
+  "A++ double · pin · engulf · climax · dry-up · washout ≤25 · failed range · overbought ≥75. Continuation and trend-cooling are off.";
 
 export function aPlusKind(thesis: string): string | null {
   const t = thesis;
@@ -459,7 +455,7 @@ export function writeDeskNote(opts: {
     `${opts.phase}. Equity $${eq.toFixed(2)}. Margin cap ${opts.marginPct.toFixed(1)}% of the WEEX wallet, coin-max lev, cross. The stop is the SL — not isolated-style “liq in 0.25%.” Unused wallet backs the ticket. Residual risk is a gap through the SL, not liquidation before it.`,
   );
   if (!opts.tickets.length) {
-    lines.push("Nothing on. Waiting for an A+ 1h idea that tags the 15m, clears spread, and fits 2 at-risk (3rd after 2× BE).");
+    lines.push("Nothing on. Waiting for an A++ 1h idea that tags the 15m, clears spread, and fits 2 at-risk (3rd after 2× BE).");
     if (opts.correction) lines.push(opts.correction);
     return lines.join(" ");
   }

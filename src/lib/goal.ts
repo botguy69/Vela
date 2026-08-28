@@ -144,7 +144,7 @@ export function adaptMethod(opts: {
   if (opts.closed >= 12 && wr < 0.35) {
     next = {
       ...next,
-      note: `${next.note} Book is cold — still A+ longs and shorts, same 80% bar. Size rules unchanged.`,
+      note: `${next.note} Book is cold — still A++ only, 86% bar. Size rules unchanged.`,
     };
   }
 
