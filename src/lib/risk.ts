@@ -11,11 +11,11 @@ export type SizedSetup = RawSetup & {
 };
 
 export function clampRiskPct(raw: number): number {
-  if (!Number.isFinite(raw)) return 3;
-  return Math.min(3, Math.max(1, raw));
+  if (!Number.isFinite(raw)) return 2;
+  return Math.min(2, Math.max(1, raw));
 }
 
-/** 3% of the book is margin (1.8% after 3 losses, 1.2% after 5). Notional = margin × coin max leverage on cross. */
+/** 2% of the book is margin (1.2% after 3 losses). Notional = margin × coin max leverage on cross. */
 export function sizeSetup(
   setup: RawSetup,
   accountUsd: number,

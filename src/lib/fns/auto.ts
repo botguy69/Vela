@@ -185,16 +185,13 @@ function feeBePx(side: "long" | "short", entry: number, mark: number, weexBe: nu
 function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
   const at = liveL + liveS;
   const live = liveTotal ?? at + beN;
-  if (live >= 3) {
-    return `Not hunting — ${live} live (${at} at-risk, ${beN} BE). Cap 3.`;
+  if (live >= 2 && at >= 1) {
+    return `Not hunting — ${live} live (${at} at-risk, ${beN} BE). Cap 2.`;
   }
-  if (at >= 2) {
-    return `Not hunting — 2 at-risk (${liveL}L/${liveS}S). Need 2× TP1/BE for the 3rd.`;
+  if (at >= 1) {
+    return `Not hunting — 1 at-risk (${liveL}L/${liveS}S). 2nd only after TP1/BE.`;
   }
-  if (live >= 2 && beN < 2) {
-    return `Not hunting — ${at} at-risk, ${beN} BE. 3rd only after 2 are at BE.`;
-  }
-  return `Hunting 1 A++ per tick, any side (${liveL}L/${liveS}S at-risk). Cap 2, 3rd after 2× TP1/BE. 3% size.`;
+  return `Hunting 1 A++ per tick, any side (${liveL}L/${liveS}S at-risk). 1 at-risk, 2nd after TP1/BE. 2% size.`;
 }
 
 function composePass(note: string | null, liveL: number, liveS: number, liveLines: string[]) {
@@ -231,7 +228,7 @@ function publicSettings(
     armed: Boolean(row.armed),
     hasKeys: Boolean(row.api_key_enc && row.api_secret_enc && row.api_pass_enc),
     keyHint: row.key_hint,
-    riskPct: liveEq != null ? phase.marginPct : 3,
+    riskPct: liveEq != null ? phase.marginPct : 2,
     accountUsd: equity,
     availableUsd: live?.available ?? 0,
     weexLive: Boolean(live),
@@ -1088,7 +1085,7 @@ async function trimToTwoPct(
     const spec = await specFor(coinByWeex(pos.weex_symbol));
     const entry = n(pos.fill_px ?? pos.entry);
     if (!(entry > 0) || !(equity > 0)) continue;
-    const wantQty = (equity * 0.03 * spec.maxLeverage) / entry;
+    const wantQty = (equity * 0.02 * spec.maxLeverage) / entry;
     const key = pos.weex_symbol.replace(/_/g, "").toUpperCase();
     const live =
       livePos?.find((p) => p.symbol.replace(/_/g, "").toUpperCase() === key || p.symbol === pos.weex_symbol)
@@ -1104,7 +1101,7 @@ async function trimToTwoPct(
       });
       notes.push(
         sent.ok
-          ? `Trimmed ${pos.weex_symbol} to ~3% margin`
+          ? `Trimmed ${pos.weex_symbol} to ~2% margin`
           : `Trim ${pos.weex_symbol} failed: ${sent.error.slice(0, 80)}`,
       );
       if (sent.ok) {
@@ -1804,6 +1801,31 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const { getWeexPositionQty } = await import("@/lib/weex.server");
         left = await getWeexPositionQty(credsNow, pos.weex_symbol);
       }
+      if (pos.status === "filled" && credsNow && left != null && left > 0 && !beLocked) {
+        const unit = oneRUsd(pos);
+        const lastPx = mark || px;
+        const openPnl = side === "short" ? (entry - lastPx) * left : (lastPx - entry) * left;
+        const pastStop =
+          stop > 0 && (side === "short" ? lastPx >= stop * 0.997 : lastPx <= stop * 1.003);
+        if ((unit > 0.05 && openPnl <= -1.25 * unit) || pastStop) {
+          const spec = await specFor(coinByWeex(pos.weex_symbol));
+          const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
+          await cancelWeexProtective(credsNow, pos.weex_symbol).catch(() => null);
+          const sent = await flattenWeex(credsNow, {
+            symbol: pos.weex_symbol,
+            side: side === "short" ? "BUY" : "SELL",
+            positionSide: side === "short" ? "SHORT" : "LONG",
+            quantity: formatWeexQty(left, spec.quantityPrecision),
+            clientOid: `velarisk${pos.id}${Date.now().toString(36)}`.slice(0, 36),
+          });
+          if (sent.ok) {
+            notes.push(
+              `${pos.weex_symbol} flattened — ${pastStop ? "stop missed on WEEX" : "past 1.25R"}`,
+            );
+            left = 0;
+          }
+        }
+      }
       if (pos.status === "filled" && credsNow && left != null && left > 0) {
         const orig = origQty(pos);
         const dust = orig > 0 && left <= orig * 0.18;
@@ -2073,8 +2095,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const atRisk = stillOpen.filter(
       (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
     );
-    const LIVE_CAP = 3;
-    const AT_RISK = 2;
+    const LIVE_CAP = 2;
+    const AT_RISK = 1;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 86, note: "A++ any side · 86%+." };
 
@@ -2123,9 +2145,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const atRiskN = riskL + riskS;
     const beNLive = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
     const blocked =
-      atRiskN >= AT_RISK ||
-      liveN.length >= LIVE_CAP ||
-      (liveN.length >= 2 && beNLive < 2);
+      atRiskN >= AT_RISK || liveN.length >= LIVE_CAP;
     const roomN = blocked ? 0 : 1;
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
@@ -2185,7 +2205,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               updated_at = now()
           where id = ${row.id} and user_id = ${userId}
         `;
-        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 2 at-risk`);
+        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 1 at-risk`);
       }
       for (const row of stillOpenRaw) {
         const sym = row.weex_symbol.replace(/_/g, "").toUpperCase();
@@ -2232,12 +2252,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           await sql`
             update auto_signals
             set status = 'skipped',
-                close_reason = ${"Cancelled — 2 at-risk already"},
+                close_reason = ${"Cancelled — 1 at-risk already"},
                 pnl = 0,
                 updated_at = now()
             where id = ${row.id} and user_id = ${userId}
           `;
-          notes.push(`${row.weex_symbol} limit cancelled — 2 at-risk already`);
+          notes.push(`${row.weex_symbol} limit cancelled — 1 at-risk already`);
           continue;
         }
         slotN += 1;
@@ -2268,7 +2288,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ];
       huntTape = [huntStatus, ...whyLive].filter(Boolean).join("\n");
       notes.push(
-        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk, ${beNLive} BE · cap 3.`,
+        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk, ${beNLive} BE · cap 2.`,
       );
     } else if (settings.armed && liveN.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
@@ -2610,8 +2630,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       huntTape = huntStatus;
       notes.push("Disarmed. No new orders.");
     } else if (stillOpen.length >= LIVE_CAP) {
-      huntTape = `${huntStatus}\nLive cap (3 names). Waiting on an exit.`;
-      notes.push("Live cap (3 names). Waiting on an exit.");
+      huntTape = `${huntStatus}\nLive cap (2 names). Waiting on an exit.`;
+      notes.push("Live cap (2 names). Waiting on an exit.");
     } else {
       huntTape = huntTape || huntStatus;
     }
