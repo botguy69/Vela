@@ -2155,7 +2155,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const sym = s.weex_symbol.replace(/_/g, "").toUpperCase();
         if (SKIP_WEEX.has(sym) || !TOP25_WEEX.includes(sym)) return true;
         if (filledSym.has(sym)) return true;
-        return atRiskN >= AT_RISK;
+        return false;
       });
       const { cancelWeexOrder, cancelWeexProtective, flattenWeex } = await import("@/lib/weex.server");
       for (const row of extras) {
