@@ -2145,20 +2145,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     let riskS = countAtRisk("short");
     const atRiskN = riskL + riskS;
     const beNLive = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-    const dayStart = Date.now() - (Date.now() % 86_400_000);
-    const dayClosed = weexCloses
-      .filter((c) => (c.ts || 0) >= dayStart)
-      .reduce((s, c) => s + c.pnl, 0);
-    const dayOpen = liveN.reduce((s, p) => s + (p.pnl ?? 0), 0);
-    const dayHalt = equity > 0 && dayClosed + dayOpen <= -equity * 0.04;
-    const blocked =
-      dayHalt || atRiskN >= AT_RISK || liveN.length >= LIVE_CAP;
+    const blocked = atRiskN >= AT_RISK || liveN.length >= LIVE_CAP;
     const roomN = blocked ? 0 : 1;
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
-      : dayHalt
-        ? `Stood down — day −${Math.abs(((dayClosed + dayOpen) / equity) * 100).toFixed(1)}%. No new tickets until tomorrow.`
-        : huntHeader(riskL, riskS, beNLive, liveN.length);
+      : huntHeader(riskL, riskS, beNLive, liveN.length);
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
