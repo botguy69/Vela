@@ -26,12 +26,23 @@ export function sizeSetup(
   if (setup.entry <= 0 || accountUsd < 5) return null;
 
   const leverage = Math.max(1, Math.round(coinMaxLev));
-  const marginUsd = accountUsd * (alloc / 100);
-  const notional = marginUsd * leverage;
+  let marginUsd = accountUsd * (alloc / 100);
+  let notional = marginUsd * leverage;
+  if (notional < 8) return null;
+
+  const qty0 = notional / setup.entry;
+  const stopDist = Math.abs(setup.entry - setup.stop);
+  const maxLoss = accountUsd * 0.015;
+  if (stopDist > 0 && setup.entry > 0) {
+    const lossAtStop = notional * (stopDist / setup.entry);
+    if (lossAtStop > maxLoss) {
+      notional = (maxLoss * setup.entry) / stopDist;
+      marginUsd = notional / leverage;
+    }
+  }
   if (notional < 8) return null;
 
   const qty = notional / setup.entry;
-  const stopDist = Math.abs(setup.entry - setup.stop);
   const stopAccountPct = stopDist > 0 ? (notional * (stopDist / setup.entry) / accountUsd) * 100 : 0;
   if (stopAccountPct > 25) return null;
 
