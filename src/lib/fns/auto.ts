@@ -762,9 +762,9 @@ async function ensureTakes(
       p.symbol.replace(/_/g, "").toUpperCase() === key &&
       (p.side === "short" ? "short" : "long") === sideLc,
   );
-  if (!live || !(live.qty > 0)) return;
-  const liveQty = live.qty;
-  const mark = live.mark ?? 0;
+  const liveQty = live && live.qty > 0 ? live.qty : n(pos.qty);
+  if (!(liveQty > 0)) return;
+  const mark = live?.mark && live.mark > 0 ? live.mark : 0;
   const side = pos.side === "short" ? "SHORT" : "LONG";
   const { taggedTake } = await import("@/lib/ta");
   const afterTp1 = Boolean(pos.tp1_hit) || Boolean(pos.be_moved);
@@ -875,6 +875,7 @@ async function resurrectLive(
   userId: string,
   livePos: { symbol: string; qty: number; side?: string; entry?: number }[] | null,
   notes: string[],
+  creds: { apiKey: string; apiSecret: string; passphrase: string } | null,
 ) {
   if (!livePos?.length) return;
   for (const p of livePos) {
@@ -917,6 +918,10 @@ async function resurrectLive(
       where id = ${row.id} and user_id = ${userId}
     `;
     notes.push(`Reattached ${key} ${side} — still live on WEEX, was marked ${row.status}`);
+    if (creds) {
+      const liveRow = { ...row, status: "filled" as const, qty: p.qty };
+      await ensureTakes(liveRow, notes, creds);
+    }
   }
 }
 
@@ -1014,18 +1019,20 @@ async function closeFlatOnWeex(
   }
 
   if (creds) {
-    const liveKeys = new Set(
-      (livePos ?? []).filter((p) => p.qty > 0).map((p) => p.symbol.replace(/_/g, "").toUpperCase()),
-    );
-    const idle = await sql<{ weex_symbol: string }>`
-      select distinct weex_symbol from auto_signals
-      where user_id = ${userId} and weex_symbol is not null
+    const open = await sql<SignalRow>`
+      select * from auto_signals
+      where user_id = ${userId} and status = 'filled' and weex_symbol is not null
     `;
-    const { cancelWeexProtective } = await import("@/lib/weex.server");
-    for (const row of idle) {
-      const k = row.weex_symbol.replace(/_/g, "").toUpperCase();
-      if (liveKeys.has(k)) continue;
-      await cancelWeexProtective(creds, row.weex_symbol).catch(() => null);
+    const { cancelWeexProtective, getWeexPositionQty } = await import("@/lib/weex.server");
+    for (const pos of open) {
+      const k = pos.weex_symbol.replace(/_/g, "").toUpperCase();
+      const on = (livePos ?? []).some(
+        (p) => p.qty > 0 && p.symbol.replace(/_/g, "").toUpperCase() === k,
+      );
+      if (on) continue;
+      const q = await getWeexPositionQty(creds, pos.weex_symbol);
+      if (q == null || q > 0) continue;
+      await cancelWeexProtective(creds, pos.weex_symbol).catch(() => null);
     }
   }
 
@@ -1609,7 +1616,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const { listWeexPositions, listWeexClosedPnl } = await import("@/lib/weex.server");
         weexBook = await listWeexPositions(creds);
         weexCloses = await listWeexClosedPnl(creds).catch(() => []);
-        await resurrectLive(sql, userId, weexBook, notes);
+        await resurrectLive(sql, userId, weexBook, notes, creds);
         const flat = await closeFlatOnWeex(sql, userId, weexBook, notes, creds);
         bookedFlat = flat.booked;
         flattenedTick = flat.flattened;
