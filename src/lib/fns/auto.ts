@@ -2145,15 +2145,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     let riskS = countAtRisk("short");
     const atRiskN = riskL + riskS;
     const beNLive = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-    const [dayRow] = await sql<{ pnl: number }>`
-      select coalesce(sum(pnl), 0)::float as pnl
-      from auto_signals
-      where user_id = ${userId}
-        and status in ('targeted','stopped','skipped')
-        and updated_at >= date_trunc('day', now())
-        and abs(coalesce(pnl, 0)) >= 0.05
-    `;
-    const dayClosed = n(dayRow?.pnl);
+    const dayStart = Date.now() - (Date.now() % 86_400_000);
+    const dayClosed = weexCloses
+      .filter((c) => (c.ts || 0) >= dayStart)
+      .reduce((s, c) => s + c.pnl, 0);
     const dayOpen = liveN.reduce((s, p) => s + (p.pnl ?? 0), 0);
     const dayHalt = equity > 0 && dayClosed + dayOpen <= -equity * 0.04;
     const blocked =
