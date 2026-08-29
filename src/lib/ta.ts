@@ -492,8 +492,24 @@ export function analyzeMarket(
     }
   }
 
+  const wickLow = Math.min(lo, ...hourly.slice(-3).map((c) => c.low));
+  const wickHigh = Math.max(hi, ...hourly.slice(-3).map((c) => c.high));
+  const minStopFrac = style === "scalp" ? 0.008 : 0.012;
+
   const finish = (best: Idea): RawSetup | null => {
-    const risk = Math.abs(best.entry - best.stop);
+    let stop = best.stop;
+    if (best.side === "long") {
+      const beyond = wickLow - 0.25 * a;
+      const floor = best.entry * (1 - minStopFrac);
+      stop = Math.min(stop, beyond, floor);
+      if (!(stop < best.entry)) stop = best.entry - Math.max(0.8 * a, best.entry * minStopFrac);
+    } else {
+      const beyond = wickHigh + 0.25 * a;
+      const ceil = best.entry * (1 + minStopFrac);
+      stop = Math.max(stop, beyond, ceil);
+      if (!(stop > best.entry)) stop = best.entry + Math.max(0.8 * a, best.entry * minStopFrac);
+    }
+    const risk = Math.abs(best.entry - stop);
     if (risk <= 0) return null;
     const push = (mult: number) =>
       best.side === "long" ? best.entry + risk * mult : best.entry - risk * mult;
@@ -544,7 +560,7 @@ export function analyzeMarket(
       style,
       entryType,
       entry: best.entry,
-      stop: best.stop,
+      stop,
       target,
       targets,
       scale,
