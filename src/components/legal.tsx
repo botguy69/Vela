@@ -51,7 +51,7 @@ export function BotBreakdown() {
     ["First method", "Structure + RSI + ATR. Bot sets SL. Scalps: TP1 at 1R then leftover runner. Limits are post-only."],
     ["Breakeven + trail", "Stop walks to entry + fee after 1R / first take, then trails last swing."],
     ["Time stops", "Unfilled limits die in 4–10h. Scalp fills that never print 0.3R in 5h flatten. BE leftovers hold."],
-    ["One-beta", "1 at-risk. 2nd only after TP1/BE (cap 2). 2% margin. Flatten if a stop is missed (1.25R). A++ 86%+ only."],
+    ["One-beta", "2 tickets at 3% margin. With-trend; opposite side only on a fade. Flatten if a stop is missed (1.25R). A++ 86%+ only."],
     ["HTF + 15m", "1h picks the side. Fill on a 15m pullback to EMA 9/21 — not the spike. Stop stays the 1h structure. Hedge / diverge skips 4h+BTC 15m."],
     ["Spread / funding", "Skip a wide book. Skip chasing the side already paying 8bps+ funding."],
     ["Regime", "If BTC hourly ATR is 2.2× its median AND the last bar is a shock wick, stand down. Trend grinds can still trade."],

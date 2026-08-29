@@ -60,38 +60,38 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
     return {
       id: "micro",
       name: "Stage 1",
-      marginPct: 2,
+      marginPct: 3,
       style: "scalp",
       maxOpen: 2,
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1 · 2% · 1 at-risk, 2nd after TP1/BE.",
+      note: "Stage 1 · 3% · 2 tickets max. Flatten if a stop is missed (1.25R).",
     };
   }
   if (equity < 1000) {
     return {
       id: "seed",
       name: "Stage 1",
-      marginPct: 2,
+      marginPct: 3,
       style: "scalp",
       maxOpen: 2,
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1 · 2% (1.2% after 3 losses). 1 at-risk, 2nd after TP1/BE.",
+      note: "Stage 1 · 3% (1.8% after 3 losses). 2 tickets max.",
     };
   }
   return {
     id: "grow",
     name: "Stage 2",
-    marginPct: 2,
+    marginPct: 3,
     style: "scalp",
     maxOpen: 2,
     minRr: 1.9,
     minConf: 78,
     method: "trend",
-    note: "Stage 2: $1k → $10k. 2% size. 1 at-risk, 2nd after TP1/BE. Stop at $10k.",
+    note: "Stage 2: $1k → $10k. 3% size. 2 tickets max. Stop at $10k.",
   };
 }
 
@@ -148,29 +148,29 @@ export function adaptMethod(opts: {
     };
   }
 
-  next = { ...next, marginPct: 2 };
+  next = { ...next, marginPct: 3 };
 
   // Size cuts lift on wins, not on waiting for equity to climb back.
   const restored = opts.winStreak >= 2;
   if (opts.drawdownPct >= 30 && !restored) {
     next = {
       ...next,
-      marginPct: 1,
+      marginPct: 1.2,
       minConf: Math.min(82, next.minConf + 4),
-      note: `${next.note} ~30% off peak. 1% until two wins in a row — then back to 2%.`,
+      note: `${next.note} ~30% off peak. 1.2% until two wins in a row — then back to 3%.`,
     };
   } else if (opts.lossStreak >= 5) {
     next = {
       ...next,
-      marginPct: 1,
+      marginPct: 1.2,
       minConf: Math.min(82, next.minConf + 3),
-      note: `${next.note} Five losses. 1% size. A win restores 2%.`,
+      note: `${next.note} Five losses. 1.2% size. A win restores 3%.`,
     };
   } else if (opts.lossStreak >= 3) {
     next = {
       ...next,
-      marginPct: 1.2,
-      note: `${next.note} Risk cut to 1.2% after three losses. A win restores 2%.`,
+      marginPct: 1.8,
+      note: `${next.note} Risk cut to 1.8% after three losses. A win restores 3%.`,
     };
   }
   return next;

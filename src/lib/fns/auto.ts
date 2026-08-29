@@ -185,13 +185,10 @@ function feeBePx(side: "long" | "short", entry: number, mark: number, weexBe: nu
 function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
   const at = liveL + liveS;
   const live = liveTotal ?? at + beN;
-  if (live >= 2 && at >= 1) {
+  if (live >= 2 || at >= 2) {
     return `Not hunting — ${live} live (${at} at-risk, ${beN} BE). Cap 2.`;
   }
-  if (at >= 1) {
-    return `Not hunting — 1 at-risk (${liveL}L/${liveS}S). 2nd only after TP1/BE.`;
-  }
-  return `Hunting 1 A++ per tick, any side (${liveL}L/${liveS}S at-risk). 1 at-risk, 2nd after TP1/BE. 2% size.`;
+  return `Hunting 1 A++ per tick, any side (${liveL}L/${liveS}S at-risk). Cap 2 · 3% size. With-trend; fades special.`;
 }
 
 function composePass(note: string | null, liveL: number, liveS: number, liveLines: string[]) {
@@ -228,7 +225,7 @@ function publicSettings(
     armed: Boolean(row.armed),
     hasKeys: Boolean(row.api_key_enc && row.api_secret_enc && row.api_pass_enc),
     keyHint: row.key_hint,
-    riskPct: liveEq != null ? phase.marginPct : 2,
+    riskPct: liveEq != null ? phase.marginPct : 3,
     accountUsd: equity,
     availableUsd: live?.available ?? 0,
     weexLive: Boolean(live),
@@ -1085,7 +1082,7 @@ async function trimToTwoPct(
     const spec = await specFor(coinByWeex(pos.weex_symbol));
     const entry = n(pos.fill_px ?? pos.entry);
     if (!(entry > 0) || !(equity > 0)) continue;
-    const wantQty = (equity * 0.02 * spec.maxLeverage) / entry;
+    const wantQty = (equity * 0.03 * spec.maxLeverage) / entry;
     const key = pos.weex_symbol.replace(/_/g, "").toUpperCase();
     const live =
       livePos?.find((p) => p.symbol.replace(/_/g, "").toUpperCase() === key || p.symbol === pos.weex_symbol)
@@ -1101,7 +1098,7 @@ async function trimToTwoPct(
       });
       notes.push(
         sent.ok
-          ? `Trimmed ${pos.weex_symbol} to ~2% margin`
+          ? `Trimmed ${pos.weex_symbol} to ~3% margin`
           : `Trim ${pos.weex_symbol} failed: ${sent.error.slice(0, 80)}`,
       );
       if (sent.ok) {
@@ -2096,7 +2093,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
     );
     const LIVE_CAP = 2;
-    const AT_RISK = 1;
+    const AT_RISK = 2;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 86, note: "A++ any side · 86%+." };
 
@@ -2205,7 +2202,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               updated_at = now()
           where id = ${row.id} and user_id = ${userId}
         `;
-        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 1 at-risk`);
+        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 2 at-risk`);
       }
       for (const row of stillOpenRaw) {
         const sym = row.weex_symbol.replace(/_/g, "").toUpperCase();
@@ -2252,12 +2249,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           await sql`
             update auto_signals
             set status = 'skipped',
-                close_reason = ${"Cancelled — 1 at-risk already"},
+                close_reason = ${"Cancelled — 2 at-risk already"},
                 pnl = 0,
                 updated_at = now()
             where id = ${row.id} and user_id = ${userId}
           `;
-          notes.push(`${row.weex_symbol} limit cancelled — 1 at-risk already`);
+          notes.push(`${row.weex_symbol} limit cancelled — 2 at-risk already`);
           continue;
         }
         slotN += 1;
