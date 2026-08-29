@@ -192,11 +192,21 @@ function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
   if (at >= 2) {
     return `Not hunting — 2 at-risk (${liveL}L/${liveS}S). 3rd after one TP1/BE.`;
   }
+  if (beN >= 1) {
+    return `Hunting 3rd A++ (${liveL}L/${liveS}S at-risk, ${beN} BE). Cap 3.`;
+  }
   return `Hunting 1 A++ per tick, any side (${liveL}L/${liveS}S at-risk). 2 at 3%. 3rd if one is TP1/BE.`;
 }
 
-function composePass(note: string | null, liveL: number, liveS: number, liveLines: string[]) {
-  const head = huntHeader(liveL, liveS);
+function composePass(
+  note: string | null,
+  liveL: number,
+  liveS: number,
+  liveLines: string[],
+  beN = 0,
+  liveTotal?: number,
+) {
+  const head = huntHeader(liveL, liveS, beN, liveTotal);
   const fromTick = (note ?? "")
     .split("\n")
     .map((ln) => ln.trim())
@@ -214,7 +224,7 @@ function publicSettings(
   stats: { closed: number; wins: number; winRate?: number; avgWinR?: number; avgLossR?: number; names?: string[] } = { closed: 0, wins: 0 },
   live?: { equity: number; available: number } | null,
   weexError?: string | null,
-  book?: { liveL?: number; liveS?: number; liveLines?: string[] },
+  book?: { liveL?: number; liveS?: number; liveLines?: string[]; beN?: number; liveTotal?: number },
 ) {
   const liveEq = live?.equity;
   const equity = liveEq != null ? liveEq : 0;
@@ -237,7 +247,14 @@ function publicSettings(
     minRr: phase.minRr,
     maxOpen: phase.maxOpen,
     lastTickAt: row.last_tick_at,
-    lastTickNote: composePass(row.last_tick_note, book?.liveL ?? 0, book?.liveS ?? 0, book?.liveLines ?? []),
+    lastTickNote: composePass(
+      row.last_tick_note,
+      book?.liveL ?? 0,
+      book?.liveS ?? 0,
+      book?.liveLines ?? [],
+      book?.beN ?? 0,
+      book?.liveTotal,
+    ),
     goalUsd: n(row.goal_usd) || GOAL_USD,
     peakUsd: peak,
     lossStreak: row.loss_streak ?? 0,
@@ -1273,6 +1290,8 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       (t.liveOnWeex || t.status === "working") && !(t.beMoved && t.tp1Hit);
     const liveL = mapped.filter((t) => atRiskTick(t) && t.side === "long").length;
     const liveS = mapped.filter((t) => atRiskTick(t) && t.side === "short").length;
+    const beN = mapped.filter((t) => t.liveOnWeex && t.beMoved && t.tp1Hit).length;
+    const liveTotal = mapped.filter((t) => t.liveOnWeex || t.status === "working").length;
     const { whyTookTrade } = await import("@/lib/desk-rules");
     const liveLines = mapped
       .filter((t) => t.liveOnWeex || t.status === "working")
@@ -1288,7 +1307,13 @@ export const getAutoDesk = createServerFn({ method: "GET" })
         }),
       );
     return {
-      settings: publicSettings(settings!, stats, live, pulled.error, { liveL, liveS, liveLines }),
+      settings: publicSettings(settings!, stats, live, pulled.error, {
+        liveL,
+        liveS,
+        liveLines,
+        beN,
+        liveTotal,
+      }),
       signals: mapped,
       universe: (await import("@/lib/universe")).TOP25.map((c) => ({
         id: c.id,
@@ -2325,7 +2350,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               and created_at > now() - interval '4 minutes'
               and status in ('proposed','working','filled')
           `;
-          if ((burst?.n ?? 0) >= 1) room = 0;
+          if ((burst?.n ?? 0) >= 1 && beNLive < 1) room = 0;
           let openLimits = stillOpenRaw.filter(
             (s) => s.status === "working" || s.status === "proposed",
           ).length;
