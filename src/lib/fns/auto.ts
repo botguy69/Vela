@@ -2417,45 +2417,32 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} ${trig.reason}`);
               continue;
             }
-            const diverges =
-              aPlus ||
-              rules.divergesFromBtc(pick.side, coin15, btc15) ||
-              /double (top|bottom)|failed range/i.test(pick.thesis ?? "");
-            if (compass.bias !== "chop") {
-              if (pick.side !== compass.bias && !diverges) {
-                veto = `${pick.weexSymbol} ${pick.side} vs BTC ${compass.bias} — not fading`;
-                whyNot.push(`${tag} vs BTC ${compass.bias}`);
-                continue;
-              }
-            } else if (!diverges) {
-              veto = `${pick.weexSymbol} ${pick.side} — BTC chop, not A+`;
-              whyNot.push(`${tag} BTC chop`);
+            const fadePattern =
+              pick.side === "short"
+                ? /double top|Failed bounce|Overbought|Pin bar at highs|Failed range high|Bear engulf|climax rejection at highs|Dry-up at high|supply on 2nd/i.test(
+                    pick.thesis ?? "",
+                  )
+                : /double bottom|washout|Oversold|Pin bar at lows|Failed range low|Bull engulf|climax rejection at lows|Dry-up at low|buyers on 2nd/i.test(
+                    pick.thesis ?? "",
+                  );
+            const withBtc = compass.bias === "chop" || pick.side === compass.bias;
+            if (!withBtc && !fadePattern) {
+              veto = `${pick.weexSymbol} ${pick.side} vs BTC ${compass.bias} — fade only on special structure`;
+              whyNot.push(`${tag} vs BTC ${compass.bias} — not a fade`);
               continue;
             }
-            const fadeVsBook =
-              (pick.side === "short" && compass.bias === "long") ||
-              (pick.side === "long" && compass.bias === "short");
-            if (fadeVsBook && !diverges) {
-              veto = `${pick.weexSymbol} ${pick.side} skipped — BTC/book is the other way, coin 15m not fading`;
-              whyNot.push(`${tag} not fading BTC`);
+            const liveOpp = liveN.some(
+              (p) => p.qty > 0 && (p.side === "short" ? "short" : "long") !== pick.side,
+            );
+            if (liveOpp && !fadePattern) {
+              whyNot.push(`${tag} opposite the live book — need a fade`);
               continue;
             }
-            if (!fadeVsBook && !aPlus) {
+            if (!aPlus) {
               const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
               if (!rules.htfAllows(pick.side, h4)) {
                 veto = `HTF veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
                 whyNot.push(`${tag} 4h veto`);
-                continue;
-              }
-              if (!diverges && pick.weexSymbol !== "BTCUSDT" && !rules.btcLeads(pick.side, btc15)) {
-                veto = `BTC 15m against ${pick.side} ${pick.weexSymbol} — not filling the slot`;
-                whyNot.push(`${tag} BTC 15m against`);
-                continue;
-              }
-              const daily = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
-              if (daily.length >= 24 && !rules.htfAllows(pick.side, daily)) {
-                veto = `Daily veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
-                whyNot.push(`${tag} daily veto`);
                 continue;
               }
             }

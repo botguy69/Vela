@@ -145,7 +145,7 @@ export function marketBias(
         : "BTC bleeding, 15m pausing — leaning short. A++ longs still ok if a coin diverges.",
     };
   }
-  return { bias: "chop", note: "BTC mixed / chopping. A++ both ways if the coin’s structure is clean." };
+  return { bias: "chop", note: "BTC mixed / chopping. A++ both ways. Opposite the book only on a fade." };
 }
 
 /** Snap limit to the 15m mean. Stop / targets stay — breathing room is unchanged. */
