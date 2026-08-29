@@ -349,17 +349,18 @@ export function eliteScalp(
   _bias?: "long" | "short" | "chop",
 ): boolean {
   if (conf < Math.max(86, bar)) return false;
-  return /double (top|bottom)|failed range|vol fade|washout RSI (1\d|2[0-5])|climax rejection|Dry-up at|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-5])|Overbought RSI (7[5-9]|8\d)/i.test(
+  return /double (top|bottom)|failed range|Failed bounce|vol fade|washout RSI (1\d|2[0-5])|climax rejection|Dry-up at|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-5])|Overbought RSI (7[0-9]|8\d)/i.test(
     thesis,
   );
 }
 
 export const APLUS_MENU =
-  "A++ double · pin · engulf · climax · dry-up · washout ≤25 · failed range · overbought ≥75. Continuation and trend-cooling are off.";
+  "A++ double · pin · engulf · climax · dry-up · washout ≤25 · failed range · failed bounce · overbought reject ≥70. Continuation and trend-cooling are off.";
 
 export function aPlusKind(thesis: string): string | null {
   const t = thesis;
   if (/double (top|bottom)|buyers on 2nd|supply on 2nd|vol fade/i.test(t)) return "double";
+  if (/Failed bounce|lower high/i.test(t)) return "failed bounce";
   if (/failed range/i.test(t)) return "failed range";
   if (/Pin bar/i.test(t)) return "pin";
   if (/engulf/i.test(t)) return "engulf";
@@ -368,7 +369,7 @@ export function aPlusKind(thesis: string): string | null {
   if (/washout RSI/i.test(t)) return "washout";
   if (/Trend cooling/i.test(t)) return "trend cooling";
   if (/Oversold bounce RSI (1\d|2[0-8])/i.test(t)) return "oversold";
-  if (/Overbought RSI (7[5-9]|8\d)/i.test(t)) return "overbought";
+  if (/Overbought RSI (7[0-9]|8\d)/i.test(t)) return "overbought";
   if (/Continuation/i.test(t)) return "continuation";
   return null;
 }

@@ -229,7 +229,7 @@ export function analyzeMarket(
     });
   }
 
-  if (r >= 75 && last < (slow ?? last) * 1.08) {
+  if (r >= 70 && lastBar.close <= lastBar.open && last < (slow ?? last) * 1.08) {
     const entry = last;
     const stop = hi + 0.8 * a;
     ideas.push({
@@ -237,8 +237,8 @@ export function analyzeMarket(
       entry,
       stop,
       entryType: "market",
-      score: 86 + Math.min(6, r - 75) * 0.4,
-      thesis: `Overbought RSI ${r.toFixed(0)}`,
+      score: 86 + Math.min(6, r - 70) * 0.35,
+      thesis: `Overbought RSI ${r.toFixed(0)} reject`,
       invalidation: `Break of the local swing high.`,
       plan: "scale2",
     });
@@ -290,6 +290,29 @@ export function analyzeMarket(
         score: 85,
         thesis: `Failed range low, RSI ${r.toFixed(0)}`,
         invalidation: `Hourly close back below the failed low.`,
+        plan: "scale2",
+      });
+    }
+  }
+
+  if (hourly.length >= 12) {
+    const win = hourly.slice(-12, -1);
+    const priorHi = Math.max(...win.map((c) => c.high));
+    const failedBounce =
+      lastBar.high < priorHi &&
+      lastBar.close <= lastBar.open &&
+      r >= 52 &&
+      r <= 72 &&
+      last >= mid - 0.2 * a;
+    if (failedBounce) {
+      ideas.push({
+        side: "short",
+        entry: last,
+        stop: Math.max(lastBar.high, priorHi) + stopPad * a * 0.3,
+        entryType: "market",
+        score: 86,
+        thesis: `Failed bounce, lower high, RSI ${r.toFixed(0)}`,
+        invalidation: `Hourly close through the lower high.`,
         plan: "scale2",
       });
     }

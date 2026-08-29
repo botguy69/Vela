@@ -206,7 +206,7 @@ function composePass(note: string | null, liveL: number, liveS: number, liveLine
     .filter((ln) => !/continuation|trend cooling|80%\+|21h-mean/i.test(ln));
   const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
   uniq.push(
-    "A++ double · pin · engulf · climax · dry-up · washout ≤25 · failed range · overbought ≥75. Continuation and trend-cooling are off.",
+    "A++ double · pin · engulf · climax · dry-up · washout ≤25 · failed range · failed bounce · overbought reject ≥70. Continuation and trend-cooling are off.",
   );
   return [head, ...uniq].filter(Boolean).join("\n");
 }
