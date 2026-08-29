@@ -103,7 +103,8 @@ function takeQtys(
     if (i === count - 1) {
       slices.push(fmt(Math.max(0, total - used), precision));
     } else {
-      const s = fmt(total / count, precision);
+      const part = count === 2 && i === 0 ? total * 0.7 : total / count;
+      const s = fmt(part, precision);
       used += Number(s);
       slices.push(s);
     }
