@@ -750,7 +750,7 @@ async function ensureTakes(
 ) {
   if (pos.status !== "filled") return;
   const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
-  const { placeWeexTake, moveWeexStop, trimWeexTakes, cancelWeexProtective, listWeexPositions } = await import("@/lib/weex.server");
+  const { placeWeexTake, moveWeexStop, trimWeexTakes, cancelWeexProtective, listWeexPositions, listWeexAlgoRows } = await import("@/lib/weex.server");
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
   const { coinByWeex } = await import("@/lib/universe");
   const spec = await specFor(coinByWeex(pos.weex_symbol));
@@ -805,10 +805,11 @@ async function ensureTakes(
   const oid = (tag: string) => `vela${tag}${pos.id}`.slice(0, 36);
   const needTp = afterTp1 ? Math.min(1, Math.max(0, tps.length)) : Math.min(2, Math.max(1, tps.length));
   const maxProtect = afterTp1 ? 2 : 3;
+  const armedOk = /tps:set/.test(pos.weex_resp ?? "");
+  if (armedOk && trimmed.listed === 0 && stopOverride == null) {
+    return;
+  }
   if (trimmed.haveSl && trimmed.haveTp >= needTp && trimmed.listed <= maxProtect && stopOverride == null) {
-    const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set)@?\d*/g, "").trim()} tps:set`.slice(0, 500);
-    await sql`update auto_signals set weex_resp = ${stamp}, updated_at = now() where id = ${pos.id}`;
-    pos.weex_resp = stamp;
     return;
   }
   if (stopOverride != null && stopPx > 0) {
@@ -823,7 +824,7 @@ async function ensureTakes(
     });
     if (!slSent.ok) notes.push(`${pos.weex_symbol} BE SL failed: ${slSent.error.slice(0, 80)}`);
     else notes.push(`${pos.weex_symbol} SL → WEEX BE ${stopPx.toFixed(4)}`);
-    await sql`update auto_signals set weex_resp = ${`${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set)@?\d*/g, "").trim()} tps:set`}, stop = ${stopPx}, updated_at = now() where id = ${pos.id}`;
+    await sql`update auto_signals set weex_resp = ${`${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set|be|miss)@?\d*/g, "").trim()} tps:be`}, stop = ${stopPx}, updated_at = now() where id = ${pos.id}`;
     pos.stop = stopPx;
     return;
   }
@@ -863,8 +864,11 @@ async function ensureTakes(
       else notes.push(`${pos.weex_symbol} TP${i + 1} failed: ${sent.error.slice(0, 80)}`);
     }
   }
-  notes.push(`${pos.weex_symbol} 1 SL @ ${stopPx.toFixed(4)} + ${ok || trimmed.haveTp} TP`);
-  const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set)@?\d*/g, "").trim()} tps:set`.slice(0, 500);
+  const confirm = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => []);
+  const seen = confirm.length;
+  const tag = seen > 0 ? "tps:set" : "tps:miss";
+  notes.push(`${pos.weex_symbol} 1 SL @ ${stopPx.toFixed(4)} + ${ok || trimmed.haveTp} TP${seen ? ` (${seen} on book)` : " (not listed yet)"}`);
+  const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set|be|miss)@?\d*/g, "").trim()} ${tag}`.slice(0, 500);
   await sql`update auto_signals set weex_resp = ${stamp}, stop = ${stopPx}, updated_at = now() where id = ${pos.id}`;
   pos.weex_resp = stamp;
   pos.stop = stopPx;
