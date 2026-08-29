@@ -62,11 +62,11 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       name: "Stage 1",
       marginPct: 3,
       style: "scalp",
-      maxOpen: 2,
+      maxOpen: 3,
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1 · 3% · 2 tickets max. Flatten if a stop is missed (1.25R).",
+      note: "Stage 1 · 3% · 2 at-risk. 3rd after one TP1/BE.",
     };
   }
   if (equity < 1000) {
@@ -75,11 +75,11 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       name: "Stage 1",
       marginPct: 3,
       style: "scalp",
-      maxOpen: 2,
+      maxOpen: 3,
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1 · 3% (1.8% after 3 losses). 2 tickets max.",
+      note: "Stage 1 · 3% (1.8% after 3 losses). 2 at-risk. 3rd after one TP1/BE.",
     };
   }
   return {
@@ -87,11 +87,11 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
     name: "Stage 2",
     marginPct: 3,
     style: "scalp",
-    maxOpen: 2,
+    maxOpen: 3,
     minRr: 1.9,
     minConf: 78,
     method: "trend",
-    note: "Stage 2: $1k → $10k. 3% size. 2 tickets max. Stop at $10k.",
+    note: "Stage 2: $1k → $10k. 3% size. 2 at-risk, 3rd after one TP1/BE. Stop at $10k.",
   };
 }
 

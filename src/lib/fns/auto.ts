@@ -185,10 +185,13 @@ function feeBePx(side: "long" | "short", entry: number, mark: number, weexBe: nu
 function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
   const at = liveL + liveS;
   const live = liveTotal ?? at + beN;
-  if (live >= 2 || at >= 2) {
-    return `Not hunting — ${live} live (${at} at-risk, ${beN} BE). Cap 2.`;
+  if (live >= 3) {
+    return `Not hunting — ${live} live (${at} at-risk, ${beN} BE). Cap 3.`;
   }
-  return `Hunting 1 A++ per tick, any side (${liveL}L/${liveS}S at-risk). Cap 2 · 3% size. With-trend; fades special.`;
+  if (at >= 2) {
+    return `Not hunting — 2 at-risk (${liveL}L/${liveS}S). 3rd after one TP1/BE.`;
+  }
+  return `Hunting 1 A++ per tick, any side (${liveL}L/${liveS}S at-risk). 2 at 3%. 3rd if one is TP1/BE.`;
 }
 
 function composePass(note: string | null, liveL: number, liveS: number, liveLines: string[]) {
@@ -2092,7 +2095,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const atRisk = stillOpen.filter(
       (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
     );
-    const LIVE_CAP = 2;
+    const LIVE_CAP = 3;
     const AT_RISK = 2;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 86, note: "A++ any side · 86%+." };
@@ -2285,7 +2288,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ];
       huntTape = [huntStatus, ...whyLive].filter(Boolean).join("\n");
       notes.push(
-        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk, ${beNLive} BE · cap 2.`,
+        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk, ${beNLive} BE · cap 3.`,
       );
     } else if (settings.armed && liveN.length < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
@@ -2614,8 +2617,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       huntTape = huntStatus;
       notes.push("Disarmed. No new orders.");
     } else if (stillOpen.length >= LIVE_CAP) {
-      huntTape = `${huntStatus}\nLive cap (2 names). Waiting on an exit.`;
-      notes.push("Live cap (2 names). Waiting on an exit.");
+      huntTape = `${huntStatus}\nLive cap (3 names). Waiting on an exit.`;
+      notes.push("Live cap (3 names). Waiting on an exit.");
     } else {
       huntTape = huntTape || huntStatus;
     }
