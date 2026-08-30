@@ -787,8 +787,15 @@ async function ensureTakes(
   const mark = live?.mark && live.mark > 0 ? live.mark : 0;
   const side = pos.side === "short" ? "SHORT" : "LONG";
   const { taggedTake } = await import("@/lib/ta");
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  const [st] = await sql<{ stats_from: string | null }>`
+    select stats_from from auto_settings where user_id = ${pos.user_id} limit 1
+  `;
+  const closed = st ? await closedStats(sql, pos.user_id, st.stats_from) : { wins: 0 };
+  const runners = closed.wins >= 8;
   const afterTp1 = Boolean(pos.tp1_hit) || Boolean(pos.be_moved);
-  const rawTps = parseNums(pos.targets).slice(0, 2);
+  const rawTps = parseNums(pos.targets).slice(0, runners ? 2 : 1);
   const tps: number[] = [];
   for (let i = 0; i < rawTps.length; i += 1) {
     if (afterTp1 && i === 0) continue;
@@ -798,13 +805,14 @@ async function ensureTakes(
     if (mark > 0 && taggedTake(sideLc, mark, px)) continue;
     tps.push(px);
   }
-  if (!afterTp1 && tps.length < 2 && stopPx > 0) {
+  const wantTakes = runners && !afterTp1 ? 2 : 1;
+  if (!afterTp1 && tps.length < wantTakes && stopPx > 0) {
     const entryPx = n(pos.fill_px) || n(pos.entry) || mark;
     const risk = Math.abs(entryPx - stopPx);
     if (risk > 0 && entryPx > 0 && risk / entryPx >= 0.004) {
       const t1 = sideLc === "short" ? entryPx - risk : entryPx + risk;
       const t2 = sideLc === "short" ? entryPx - 2 * risk : entryPx + 2 * risk;
-      for (const raw of [t1, t2]) {
+      for (const raw of (runners ? [t1, t2] : [t1])) {
         const px = Number(formatWeexPx(raw, spec.pricePrecision));
         if (px > 0 && !tps.includes(px) && !(mark > 0 && taggedTake(sideLc, mark, px))) tps.push(px);
       }
@@ -817,14 +825,12 @@ async function ensureTakes(
     mark,
   });
   if (trimmed.killed) {
-    notes.push(`${pos.weex_symbol} cancelled ${trimmed.killed} extra TP/SL. Kept ${trimmed.kept} (1 SL + 2 TP max).`);
+    notes.push(`${pos.weex_symbol} cancelled ${trimmed.killed} extra TP/SL. Kept ${trimmed.kept} (1 SL + ${runners ? "2 TP" : "1 TP"} max).`);
   }
-  const { getSql } = await import("@/lib/db");
-  const sql = await getSql();
   const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
   const oid = (tag: string) => `vela${tag}${pos.id}`.slice(0, 36);
-  const needTp = afterTp1 ? Math.min(1, Math.max(0, tps.length)) : Math.min(2, Math.max(1, tps.length));
-  const maxProtect = afterTp1 ? 2 : 3;
+  const needTp = afterTp1 ? Math.min(1, Math.max(0, tps.length)) : Math.min(wantTakes, Math.max(1, tps.length));
+  const maxProtect = 1 + needTp;
   const armedOk = /tps:set/.test(pos.weex_resp ?? "");
   if (armedOk && trimmed.listed === 0 && stopOverride == null) {
     return;
@@ -2664,7 +2670,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       huntTape = huntTape || huntStatus;
     }
 
-    const learned = "A++ only · with BTC · 85%+ or continuation pullback · will not fill empty slots.";
+    const learned =
+      stats.wins >= 8
+        ? "A++ only · with BTC · 85%+ or continuation · 70/30 runner back after 8 wins."
+        : `A++ only · with BTC · 85%+ or continuation · full size at 1 TP (${stats.wins}/8 wins to restore runner).`;
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))
