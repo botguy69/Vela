@@ -1287,11 +1287,11 @@ export const getAutoDesk = createServerFn({ method: "GET" })
       }
     }
     const atRiskTick = (t: (typeof mapped)[number]) =>
-      (t.liveOnWeex || t.status === "working") && !(t.beMoved && t.tp1Hit);
+      t.liveOnWeex && !(t.beMoved && t.tp1Hit);
     const liveL = mapped.filter((t) => atRiskTick(t) && t.side === "long").length;
     const liveS = mapped.filter((t) => atRiskTick(t) && t.side === "short").length;
-    const beN = mapped.filter((t) => t.liveOnWeex && t.beMoved && t.tp1Hit).length;
-    const liveTotal = mapped.filter((t) => t.liveOnWeex || t.status === "working").length;
+    const beN = mapped.filter((t) => t.liveOnWeex && (t.beMoved && t.tp1Hit)).length;
+    const liveTotal = mapped.filter((t) => t.liveOnWeex).length;
     const { whyTookTrade } = await import("@/lib/desk-rules");
     const liveLines = mapped
       .filter((t) => t.liveOnWeex || t.status === "working")
@@ -2129,7 +2129,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
     const beFree = new Set(
       stillOpenRaw
-        .filter((s) => s.be_moved && s.tp1_hit)
+        .filter((s) => {
+          if (!(s.status === "filled")) return false;
+          if (s.be_moved && s.tp1_hit) return true;
+          const e = n(s.fill_px) || n(s.entry);
+          const st = n(s.stop);
+          if (!(e > 0 && st > 0)) return false;
+          return s.side === "short" ? st <= e * 1.0005 : st >= e * 0.9995;
+        })
         .map((s) => s.weex_symbol.replace(/_/g, "").toUpperCase()),
     );
     let hiddenLive = 0;
@@ -2154,23 +2161,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         if (beFree.has(k)) continue;
         syms.add(k);
       }
-      for (const s of stillOpenRaw) {
-        if ((s.side === "short" ? "short" : "long") !== side) continue;
-        if (flattened.has(s.weex_symbol)) continue;
-        if (s.status === "filled" && s.be_moved && s.tp1_hit) continue;
-        if (s.status === "filled") {
-          const k = s.weex_symbol.replace(/_/g, "").toUpperCase();
-          if (!liveN.some((p) => p.qty > 0 && p.symbol.replace(/_/g, "").toUpperCase() === k)) continue;
-        } else if (s.status !== "working" && s.status !== "proposed") continue;
-        syms.add(s.weex_symbol.replace(/_/g, "").toUpperCase());
-      }
       return syms.size;
     };
     let riskL = countAtRisk("long");
     let riskS = countAtRisk("short");
     const atRiskN = riskL + riskS;
     const beNLive = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-    const blocked = atRiskN >= AT_RISK || liveN.length >= LIVE_CAP;
+    const blocked = liveN.length >= LIVE_CAP || (liveN.length > 0 && atRiskN >= AT_RISK);
     const roomN = blocked ? 0 : 1;
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
@@ -2350,7 +2347,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               and created_at > now() - interval '4 minutes'
               and status in ('proposed','working','filled')
           `;
-          if ((burst?.n ?? 0) >= 1 && beNLive < 1) room = 0;
+          if ((burst?.n ?? 0) >= 1 && liveN.length > 0 && beNLive < 1) room = 0;
           let openLimits = stillOpenRaw.filter(
             (s) => s.status === "working" || s.status === "proposed",
           ).length;
