@@ -132,8 +132,8 @@ export function marketBias(
     return {
       bias: "long",
       note: ltf
-        ? "BTC pumping — leaning long. Still take A++ shorts if a coin fades vs BTC."
-        : "BTC pumping, 15m pausing — leaning long. A++ shorts still ok if a coin diverges.",
+        ? "BTC pumping — longs only. No fade shorts."
+        : "BTC pumping, 15m pausing — longs only. Wait for 15m. No fade shorts.",
     };
   }
   if (h4S && h1S) {
@@ -141,11 +141,11 @@ export function marketBias(
     return {
       bias: "short",
       note: ltf
-        ? "BTC bleeding — leaning short. Still take A++ longs if a coin holds vs BTC."
-        : "BTC bleeding, 15m pausing — leaning short. A++ longs still ok if a coin diverges.",
+        ? "BTC bleeding — shorts only. No dip-buy longs."
+        : "BTC bleeding, 15m pausing — shorts only. Wait for 15m. No dip-buy longs.",
     };
   }
-  return { bias: "chop", note: "BTC mixed / chopping. A++ both ways. Opposite the book only on a fade." };
+  return { bias: "chop", note: "BTC mixed / chopping. A++ both ways. 15m must confirm." };
 }
 
 /** Snap limit to the 15m mean. Stop / targets stay — breathing room is unchanged. */
@@ -348,14 +348,14 @@ export function eliteScalp(
   bar: number,
   _bias?: "long" | "short" | "chop",
 ): boolean {
-  if (conf < Math.max(86, bar)) return false;
+  if (conf < Math.max(90, bar)) return false;
   return /double (top|bottom)|failed range|Failed bounce|vol fade|washout RSI (1\d|2[0-5])|climax rejection|Dry-up at|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-5])|Overbought RSI (7[0-9]|8\d)/i.test(
     thesis,
   );
 }
 
 export const APLUS_MENU =
-  "A++ double · pin · engulf · climax · dry-up · washout ≤25 · failed range · failed bounce · overbought reject ≥70. Continuation and trend-cooling are off.";
+  "A++ with BTC. 15m must confirm. Double · pin · engulf · climax · dry-up · washout ≤25 · failed range · overbought ≥70. No dip-buy vs BTC. Continuation off.";
 
 export function aPlusKind(thesis: string): string | null {
   const t = thesis;

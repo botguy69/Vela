@@ -214,7 +214,7 @@ function composePass(
     .filter((ln) => !/continuation|trend cooling|80%\+|21h-mean/i.test(ln));
   const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
   uniq.push(
-    "A++ double · pin · engulf · climax · dry-up · washout ≤25 · failed range · failed bounce · overbought reject ≥70. Continuation and trend-cooling are off.",
+    "A++ with BTC · 90%+ · 15m confirm. No dip-buy vs a BTC dump. Continuation off.",
   );
   return [head, ...uniq].filter(Boolean).join("\n");
 }
@@ -2124,7 +2124,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const LIVE_CAP = 3;
     const AT_RISK = 2;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
-    const bar = { minConf: 86, note: "A++ any side · 86%+." };
+    const bar = { minConf: 90, note: "A++ with BTC · 90%+ · 15m confirm." };
 
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
     const beFree = new Set(
@@ -2437,39 +2437,29 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
             const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
             const trig = rules.ltfTrigger(pick.side, coin15);
-            if (!aPlus && !trig.ok && !trig.wait) {
+            if (!trig.ok && !trig.wait) {
               veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
               whyNot.push(`${tag} ${trig.reason}`);
               continue;
             }
-            const fadePattern =
-              pick.side === "short"
-                ? /double top|Failed bounce|Overbought|Pin bar at highs|Failed range high|Bear engulf|climax rejection at highs|Dry-up at high|supply on 2nd/i.test(
-                    pick.thesis ?? "",
-                  )
-                : /double bottom|washout|Oversold|Pin bar at lows|Failed range low|Bull engulf|climax rejection at lows|Dry-up at low|buyers on 2nd/i.test(
-                    pick.thesis ?? "",
-                  );
             const withBtc = compass.bias === "chop" || pick.side === compass.bias;
-            if (!withBtc && !fadePattern) {
-              veto = `${pick.weexSymbol} ${pick.side} vs BTC ${compass.bias} — fade only on special structure`;
-              whyNot.push(`${tag} vs BTC ${compass.bias} — not a fade`);
+            if (!withBtc) {
+              veto = `${pick.weexSymbol} ${pick.side} vs BTC ${compass.bias} — with-tape only`;
+              whyNot.push(`${tag} vs BTC ${compass.bias} — no dip-buy / fade`);
               continue;
             }
             const liveOpp = liveN.some(
               (p) => p.qty > 0 && (p.side === "short" ? "short" : "long") !== pick.side,
             );
-            if (liveOpp && !fadePattern) {
-              whyNot.push(`${tag} opposite the live book — need a fade`);
+            if (liveOpp && compass.bias !== "chop") {
+              whyNot.push(`${tag} opposite the live book — BTC not mixed`);
               continue;
             }
-            if (!aPlus) {
-              const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
-              if (!rules.htfAllows(pick.side, h4)) {
-                veto = `HTF veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
-                whyNot.push(`${tag} 4h veto`);
-                continue;
-              }
+            const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
+            if (!rules.htfAllows(pick.side, h4)) {
+              veto = `HTF veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
+              whyNot.push(`${tag} 4h veto`);
+              continue;
             }
             const book = await getBookTicker(pick.weexSymbol);
             if (book && rules.spreadTooWide(pick.weexSymbol, book.bid, book.ask)) {
@@ -2499,12 +2489,25 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               limit 1
             `;
             if (already) continue;
+            const [pairLoss] = await sql<{ id: number }>`
+              select id from auto_signals
+              where user_id = ${userId}
+                and weex_symbol = ${pick.weexSymbol}
+                and status in ('stopped','skipped')
+                and coalesce(pnl, 0) < 0
+                and updated_at > now() - interval '6 hours'
+              limit 1
+            `;
+            if (pairLoss) {
+              whyNot.push(`${tag} same pair lost in 6h — skip`);
+              continue;
+            }
             if (parked && parked.weex_symbol === pick.weexSymbol && parked.side === pick.side) {
               whyNot.push(`${tag} already parked — leave the limit`);
               continue;
             }
-            const timed0 = rules.withLtfEntry(pick, aPlus ? null : trig.pullback);
-            const timed = !aPlus && trig.wait ? { ...timed0, entryType: "limit" as const } : timed0;
+            const timed0 = rules.withLtfEntry(pick, trig.pullback);
+            const timed = trig.wait ? { ...timed0, entryType: "limit" as const } : timed0;
             const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
             if (!sz) continue;
             if (sz.entryType === "limit" && openLimits >= 1) {
