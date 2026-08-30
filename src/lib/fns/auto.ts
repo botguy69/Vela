@@ -389,14 +389,21 @@ async function closedStats(
     tFrom = resetAt;
     await sql`update auto_settings set stats_from = ${STATS_RESET} where user_id = ${userId}`;
   }
-  const window = uniq.filter((r) => closeAt(r) >= tFrom - 2000);
-  const closed = window.length;
-  const wins = window.filter((r) => n(r.pnl) > 0).length;
-  const rOf = (r: (typeof window)[number]) => {
+  const rOf = (r: (typeof uniq)[number]) => {
     const unit = oneRUsd(r);
     if (!(unit > 0.05)) return null;
     return n(r.pnl) / unit;
   };
+  const window = uniq.filter((r) => {
+    if (closeAt(r) < tFrom - 2000) return false;
+    const rr = rOf(r);
+    if (rr != null && rr > 0 && rr < 0.4) return false;
+    const reason = r.close_reason ?? "";
+    if (/BE scratch|Closed in green/i.test(reason) && n(r.pnl) > 0 && (rr == null || rr < 0.4)) return false;
+    return true;
+  });
+  const closed = window.length;
+  const wins = window.filter((r) => n(r.pnl) > 0).length;
   const winR = window.map(rOf).filter((x): x is number => x != null && x > 0);
   const lossR = window.map(rOf).filter((x): x is number => x != null && x < 0);
   const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
