@@ -192,8 +192,14 @@ function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
   if (at >= 2) {
     return `Not hunting — 2 at-risk (${liveL}L/${liveS}S). 3rd after one TP1/BE.`;
   }
-  if (beN >= 1) {
+  if (at === 1 && beN >= 1) {
     return `Hunting 3rd A++ (${liveL}L/${liveS}S at-risk, ${beN} BE). Cap 3.`;
+  }
+  if (beN >= 1 && at === 0) {
+    return `Hunting (${beN} BE live, 0 at-risk). Room for 2 at 3%.`;
+  }
+  if (at === 1) {
+    return `Hunting 2nd A++ (${liveL}L/${liveS}S at-risk). 2 at 3%. 3rd if one is TP1/BE.`;
   }
   return `Hunting 1 A++ per tick, any side (${liveL}L/${liveS}S at-risk). 2 at 3%. 3rd if one is TP1/BE.`;
 }
@@ -2127,18 +2133,18 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const bar = { minConf: 90, note: "A++ with BTC · 90%+ · 15m confirm." };
 
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
-    const beFree = new Set(
-      stillOpenRaw
-        .filter((s) => {
-          if (!(s.status === "filled")) return false;
-          if (s.be_moved && s.tp1_hit) return true;
-          const e = n(s.fill_px) || n(s.entry);
-          const st = n(s.stop);
-          if (!(e > 0 && st > 0)) return false;
-          return s.side === "short" ? st <= e * 1.0005 : st >= e * 0.9995;
-        })
-        .map((s) => s.weex_symbol.replace(/_/g, "").toUpperCase()),
-    );
+    const beFree = new Set<string>();
+    for (const p of liveN) {
+      const k = p.symbol.replace(/_/g, "").toUpperCase();
+      const row = stillOpen.find(
+        (s) =>
+          s.status === "filled" &&
+          s.weex_symbol.replace(/_/g, "").toUpperCase() === k &&
+          Boolean(s.be_moved) &&
+          Boolean(s.tp1_hit),
+      );
+      if (row) beFree.add(k);
+    }
     let hiddenLive = 0;
     if (liveN.length === 0 && flattened.size) {
       const credsGate = await credsFrom(settings);
