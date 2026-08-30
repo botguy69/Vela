@@ -2437,16 +2437,28 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
             const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
-            const trig = rules.ltfTrigger(pick.side, coin15);
-            if (!trig.ok && !trig.wait) {
-              veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
-              whyNot.push(`${tag} ${trig.reason}`);
-              continue;
-            }
             const withBtc = compass.bias === "chop" || pick.side === compass.bias;
             if (!withBtc) {
               veto = `${pick.weexSymbol} ${pick.side} vs BTC ${compass.bias} — with-tape only`;
               whyNot.push(`${tag} vs BTC ${compass.bias} — no dip-buy / fade`);
+              continue;
+            }
+            const trig = rules.ltfTrigger(pick.side, coin15);
+            if (compass.bias === "chop") {
+              if (!trig.ok && !trig.wait) {
+                veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
+                whyNot.push(`${tag} ${trig.reason}`);
+                continue;
+              }
+              const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
+              if (!rules.htfAllows(pick.side, h4)) {
+                veto = `HTF veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
+                whyNot.push(`${tag} 4h veto`);
+                continue;
+              }
+            } else if (!rules.ltfAllows(pick.side, coin15)) {
+              veto = `${pick.weexSymbol} ${pick.side} 15m fighting BTC ${compass.bias}`;
+              whyNot.push(`${tag} 15m fighting`);
               continue;
             }
             const liveOpp = liveN.some(
@@ -2454,12 +2466,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             );
             if (liveOpp && compass.bias !== "chop") {
               whyNot.push(`${tag} opposite the live book — BTC not mixed`);
-              continue;
-            }
-            const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
-            if (!rules.htfAllows(pick.side, h4)) {
-              veto = `HTF veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
-              whyNot.push(`${tag} 4h veto`);
               continue;
             }
             const book = await getBookTicker(pick.weexSymbol);
@@ -2507,8 +2513,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} already parked — leave the limit`);
               continue;
             }
-            const timed0 = rules.withLtfEntry(pick, trig.pullback);
-            const timed = trig.wait ? { ...timed0, entryType: "limit" as const } : timed0;
+            const timed0 =
+              compass.bias === "chop" ? rules.withLtfEntry(pick, trig.pullback) : pick;
+            const timed =
+              compass.bias === "chop" && trig.wait
+                ? { ...timed0, entryType: "limit" as const }
+                : timed0;
             const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
             if (!sz) continue;
             if (sz.entryType === "limit" && openLimits >= 1) {
