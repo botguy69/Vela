@@ -382,15 +382,14 @@ async function closedStats(
     return Number.isFinite(f) ? f : 0;
   };
   const uniq = uniqueFills(rows).sort((a, b) => closeAt(a) - closeAt(b));
-  const tFrom = statsFrom ? new Date(statsFrom).getTime() : 0;
-  let window = tFrom > 0 ? uniq.filter((r) => closeAt(r) >= tFrom - 2000) : uniq;
-  if (tFrom <= 0) {
-    window = uniq.slice(-15);
-    const pin = window[0] ? new Date(closeAt(window[0])).toISOString() : null;
-    if (pin) {
-      await sql`update auto_settings set stats_from = ${pin} where user_id = ${userId}`;
-    }
+  const STATS_RESET = "2026-08-30T19:05:00.000Z";
+  const resetAt = new Date(STATS_RESET).getTime();
+  let tFrom = statsFrom ? new Date(statsFrom).getTime() : 0;
+  if (!(tFrom >= resetAt)) {
+    tFrom = resetAt;
+    await sql`update auto_settings set stats_from = ${STATS_RESET} where user_id = ${userId}`;
   }
+  const window = uniq.filter((r) => closeAt(r) >= tFrom - 2000);
   const closed = window.length;
   const wins = window.filter((r) => n(r.pnl) > 0).length;
   const rOf = (r: (typeof window)[number]) => {
