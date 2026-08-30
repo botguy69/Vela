@@ -217,10 +217,10 @@ function composePass(
     .split("\n")
     .map((ln) => ln.trim())
     .filter((ln) => /^(Eying |Took |BTC )/i.test(ln))
-    .filter((ln) => !/continuation|trend cooling|80%\+|21h-mean/i.test(ln));
+    .filter((ln) => !/trend cooling|80%\+|21h-mean/i.test(ln));
   const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
   uniq.push(
-    "A++ with BTC · 90%+ · 15m confirm. No dip-buy vs a BTC dump. Continuation off.",
+    "A++ with BTC · 85%+ structure or continuation pullback. 15m agree. No dip-buy vs a dump.",
   );
   return [head, ...uniq].filter(Boolean).join("\n");
 }
@@ -2130,7 +2130,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const LIVE_CAP = 3;
     const AT_RISK = 2;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
-    const bar = { minConf: 90, note: "A++ with BTC · 90%+ · 15m confirm." };
+    const bar = { minConf: 85, note: "A++ with BTC · 85%+ structure or continuation pullback." };
 
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
     const beFree = new Set<string>();
@@ -2665,7 +2665,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       huntTape = huntTape || huntStatus;
     }
 
-    const learned = "A++ only · 90%+ · with BTC · 15m confirm · will not fill empty slots.";
+    const learned = "A++ only · with BTC · 85%+ or continuation pullback · will not fill empty slots.";
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))

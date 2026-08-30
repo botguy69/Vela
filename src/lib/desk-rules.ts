@@ -341,21 +341,27 @@ export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
   return filtered.length ? filtered : setups;
 }
 
-/** A++ scalp — only the best structure. No continuation, no trend-cooling, no RSI 48 mean. */
+/** A++ — structure at 85%+, plus with-BTC continuation (pullback, not the spike). */
 export function eliteScalp(
   thesis: string,
   conf: number,
   bar: number,
-  _bias?: "long" | "short" | "chop",
+  bias?: "long" | "short" | "chop",
 ): boolean {
-  if (conf < Math.max(90, bar)) return false;
-  return /double (top|bottom)|failed range|Failed bounce|vol fade|washout RSI (1\d|2[0-5])|climax rejection|Dry-up at|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-5])|Overbought RSI (7[0-9]|8\d)/i.test(
-    thesis,
-  );
+  const floor = Math.max(85, bar);
+  const structure =
+    /double (top|bottom)|failed range|Failed bounce|vol fade|washout RSI (1\d|2[0-5])|climax rejection|Dry-up at|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-5])|Overbought RSI (7[0-9]|8\d)/i.test(
+      thesis,
+    );
+  if (structure && conf >= floor) return true;
+  if (bias && bias !== "chop" && /Continuation (on|short on) 21h/i.test(thesis) && conf >= 82) {
+    return true;
+  }
+  return false;
 }
 
 export const APLUS_MENU =
-  "A++ with BTC. 15m must confirm. Double · pin · engulf · climax · dry-up · washout ≤25 · failed range · overbought ≥70. No dip-buy vs BTC. Continuation off.";
+  "A++ with BTC. Structure 85%+ or continuation pullback. 15m must agree. No dip-buy vs a dump. Cooling off.";
 
 export function aPlusKind(thesis: string): string | null {
   const t = thesis;
