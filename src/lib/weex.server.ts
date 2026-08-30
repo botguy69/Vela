@@ -557,6 +557,12 @@ export async function flattenWeex(
     clientOid: string;
   },
 ): Promise<WeexResult<unknown>> {
+  const live = await getWeexPositionQty(creds, order.symbol);
+  const want = Number(order.quantity);
+  if (live != null && live > 0 && Number.isFinite(want) && want > 0 && live > want * 1.25) {
+    return { ok: false, error: "refuse partial flatten — larger position live", status: 0 };
+  }
+  const qty = live != null && live > 0 ? String(live) : order.quantity;
   return weexRequest({
     creds,
     method: "POST",
@@ -566,7 +572,7 @@ export async function flattenWeex(
       side: order.side,
       positionSide: order.positionSide,
       type: "MARKET",
-      quantity: order.quantity,
+      quantity: qty,
       newClientOrderId: order.clientOid.slice(0, 36),
       reduceOnly: "true",
     },

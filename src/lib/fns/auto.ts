@@ -886,6 +886,7 @@ async function ensureTakes(
     for (let i = start; i < tps.length; i += 1) {
       const slice = slices[i]!;
       if (Number(slice) <= 0) continue;
+      if (!runners && liveQty > 0 && Number(slice) < liveQty * 0.85) continue;
       const sent = await placeWeexTake(creds, {
         symbol: pos.weex_symbol,
         positionSide: side,
@@ -1872,7 +1873,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       }
       if (pos.status === "filled" && credsNow && left != null && left > 0) {
         const orig = origQty(pos);
-        const dust = orig > 0 && left <= orig * 0.18;
+        const dust = orig > 0 && left <= orig * 0.05;
         if (dust && !hitTp) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));
           const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
@@ -1970,7 +1971,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
       if (hitStop || hitTp) {
         const orig = origQty(pos);
-        const dust = left != null && left > 0 && orig > 0 && left <= orig * 0.18;
+        const dust = left != null && left > 0 && orig > 0 && left <= orig * 0.05;
         if (credsNow && left != null && left > 0 && (hitStop || hitTp || dust)) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));
           const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
