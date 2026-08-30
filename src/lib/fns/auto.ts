@@ -1932,11 +1932,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           continue;
         }
         const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
-        const hours = style === "scalp" ? "5h" : "12h";
+        const hours = style === "scalp" ? "12h" : "18h";
         const why =
           pnl < 0
-            ? `Sold at a loss to move on — no 0.3R in ${hours}`
-            : `Sold to move on — no 0.3R in ${hours}`;
+            ? `Sold at a loss to move on — still red after ${hours}`
+            : `Sold to move on — nowhere after ${hours}`;
         await sql`
           update auto_signals
           set status = 'skipped', closed_px = ${px}, pnl = ${pnl}, close_reason = ${why}, updated_at = now()
