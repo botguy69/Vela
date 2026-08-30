@@ -1932,7 +1932,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           continue;
         }
         const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
-        const hours = style === "scalp" ? "12h" : "18h";
+        const hours = style === "scalp" ? "5h" : "12h";
         const why =
           pnl < 0
             ? `Sold at a loss to move on — still red after ${hours}`
