@@ -2384,6 +2384,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const conf = s.confidence ?? scoreToConf(s.score);
             if (!rules.eliteScalp(s.thesis ?? "", conf, bar.minConf, compass.bias)) return false;
             if (held.has(s.weexSymbol)) return false;
+            if (compass.bias !== "chop" && s.side !== compass.bias) return false;
             return true;
           });
           const byKind = new Map<string, (typeof aPlusList)[0]>();
@@ -2651,7 +2652,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       huntTape = huntTape || huntStatus;
     }
 
-    const learned = "A++ only · 86%+ structure · will not fill empty slots.";
+    const learned = "A++ only · 90%+ · with BTC · 15m confirm · will not fill empty slots.";
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))
