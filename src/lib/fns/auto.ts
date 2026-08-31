@@ -2420,13 +2420,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (compass.bias !== "chop" && s.side !== compass.bias) return false;
             return true;
           });
-          const best = aPlusList[0];
-          const other = best
-            ? aPlusList.find(
-                (s) => s.side !== best.side && rules.setupQuality(s.thesis ?? "") >= 2,
-              )
-            : undefined;
-          const eyeing = [best, other].filter((s): s is (typeof aPlusList)[0] => Boolean(s)).map((s) => {
+          const primes = aPlusList.filter((s) => rules.setupQuality(s.thesis ?? "") >= 2);
+          const eyeing = (primes.length ? primes : aPlusList.slice(0, 1)).slice(0, 2).map((s) => {
             const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
             return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
           });
