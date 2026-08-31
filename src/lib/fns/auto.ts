@@ -2421,7 +2421,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           });
           const whyNot: string[] = [];
           const pool: typeof aPlusList = [];
-          for (const s of aPlusList.slice(0, 8)) {
+          let checked = 0;
+          for (const s of aPlusList) {
+            if (pool.length >= 4 || checked >= 20) break;
+            checked += 1;
             const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%`;
             const h4 = await getWeexFourHour(s.weexSymbol).catch(() => []);
             const d1 = await getWeexKlines(s.weexSymbol, "1d", 40).catch(() => []);
@@ -2441,7 +2444,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               }
             }
             pool.push(s);
-            if (pool.length >= 4) break;
           }
           const primes = pool.filter((s) => rules.setupQuality(s.thesis ?? "") >= 2);
           const eyeing = (primes.length ? primes : pool.slice(0, 1)).slice(0, 2).map((s) => {
