@@ -391,7 +391,7 @@ export function eliteScalp(
 }
 
 export const APLUS_MENU =
-  "One best A++ on the list. 4h + daily confirm. Structure over RSI. Knife only with divergence.";
+  "One best A++ on the list. 4h confirm. Structure over RSI. Knife only with divergence.";
 
 /** Higher = cleaner. Oversold/washout last so a 92 RSI dump doesn't beat an 86 double. */
 export function setupQuality(thesis: string): number {

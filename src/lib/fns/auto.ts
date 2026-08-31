@@ -2142,7 +2142,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const LIVE_CAP = 3;
     const AT_RISK = 2;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
-    const bar = { minConf: 85, note: "A++ per coin · 85%+ structure or continuation. 4h+daily." };
+    const bar = { minConf: 85, note: "A++ per coin · 85%+ structure or continuation. 4h + 15m." };
 
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
     const beFree = new Set<string>();
@@ -2387,7 +2387,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const tape = rules.marketBias(btc4, btcBook, btc15);
           const compass = {
             bias: "chop" as const,
-            note: `Per coin. 4h + daily + 15m. BTC ${tape.bias} is info only — not a compass.`,
+            note: `Per coin. 4h + 15m. BTC ${tape.bias} is info only — not a compass.`,
           };
           const ordered = [...raw].sort((a, b) => {
             const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf, compass.bias) ? 1 : 0;
@@ -2424,13 +2424,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             seen.add(key);
             const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(conf)}%`;
             const h4 = await getWeexFourHour(s.weexSymbol).catch(() => []);
-            const d1 = await getWeexKlines(s.weexSymbol, "1d", 40).catch(() => []);
             if (!rules.htfAllows(s.side, h4)) {
               whyNot.push(`${tag} 4h reject`);
-              continue;
-            }
-            if (d1.length >= 21 && !rules.htfAllows(s.side, d1)) {
-              whyNot.push(`${tag} daily reject`);
               continue;
             }
             if (rules.setupQuality(s.thesis ?? "") === 0) {
@@ -2450,8 +2445,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const withTape = raw.filter((s) => compass.bias === "chop" || s.side === compass.bias);
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")}`
-            : `Eying no A++ through 4h+daily. Scanned ${withTape.length}. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "One best A++. 4h + daily must agree. RSI-knife needs divergence.";
+            : `Eying no A++ through 4h. Scanned ${withTape.length}. Seat ${atRiskN}/${AT_RISK} open.`;
+          const aPlusLine = "One best A++. 4h must agree. RSI-knife needs divergence.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2487,7 +2482,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
             const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
-            const d1 = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
             const withBtc = compass.bias === "chop" || pick.side === compass.bias;
             if (!withBtc) {
               veto = `${pick.weexSymbol} ${pick.side} vs BTC ${compass.bias} — with-tape only`;
@@ -2497,11 +2491,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (!rules.htfAllows(pick.side, h4)) {
               veto = `${pick.weexSymbol} ${pick.side} 4h reject`;
               whyNot.push(`${tag} 4h reject`);
-              continue;
-            }
-            if (d1.length >= 21 && !rules.htfAllows(pick.side, d1)) {
-              veto = `${pick.weexSymbol} ${pick.side} daily reject`;
-              whyNot.push(`${tag} daily reject`);
               continue;
             }
             if (rules.setupQuality(pick.thesis ?? "") === 0) {
