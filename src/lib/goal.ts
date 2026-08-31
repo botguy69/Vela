@@ -150,14 +150,15 @@ export function adaptMethod(opts: {
 
   next = { ...next, marginPct: 3 };
 
-  // Size cuts lift on wins, not on waiting for equity to climb back.
-  const restored = opts.winStreak >= 2;
-  if (opts.drawdownPct >= 30 && !restored) {
+  // One counted win restores 3%. Scratches <0.4R do not.
+  if (opts.winStreak >= 1) return next;
+
+  if (opts.drawdownPct >= 30) {
     next = {
       ...next,
       marginPct: 1.2,
       minConf: Math.min(82, next.minConf + 4),
-      note: `${next.note} ~30% off peak. 1.2% until two wins in a row — then back to 3%.`,
+      note: `${next.note} ~30% off peak. 1.2% until a win — then back to 3%.`,
     };
   } else if (opts.lossStreak >= 5) {
     next = {
