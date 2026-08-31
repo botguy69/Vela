@@ -2420,11 +2420,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (compass.bias !== "chop" && s.side !== compass.bias) return false;
             return true;
           });
-          const longs = aPlusList.filter((s) => s.side === "long");
-          const shorts = aPlusList.filter((s) => s.side === "short");
-          const mix = [longs[0], shorts[0]].filter((s): s is (typeof aPlusList)[0] => Boolean(s));
-          const rest = aPlusList.filter((s) => !mix.includes(s));
-          const eyeing = [...mix, ...rest].slice(0, 4).map((s) => {
+          const best = aPlusList[0];
+          const other = best
+            ? aPlusList.find(
+                (s) => s.side !== best.side && rules.setupQuality(s.thesis ?? "") >= 2,
+              )
+            : undefined;
+          const eyeing = [best, other].filter((s): s is (typeof aPlusList)[0] => Boolean(s)).map((s) => {
             const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
             return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
           });
@@ -2434,7 +2436,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : `Eying no A++. Seat ${atRiskN}/${AT_RISK} open — not blocked. Scanned ${withTape.length} with-BTC, 0 at 85%+ (21h still the other way).`;
           const aPlusLine =
             compass.bias === "chop"
-              ? "A++ either side. Structure over RSI-knife. 15m agree. BTC is tilt only while flat."
+              ? "One best A++. 4h + daily must agree. RSI-knife needs divergence. Structure over INJ/LDO/BONK clones."
               : `A++  ${rules.APLUS_MENU}`;
           let veto = "No A++ this pass. Slots stay empty.";
           const whyNot: string[] = [];
@@ -2471,23 +2473,36 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
             const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
+            const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
+            const d1 = await getWeexKlines(pick.weexSymbol, "1d", 40).catch(() => []);
             const withBtc = compass.bias === "chop" || pick.side === compass.bias;
             if (!withBtc) {
               veto = `${pick.weexSymbol} ${pick.side} vs BTC ${compass.bias} — with-tape only`;
               whyNot.push(`${tag} vs BTC ${compass.bias} — no dip-buy / fade`);
               continue;
             }
+            if (!rules.htfAllows(pick.side, h4)) {
+              veto = `${pick.weexSymbol} ${pick.side} 4h reject`;
+              whyNot.push(`${tag} 4h reject`);
+              continue;
+            }
+            if (d1.length >= 21 && !rules.htfAllows(pick.side, d1)) {
+              veto = `${pick.weexSymbol} ${pick.side} daily reject`;
+              whyNot.push(`${tag} daily reject`);
+              continue;
+            }
+            if (rules.setupQuality(pick.thesis ?? "") === 0) {
+              const hour = books[pick.weexSymbol] ?? [];
+              if (!rules.rsiDivergence(hour, pick.side)) {
+                whyNot.push(`${tag} RSI-knife, no divergence`);
+                continue;
+              }
+            }
             const trig = rules.ltfTrigger(pick.side, coin15);
             if (compass.bias === "chop") {
               if (!trig.ok && !trig.wait) {
                 veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
                 whyNot.push(`${tag} ${trig.reason}`);
-                continue;
-              }
-              const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
-              if (!rules.htfAllows(pick.side, h4)) {
-                veto = `HTF veto ${pick.weexSymbol} ${pick.side} — slot stays empty`;
-                whyNot.push(`${tag} 4h veto`);
                 continue;
               }
             } else if (!rules.ltfAllows(pick.side, coin15)) {

@@ -66,6 +66,38 @@ export function htfAllows(side: Side, fourHour: Candle[]): boolean {
   return last <= mid * 1.003;
 }
 
+function rsiAt(closes: number[], end: number, period = 14): number | null {
+  if (end - period < 1) return null;
+  let gain = 0;
+  let loss = 0;
+  for (let i = end - period; i < end; i += 1) {
+    const d = closes[i]! - closes[i - 1]!;
+    if (d >= 0) gain += d;
+    else loss -= d;
+  }
+  if (loss === 0) return 100;
+  return 100 - 100 / (1 + gain / loss);
+}
+
+/** Price made a new extreme, RSI did not — confirms RSI-knife, doesn't replace structure. */
+export function rsiDivergence(hourly: Candle[], side: Side): boolean {
+  if (hourly.length < 24) return false;
+  const closes = hourly.map((c) => c.close);
+  const last = hourly.slice(-8);
+  const prev = hourly.slice(-16, -8);
+  const rNow = rsiAt(closes, closes.length);
+  const rPrev = rsiAt(closes, Math.max(14, closes.length - 8));
+  if (rNow == null || rPrev == null) return false;
+  if (side === "long") {
+    const pLo = Math.min(...last.map((c) => c.low));
+    const pLo2 = Math.min(...prev.map((c) => c.low));
+    return pLo <= pLo2 * 1.002 && rNow >= rPrev + 1.5 && rNow <= 42;
+  }
+  const pHi = Math.max(...last.map((c) => c.high));
+  const pHi2 = Math.max(...prev.map((c) => c.high));
+  return pHi >= pHi2 * 0.998 && rNow <= rPrev - 1.5 && rNow >= 58;
+}
+
 /** 15m mean must not be selling a 1h long (and reverse). */
 export function ltfAllows(side: Side, fifteen: Candle[]): boolean {
   if (fifteen.length < 24) return true;
@@ -361,7 +393,7 @@ export function eliteScalp(
 }
 
 export const APLUS_MENU =
-  "A++ either side when flat. Structure (double/pin/engulf/failed/climax) over RSI-knife. 15m must agree. With BTC once a ticket is live.";
+  "One best A++ on the list. 4h + daily confirm. Structure over RSI. Knife only with divergence.";
 
 /** Higher = cleaner. Oversold/washout last so a 92 RSI dump doesn't beat an 86 double. */
 export function setupQuality(thesis: string): number {
