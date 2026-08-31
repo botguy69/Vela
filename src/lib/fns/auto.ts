@@ -2142,7 +2142,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const LIVE_CAP = 3;
     const AT_RISK = 2;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
-    const bar = { minConf: 85, note: "A++ with BTC · 85%+ structure or continuation pullback." };
+    const bar = { minConf: 85, note: "A++ per coin · 85%+ structure or continuation. 4h+daily." };
 
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
     const beFree = new Set<string>();
@@ -2385,13 +2385,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const btc15 = await getWeexKlines("BTCUSDT", "15m", 48).catch(() => []);
           const btc4 = await getWeexFourHour("BTCUSDT").catch(() => []);
           const tape = rules.marketBias(btc4, btcBook, btc15);
-          const compass =
-            liveN.length === 0
-              ? {
-                  bias: "chop" as const,
-                  note: `Book flat — A++ long or short (coin 4h + 15m). BTC ${tape.bias} is tilt, not a veto.`,
-                }
-              : tape;
+          const compass = {
+            bias: "chop" as const,
+            note: `Per coin. 4h + daily + 15m. BTC ${tape.bias} is info only — not a compass.`,
+          };
           const ordered = [...raw].sort((a, b) => {
             const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf, compass.bias) ? 1 : 0;
             const bA = rules.eliteScalp(b.thesis ?? "", b.confidence ?? scoreToConf(b.score), bar.minConf, compass.bias) ? 1 : 0;
@@ -2524,13 +2521,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             } else if (!rules.ltfAllows(pick.side, coin15)) {
               veto = `${pick.weexSymbol} ${pick.side} 15m fighting BTC ${compass.bias}`;
               whyNot.push(`${tag} 15m fighting`);
-              continue;
-            }
-            const liveOpp = liveN.some(
-              (p) => p.qty > 0 && (p.side === "short" ? "short" : "long") !== pick.side,
-            );
-            if (liveOpp && compass.bias !== "chop") {
-              whyNot.push(`${tag} opposite the live book — BTC not mixed`);
               continue;
             }
             const book = await getBookTicker(pick.weexSymbol);

@@ -386,9 +386,7 @@ export function eliteScalp(
       thesis,
     );
   if (structure && conf >= floor) return true;
-  if (bias && bias !== "chop" && /Continuation (on|short on) 21h/i.test(thesis) && conf >= 82) {
-    return true;
-  }
+  if (/Continuation (on|short on) 21h/i.test(thesis) && conf >= 85) return true;
   return false;
 }
 
