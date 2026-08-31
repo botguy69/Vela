@@ -2,6 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { adaptMethod, clampPeak, GOAL_USD, STAGE2_USD, multipleToGoal, phaseForRun, progressPct, stageTarget } from "@/lib/goal";
 
+/** WR / streaks start when 4h confirm went live. Older tape is junk. */
+const TAPE_FROM = "2026-08-31T02:30:00.000Z";
+
 type SettingsRow = {
   user_id: string;
   venue: string;
@@ -372,7 +375,7 @@ async function closedStats(
     return Number.isFinite(f) ? f : 0;
   };
   const uniq = uniqueFills(rows).sort((a, b) => closeAt(a) - closeAt(b));
-  const STATS_RESET = "2026-08-30T19:05:00.000Z";
+  const STATS_RESET = TAPE_FROM;
   const resetAt = new Date(STATS_RESET).getTime();
   let tFrom = statsFrom ? new Date(statsFrom).getTime() : 0;
   if (!(tFrom >= resetAt)) {
@@ -2092,6 +2095,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       select pnl, close_reason from auto_signals
       where user_id = ${userId}
         and status in ('stopped','targeted','skipped')
+        and updated_at >= ${TAPE_FROM}::timestamptz
       order by updated_at desc
       limit 12
     `;
