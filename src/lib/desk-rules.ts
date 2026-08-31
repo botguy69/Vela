@@ -509,7 +509,7 @@ export function writeDeskNote(opts: {
     `${opts.phase}. Equity $${eq.toFixed(2)}. Margin cap ${opts.marginPct.toFixed(1)}% of the WEEX wallet, coin-max lev, cross. The stop is the SL — not isolated-style “liq in 0.25%.” Unused wallet backs the ticket. Residual risk is a gap through the SL, not liquidation before it.`,
   );
   if (!opts.tickets.length) {
-    lines.push("Nothing on. Waiting for an A++ 1h idea that tags the 15m, clears spread, and fits 2 at-risk (3rd after one TP1/BE).");
+    lines.push("Nothing on. Waiting for an A++ 1h idea that tags the 15m, clears spread, and fits 4 at-risk.");
     if (opts.correction) lines.push(opts.correction);
     return lines.join(" ");
   }

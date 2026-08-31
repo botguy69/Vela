@@ -186,22 +186,13 @@ function feeBePx(side: "long" | "short", entry: number, mark: number, weexBe: nu
 function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
   const at = liveL + liveS;
   const live = liveTotal ?? at + beN;
-  if (live >= 3) {
-    return `Not hunting — ${live} live (${at} at-risk, ${beN} BE). Cap 3.`;
+  if (live >= 4 || at >= 4) {
+    return `Not hunting — ${live} live (${at} at-risk). Cap 4.`;
   }
-  if (at >= 2) {
-    return `Not hunting — 2 at-risk (${liveL}L/${liveS}S). 3rd after one TP1/BE.`;
+  if (at >= 1) {
+    return `Hunting next A++ (${at}/4 at-risk, ${liveL}L/${liveS}S). One per tick.`;
   }
-  if (at === 1 && beN >= 1) {
-    return `Hunting 3rd A++ (${liveL}L/${liveS}S at-risk, ${beN} BE). Cap 3.`;
-  }
-  if (beN >= 1 && at === 0) {
-    return `Hunting (${beN} BE live, 0 at-risk). Room for 2 at 3%.`;
-  }
-  if (at === 1) {
-    return `Hunting 2nd A++ (${liveL}L/${liveS}S at-risk). 2 at 3%. 3rd if one is TP1/BE.`;
-  }
-  return `Hunting 1 A++ per tick, long or short (${liveL}L/${liveS}S at-risk).`;
+  return `Hunting 1 A++ per tick, long or short (0/4 at-risk).`;
 }
 
 function composePass(
@@ -2139,8 +2130,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const atRisk = stillOpen.filter(
       (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
     );
-    const LIVE_CAP = 3;
-    const AT_RISK = 2;
+    const LIVE_CAP = 4;
+    const AT_RISK = 4;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 85, note: "A++ per coin · 85%+ structure or continuation. 4h + 15m." };
 
@@ -2245,7 +2236,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               updated_at = now()
           where id = ${row.id} and user_id = ${userId}
         `;
-        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 2 at-risk`);
+        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 4 at-risk`);
       }
       for (const row of stillOpenRaw) {
         const sym = row.weex_symbol.replace(/_/g, "").toUpperCase();
@@ -2292,12 +2283,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           await sql`
             update auto_signals
             set status = 'skipped',
-                close_reason = ${"Cancelled — 2 at-risk already"},
+                close_reason = ${"Cancelled — 4 at-risk already"},
                 pnl = 0,
                 updated_at = now()
             where id = ${row.id} and user_id = ${userId}
           `;
-          notes.push(`${row.weex_symbol} limit cancelled — 2 at-risk already`);
+          notes.push(`${row.weex_symbol} limit cancelled — 4 at-risk already`);
           continue;
         }
         slotN += 1;
@@ -2365,7 +2356,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               and created_at > now() - interval '4 minutes'
               and status = 'filled'
           `;
-          if ((burst?.n ?? 0) >= 1 && liveN.length > 0 && beNLive < 1) room = 0;
+          if ((burst?.n ?? 0) >= 1 && atRiskN >= AT_RISK) room = 0;
           let openLimits = stillOpenRaw.filter(
             (s) => s.status === "working" || s.status === "proposed",
           ).length;
@@ -2700,8 +2691,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       huntTape = huntStatus;
       notes.push("Disarmed. No new orders.");
     } else if (stillOpen.length >= LIVE_CAP) {
-      huntTape = `${huntStatus}\nLive cap (3 names). Waiting on an exit.`;
-      notes.push("Live cap (3 names). Waiting on an exit.");
+      huntTape = `${huntStatus}\nLive cap (4 names). Waiting on an exit.`;
+      notes.push("Live cap (4 names). Waiting on an exit.");
     } else {
       huntTape = huntTape || huntStatus;
     }
