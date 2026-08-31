@@ -2385,7 +2385,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
           const btc15 = await getWeexKlines("BTCUSDT", "15m", 48).catch(() => []);
           const btc4 = await getWeexFourHour("BTCUSDT").catch(() => []);
-          const compass = rules.marketBias(btc4, btcBook, btc15);
+          const tape = rules.marketBias(btc4, btcBook, btc15);
+          const compass =
+            liveN.length === 0
+              ? {
+                  bias: "chop" as const,
+                  note: `Book flat — A++ long or short (coin 4h + 15m). BTC ${tape.bias} is tilt, not a veto.`,
+                }
+              : tape;
           const ordered = [...raw].sort((a, b) => {
             const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf, compass.bias) ? 1 : 0;
             const bA = rules.eliteScalp(b.thesis ?? "", b.confidence ?? scoreToConf(b.score), bar.minConf, compass.bias) ? 1 : 0;
