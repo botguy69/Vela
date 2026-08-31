@@ -2701,7 +2701,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const at2 = riskL + riskS;
           const be2 = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
           const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened);
-          huntTape = [huntNow, compass.note, ...whyLive, tookLine, whyNot.length ? `Skip  ${whyNot.slice(0, 3).join(" · ")}` : "", eyeLine, aPlusLine].filter(Boolean).join("\n");
+          huntTape = [huntNow, compass.note, ...whyLive, tookLine, whyNot.length ? `Skip  ${whyNot.slice(0, 3).join(" · ")}${whyNot.length > 3 ? ` · +${whyNot.length - 3} more` : ""}` : "", eyeLine, aPlusLine].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {
