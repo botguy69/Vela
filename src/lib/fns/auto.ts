@@ -216,12 +216,11 @@ function composePass(
   const fromTick = (note ?? "")
     .split("\n")
     .map((ln) => ln.trim())
-    .filter((ln) => /^(Eying |Took |BTC )/i.test(ln))
-    .filter((ln) => !/trend cooling|80%\+|21h-mean/i.test(ln));
+    .filter((ln) =>
+      /^(Eying |Took |Skip |BTC |Book |One |A\+\+)/i.test(ln),
+    )
+    .filter((ln) => !/trend cooling|80%\+|21h-mean|No dip-buy vs a dump/i.test(ln));
   const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
-  uniq.push(
-    "A++ with BTC · 85%+ structure or continuation pullback. 15m agree. No dip-buy vs a dump.",
-  );
   return [head, ...uniq].filter(Boolean).join("\n");
 }
 
@@ -2420,23 +2419,43 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (compass.bias !== "chop" && s.side !== compass.bias) return false;
             return true;
           });
-          const primes = aPlusList.filter((s) => rules.setupQuality(s.thesis ?? "") >= 2);
-          const eyeing = (primes.length ? primes : aPlusList.slice(0, 1)).slice(0, 2).map((s) => {
+          const whyNot: string[] = [];
+          const pool: typeof aPlusList = [];
+          for (const s of aPlusList.slice(0, 8)) {
+            const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%`;
+            const h4 = await getWeexFourHour(s.weexSymbol).catch(() => []);
+            const d1 = await getWeexKlines(s.weexSymbol, "1d", 40).catch(() => []);
+            if (!rules.htfAllows(s.side, h4)) {
+              whyNot.push(`${tag} 4h reject`);
+              continue;
+            }
+            if (d1.length >= 21 && !rules.htfAllows(s.side, d1)) {
+              whyNot.push(`${tag} daily reject`);
+              continue;
+            }
+            if (rules.setupQuality(s.thesis ?? "") === 0) {
+              const hour = books[s.weexSymbol] ?? [];
+              if (!rules.rsiDivergence(hour, s.side)) {
+                whyNot.push(`${tag} RSI-knife, no divergence`);
+                continue;
+              }
+            }
+            pool.push(s);
+            if (pool.length >= 4) break;
+          }
+          const primes = pool.filter((s) => rules.setupQuality(s.thesis ?? "") >= 2);
+          const eyeing = (primes.length ? primes : pool.slice(0, 1)).slice(0, 2).map((s) => {
             const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
             return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
           });
           const withTape = raw.filter((s) => compass.bias === "chop" || s.side === compass.bias);
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")}`
-            : `Eying no A++. Seat ${atRiskN}/${AT_RISK} open — not blocked. Scanned ${withTape.length} with-BTC, 0 at 85%+ (21h still the other way).`;
-          const aPlusLine =
-            compass.bias === "chop"
-              ? "One best A++. 4h + daily must agree. RSI-knife needs divergence. Structure over INJ/LDO/BONK clones."
-              : `A++  ${rules.APLUS_MENU}`;
-          let veto = "No A++ this pass. Slots stay empty.";
-          const whyNot: string[] = [];
+            : `Eying no A++ through 4h+daily. Scanned ${withTape.length}. Seat ${atRiskN}/${AT_RISK} open.`;
+          const aPlusLine = "One best A++. 4h + daily must agree. RSI-knife needs divergence.";
+          let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
-          for (const pick of ordered) {
+          for (const pick of pool) {
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
             const confNow = pick.confidence ?? scoreToConf(pick.score);
             const aPlus = rules.eliteScalp(pick.thesis ?? "", confNow, bar.minConf, compass.bias);
@@ -2693,7 +2712,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const at2 = riskL + riskS;
           const be2 = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
           const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened);
-          huntTape = [huntNow, compass.note, ...whyLive, tookLine, eyeLine, aPlusLine].filter(Boolean).join("\n");
+          huntTape = [huntNow, compass.note, ...whyLive, tookLine, whyNot.length ? `Skip  ${whyNot.slice(0, 3).join(" · ")}` : "", eyeLine, aPlusLine].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {
