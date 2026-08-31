@@ -201,7 +201,7 @@ function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
   if (at === 1) {
     return `Hunting 2nd A++ (${liveL}L/${liveS}S at-risk). 2 at 3%. 3rd if one is TP1/BE.`;
   }
-  return `Hunting 1 A++ per tick, any side (${liveL}L/${liveS}S at-risk). 2 at 3%. 3rd if one is TP1/BE.`;
+  return `Hunting 1 A++ per tick, long or short (${liveL}L/${liveS}S at-risk).`;
 }
 
 function composePass(
@@ -2397,27 +2397,34 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf, compass.bias) ? 1 : 0;
             const bA = rules.eliteScalp(b.thesis ?? "", b.confidence ?? scoreToConf(b.score), bar.minConf, compass.bias) ? 1 : 0;
             if (aA !== bA) return bA - aA;
+            const q = rules.setupQuality(b.thesis ?? "") - rules.setupQuality(a.thesis ?? "");
+            if (q) return q;
             return (b.confidence ?? b.score) - (a.confidence ?? a.score);
           });
           const held = new Set([
             ...busy,
             ...stillOpen.map((s) => s.weex_symbol),
           ]);
+          const recentLoss = await sql<{ weex_symbol: string }>`
+            select distinct weex_symbol from auto_signals
+            where user_id = ${userId}
+              and status in ('stopped','skipped')
+              and coalesce(pnl, 0) < 0
+              and updated_at > now() - interval '6 hours'
+          `;
+          const dark = new Set(recentLoss.map((r) => r.weex_symbol));
           const aPlusList = ordered.filter((s) => {
             const conf = s.confidence ?? scoreToConf(s.score);
             if (!rules.eliteScalp(s.thesis ?? "", conf, bar.minConf, compass.bias)) return false;
-            if (held.has(s.weexSymbol)) return false;
+            if (held.has(s.weexSymbol) || dark.has(s.weexSymbol)) return false;
             if (compass.bias !== "chop" && s.side !== compass.bias) return false;
             return true;
           });
-          const byKind = new Map<string, (typeof aPlusList)[0]>();
-          for (const s of aPlusList) {
-            const k = rules.aPlusKind(s.thesis ?? "") ?? "a+";
-            if (!byKind.has(k)) byKind.set(k, s);
-          }
-          const diverse = [...byKind.values()];
-          const rest = aPlusList.filter((s) => !diverse.includes(s));
-          const eyeing = [...diverse, ...rest].slice(0, 3).map((s) => {
+          const longs = aPlusList.filter((s) => s.side === "long");
+          const shorts = aPlusList.filter((s) => s.side === "short");
+          const mix = [longs[0], shorts[0]].filter((s): s is (typeof aPlusList)[0] => Boolean(s));
+          const rest = aPlusList.filter((s) => !mix.includes(s));
+          const eyeing = [...mix, ...rest].slice(0, 4).map((s) => {
             const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
             return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
           });
@@ -2425,7 +2432,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")}`
             : `Eying no A++. Seat ${atRiskN}/${AT_RISK} open — not blocked. Scanned ${withTape.length} with-BTC, 0 at 85%+ (21h still the other way).`;
-          const aPlusLine = `A++  ${rules.APLUS_MENU}. Junk 21h-mean / continuation / cooling is off.`;
+          const aPlusLine =
+            compass.bias === "chop"
+              ? "A++ either side. Structure over RSI-knife. 15m agree. BTC is tilt only while flat."
+              : `A++  ${rules.APLUS_MENU}`;
           let veto = "No A++ this pass. Slots stay empty.";
           const whyNot: string[] = [];
 

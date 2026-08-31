@@ -361,7 +361,24 @@ export function eliteScalp(
 }
 
 export const APLUS_MENU =
-  "A++ with BTC. Structure 85%+ or continuation pullback. 15m must agree. No dip-buy vs a dump. Cooling off.";
+  "A++ either side when flat. Structure (double/pin/engulf/failed/climax) over RSI-knife. 15m must agree. With BTC once a ticket is live.";
+
+/** Higher = cleaner. Oversold/washout last so a 92 RSI dump doesn't beat an 86 double. */
+export function setupQuality(thesis: string): number {
+  const k = aPlusKind(thesis);
+  if (
+    k === "double" ||
+    k === "pin" ||
+    k === "engulf" ||
+    k === "failed range" ||
+    k === "failed bounce" ||
+    k === "climax" ||
+    k === "dry-up"
+  )
+    return 2;
+  if (k === "continuation") return 1;
+  return 0;
+}
 
 export function aPlusKind(thesis: string): string | null {
   const t = thesis;
