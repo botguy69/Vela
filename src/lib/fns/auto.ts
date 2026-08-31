@@ -1794,10 +1794,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           await ensureTakes(pos, notes, creds, be);
           await sql`
             update auto_signals
-            set stop = ${be}, be_moved = true, tp1_hit = true, updated_at = now()
+            set stop = ${be}, be_moved = true, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
-          notes.push(`${pos.weex_symbol} TP1 filled · SL → WEEX BE ${be.toFixed(4)}`);
+          notes.push(`${pos.weex_symbol} 0.8R · SL → WEEX BE ${be.toFixed(4)}`);
         }
       } else if (pos.be_moved) {
         if (reduced && !pos.tp1_hit) {

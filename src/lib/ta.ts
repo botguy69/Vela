@@ -638,9 +638,9 @@ export function shouldLockBreakeven(opts: {
   already: boolean;
   reduced?: boolean;
 }): boolean {
-  if (opts.already || opts.entry <= 0 || !(opts.last > 0)) return false;
-  const tp1 = opts.targets[0];
-  if (tp1 == null || !(tp1 > 0)) return false;
-  if (!taggedTake(opts.side, opts.last, tp1)) return false;
-  return Boolean(opts.reduced);
+  if (opts.already || opts.entry <= 0 || !(opts.last > 0) || !(opts.stop > 0)) return false;
+  const risk = Math.abs(opts.entry - opts.stop);
+  if (!(risk > 0)) return false;
+  const run = opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last;
+  return run >= 0.8 * risk;
 }
