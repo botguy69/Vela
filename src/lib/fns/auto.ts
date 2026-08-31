@@ -2364,7 +2364,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             select count(*)::int as n from auto_signals
             where user_id = ${userId}
               and created_at > now() - interval '4 minutes'
-              and status in ('proposed','working','filled')
+              and status = 'filled'
           `;
           if ((burst?.n ?? 0) >= 1 && liveN.length > 0 && beNLive < 1) room = 0;
           let openLimits = stillOpenRaw.filter(
@@ -2414,9 +2414,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
             return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
           });
+          const withTape = raw.filter((s) => compass.bias === "chop" || s.side === compass.bias);
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")}`
-            : "Eying  no A++ this pass.";
+            : `Eying no A++. Seat ${atRiskN}/${AT_RISK} open — not blocked. Scanned ${withTape.length} with-BTC, 0 at 85%+ (21h still the other way).`;
           const aPlusLine = `A++  ${rules.APLUS_MENU}. Junk 21h-mean / continuation / cooling is off.`;
           let veto = "No A++ this pass. Slots stay empty.";
           const whyNot: string[] = [];
