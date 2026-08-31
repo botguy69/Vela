@@ -150,24 +150,17 @@ export function adaptMethod(opts: {
 
   next = { ...next, marginPct: 3 };
 
-  // One counted win restores 3%. Scratches <0.4R do not.
-  if (opts.winStreak >= 1) return next;
+  // One counted win restores 3%. Drawdown does not keep 1.2% after that.
+  if (opts.winStreak >= 1 || opts.lossStreak < 3) return next;
 
-  if (opts.drawdownPct >= 30) {
-    next = {
-      ...next,
-      marginPct: 1.2,
-      minConf: Math.min(82, next.minConf + 4),
-      note: `${next.note} ~30% off peak. 1.2% until a win — then back to 3%.`,
-    };
-  } else if (opts.lossStreak >= 5) {
+  if (opts.lossStreak >= 5) {
     next = {
       ...next,
       marginPct: 1.2,
       minConf: Math.min(82, next.minConf + 3),
       note: `${next.note} Five losses. 1.2% size. A win restores 3%.`,
     };
-  } else if (opts.lossStreak >= 3) {
+  } else {
     next = {
       ...next,
       marginPct: 1.8,

@@ -2088,6 +2088,23 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       if (refreshed.error) notes.push(refreshed.error);
     }
     const afterStats = { closed: stats.closed + closed, wins: stats.wins };
+    const recentCloses = await sql<{ pnl: number | null; close_reason: string | null }>`
+      select pnl, close_reason from auto_signals
+      where user_id = ${userId}
+        and status in ('stopped','targeted','skipped')
+      order by updated_at desc
+      limit 12
+    `;
+    const lastCounted = recentCloses.find((r) => {
+      const p = n(r.pnl);
+      if (Math.abs(p) < 0.4) return false;
+      if (/BE scratch|Closed in green/i.test(r.close_reason ?? "") && p > 0 && p < 2) return false;
+      return true;
+    });
+    if (lastCounted && n(lastCounted.pnl) > 0) {
+      winStreak = Math.max(winStreak, 1);
+      streak = 0;
+    }
     const corrected = adaptMethod({
       phase: phaseForRun(equity, Boolean(settings.continue_to_goal)),
       lossStreak: streak,
