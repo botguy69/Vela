@@ -2412,20 +2412,20 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               and updated_at > now() - interval '6 hours'
           `;
           const dark = new Set(recentLoss.map((r) => r.weex_symbol));
-          const aPlusList = ordered.filter((s) => {
-            const conf = s.confidence ?? scoreToConf(s.score);
-            if (!rules.eliteScalp(s.thesis ?? "", conf, bar.minConf, compass.bias)) return false;
-            if (held.has(s.weexSymbol) || dark.has(s.weexSymbol)) return false;
-            if (compass.bias !== "chop" && s.side !== compass.bias) return false;
-            return true;
-          });
           const whyNot: string[] = [];
-          const pool: typeof aPlusList = [];
-          let checked = 0;
-          for (const s of aPlusList) {
-            if (pool.length >= 4 || checked >= 20) break;
-            checked += 1;
-            const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%`;
+          const pool: typeof ordered = [];
+          const seen = new Set<string>();
+          for (const s of ordered) {
+            if (pool.length >= 4) break;
+            const conf = s.confidence ?? scoreToConf(s.score);
+            if (!rules.eliteScalp(s.thesis ?? "", conf, bar.minConf, compass.bias)) continue;
+            if (held.has(s.weexSymbol) || dark.has(s.weexSymbol)) continue;
+            if (SKIP_WEEX.has(s.weexSymbol) || !TOP25_WEEX.includes(s.weexSymbol)) continue;
+            if (compass.bias !== "chop" && s.side !== compass.bias) continue;
+            const key = `${s.weexSymbol}:${s.side}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(conf)}%`;
             const h4 = await getWeexFourHour(s.weexSymbol).catch(() => []);
             const d1 = await getWeexKlines(s.weexSymbol, "1d", 40).catch(() => []);
             if (!rules.htfAllows(s.side, h4)) {
