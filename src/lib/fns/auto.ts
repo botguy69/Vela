@@ -2519,7 +2519,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(conf)}%`;
             const h4 = rules.closedCandles(h4map[s.weexSymbol] ?? [], 4 * 60 * 60 * 1000);
             const hour = rules.closedCandles(books[s.weexSymbol] ?? [], 60 * 60 * 1000);
-            const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "");
+            const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", heat.side);
             if (!mtf.ok) {
               whyNot.push(`${tag} ${mtf.why}`);
               continue;
@@ -2540,7 +2540,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "A++ closed 5m fill · 15m stop · 4h/1h location · burst 5m · 3% all names.";
+          const aPlusLine = "A++ closed 5m fill · 15m stop. 4h SMA 2% if BTC heat agrees. Bounce/dump still off.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2581,7 +2581,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
             const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
             const h4Closed = rules.closedCandles(h4, 4 * 60 * 60 * 1000);
-            const mtfPick = rules.mtfAllows(pick.side, h4Closed, hourPick, pick.thesis ?? "");
+            const mtfPick = rules.mtfAllows(pick.side, h4Closed, hourPick, pick.thesis ?? "", heat.side);
             if (!mtfPick.ok) {
               veto = `${pick.weexSymbol} ${pick.side} ${mtfPick.why}`;
               whyNot.push(`${tag} ${mtfPick.why}`);

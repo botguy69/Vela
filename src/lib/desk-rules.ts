@@ -55,15 +55,20 @@ export function atr(candles: Candle[], period = 14): number | null {
   return sma(trs, period);
 }
 
-/** 4h trend (21 SMA) + major S/R. Longs don't buy 4h highs; shorts don't fade 4h lows. */
-export function htfAllows(side: Side, fourHour: Candle[]): boolean {
+/** 4h 21 SMA + S/R. BTC heat aligned → 2% band. Else 0.3%. Bounce/dump still veto. */
+export function htfAllows(
+  side: Side,
+  fourHour: Candle[],
+  heat: "long" | "short" | "chop" = "chop",
+): boolean {
   if (fourHour.length < 24) return true;
   const closes = fourHour.map((c) => c.close);
   const mid = sma(closes, 21);
   const last = closes[closes.length - 1];
   if (mid == null || last == null) return true;
-  if (side === "long" && last < mid * 0.997) return false;
-  if (side === "short" && last > mid * 1.003) return false;
+  const band = heat === side ? 0.02 : 0.003;
+  if (side === "long" && last < mid * (1 - band)) return false;
+  if (side === "short" && last > mid * (1 + band)) return false;
   const prior = fourHour.slice(-21, -1);
   if (prior.length < 8) return true;
   const sh = Math.max(...prior.map((c) => c.high));
@@ -614,8 +619,9 @@ export function mtfAllows(
   fourHour: Candle[],
   hourly: Candle[],
   thesis = "",
+  heat: "long" | "short" | "chop" = "chop",
 ): { ok: boolean; why: string } {
-  if (!htfAllows(side, fourHour)) return { ok: false, why: "4h reject" };
+  if (!htfAllows(side, fourHour, heat)) return { ok: false, why: "4h reject" };
   if (fourHour.length >= 16) {
     const a4 = atr(fourHour, 14) ?? 0;
     const prior4 = fourHour.slice(-21, -1);
