@@ -2538,7 +2538,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "A++ 5m fill. 4 seats any mix. One per tick. No 5m same-side lock.";
+          const aPlusLine = "A++ closed 15m fill + 15m stop. 4 seats any mix. One per tick.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2577,8 +2577,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
-            const coin5raw = await getWeexKlines(pick.weexSymbol, "5m", 320).catch(() => []);
-            const coin5 = rules.closedCandles(coin5raw, 5 * 60 * 1000);
             const coin15raw = await getWeexKlines(pick.weexSymbol, "15m", 210).catch(() => []);
             const coin15 = rules.closedCandles(coin15raw, 15 * 60 * 1000);
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
@@ -2594,7 +2592,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not location structure`);
               continue;
             }
-            const trig = rules.ltfTrigger(pick.side, coin5);
+            const trig = rules.ltfTrigger(pick.side, coin15);
             if (!trig.ok && !trig.wait) {
               veto = `Skip ${tag} ${trig.reason}`;
               whyNot.unshift(`${tag} ${trig.reason}`);
@@ -2819,8 +2817,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
     const learned =
       (stats.tpWins ?? 0) >= 20 && (stats.expectancyR ?? 0) > 0
-        ? "A++ · 5m fill / 15m stop · score not a win-rate · 70/30 runner (E[R]>0 and 20 TP hits)."
-        : `A++ · 5m fill / 15m stop · 1 TP full size (${stats.tpWins ?? 0}/20 TP hits and E[R]>0 before 2.5R runner).`;
+        ? "A++ · 15m fill / 15m stop · score not a win-rate · 70/30 runner (E[R]>0 and 20 TP hits)."
+        : `A++ · 15m fill / 15m stop · 1 TP full size (${stats.tpWins ?? 0}/20 TP hits and E[R]>0 before 2.5R runner).`;
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))
