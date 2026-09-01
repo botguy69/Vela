@@ -1614,7 +1614,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     } = await import("@/lib/weex-market.server");
     const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, taggedTake } = await import("@/lib/ta");
     const { sizeSetup } = await import("@/lib/risk");
-    const { coinByWeex, CORE_SET, SKIP_WEEX, TOP25_WEEX } = await import("@/lib/universe");
+    const { coinByWeex, SKIP_WEEX, TOP25_WEEX } = await import("@/lib/universe");
     const rules = await import("@/lib/desk-rules");
     const sql = await getSql();
     await ensureSettings(sql, userId);
@@ -2413,9 +2413,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             scanUniverse(books, corrected.style, corrected.minRr, "vela"),
             ledger,
           );
-          const raw = corrected.id === "grow"
-            ? rawAll.filter((s) => CORE_SET.has(s.weexSymbol))
-            : rawAll;
+          const raw = rawAll.filter((s) => TOP25_WEEX.includes(s.weexSymbol) && !SKIP_WEEX.has(s.weexSymbol));
+          const scannedN = Object.keys(books).length;
           const busy = new Set(
             stillOpen.filter((s) => s.status === "filled").map((s) => s.weex_symbol),
           );
@@ -2478,8 +2477,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const whyNot: string[] = [];
           const pool: typeof ordered = [];
           const seen = new Set<string>();
+          const elite: typeof ordered = [];
           for (const s of ordered) {
-            if (pool.length >= 4) break;
             const conf = s.confidence ?? scoreToConf(s.score);
             if (!rules.eliteScalp(s.thesis ?? "", conf, bar.minConf, compass.bias)) continue;
             if (held.has(s.weexSymbol) || dark.has(s.weexSymbol)) continue;
@@ -2488,8 +2487,21 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const key = `${s.weexSymbol}:${s.side}`;
             if (seen.has(key)) continue;
             seen.add(key);
+            elite.push(s);
+          }
+          const need4 = [...new Set(elite.map((s) => s.weexSymbol))];
+          const h4map: Record<string, Awaited<ReturnType<typeof getWeexFourHour>>> = {};
+          for (let i = 0; i < need4.length; i += 12) {
+            await Promise.all(
+              need4.slice(i, i + 12).map(async (sym) => {
+                h4map[sym] = await getWeexFourHour(sym).catch(() => []);
+              }),
+            );
+          }
+          for (const s of elite) {
+            const conf = s.confidence ?? scoreToConf(s.score);
             const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(conf)}%`;
-            const h4 = await getWeexFourHour(s.weexSymbol).catch(() => []);
+            const h4 = h4map[s.weexSymbol] ?? [];
             const hour = books[s.weexSymbol] ?? [];
             const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "");
             if (!mtf.ok) {
@@ -2497,24 +2509,18 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             if (rules.setupQuality(s.thesis ?? "") === 0) {
-              const hour = books[s.weexSymbol] ?? [];
               if (!rules.rsiDivergence(hour, s.side)) {
                 whyNot.push(`${tag} RSI-knife, no divergence`);
                 continue;
               }
             }
-            pool.push(s);
+            if (pool.length < 4) pool.push(s);
           }
           const primes = pool.filter((s) => rules.setupQuality(s.thesis ?? "") >= 2);
-          const eyeing = (primes.length ? primes : pool.slice(0, 1)).slice(0, 2).map((s) => {
-            const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
-            return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
-          });
-          const withTape = raw.filter((s) => compass.bias === "chop" || s.side === compass.bias);
           const eyeLine = eyeing.length
-            ? `Eying  ${eyeing.join(" · ")}`
-            : `Eying no A++ through 4h. Scanned ${withTape.length}. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "One best A++. 4h+1h both ways. 15m trigger. No chase / late bounce.";
+            ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}`
+            : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. Seat ${atRiskN}/${AT_RISK} open.`;
+          const aPlusLine = "Full board each tick. One best A++. 4h+1h both ways. 15m trigger.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
