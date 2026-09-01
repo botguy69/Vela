@@ -2490,8 +2490,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             seen.add(key);
             const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(conf)}%`;
             const h4 = await getWeexFourHour(s.weexSymbol).catch(() => []);
-            if (!rules.htfAllows(s.side, h4)) {
-              whyNot.push(`${tag} 4h reject`);
+            const hour = books[s.weexSymbol] ?? [];
+            const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "");
+            if (!mtf.ok) {
+              whyNot.push(`${tag} ${mtf.why}`);
               continue;
             }
             if (rules.setupQuality(s.thesis ?? "") === 0) {
@@ -2512,7 +2514,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")}`
             : `Eying no A++ through 4h. Scanned ${withTape.length}. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "One best A++. 4h must agree. RSI-knife needs divergence.";
+          const aPlusLine = "One best A++. 4h+1h agree. 15m trigger. No late failed-bounce shorts.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2554,9 +2556,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} vs BTC ${compass.bias} — no dip-buy / fade`);
               continue;
             }
-            if (!rules.htfAllows(pick.side, h4)) {
-              veto = `${pick.weexSymbol} ${pick.side} 4h reject`;
-              whyNot.push(`${tag} 4h reject`);
+            const hourPick = books[pick.weexSymbol] ?? [];
+            const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "");
+            if (!mtfPick.ok) {
+              veto = `${pick.weexSymbol} ${pick.side} ${mtfPick.why}`;
+              whyNot.push(`${tag} ${mtfPick.why}`);
               continue;
             }
             if (rules.setupQuality(pick.thesis ?? "") === 0) {

@@ -401,12 +401,11 @@ export function setupQuality(thesis: string): number {
     k === "pin" ||
     k === "engulf" ||
     k === "failed range" ||
-    k === "failed bounce" ||
     k === "climax" ||
     k === "dry-up"
   )
     return 2;
-  if (k === "continuation") return 1;
+  if (k === "continuation" || k === "failed bounce") return 1;
   return 0;
 }
 
@@ -432,6 +431,55 @@ export function setupTag(thesis: string): string {
   const k = aPlusKind(thesis);
   if (!k) return "OTHER";
   return k.toUpperCase().replace(/[-\s]+/g, "_");
+}
+
+/**
+ * 4h + 1h must agree. Shorts: no 4h washout, no bounce bar, no late failed-bounce.
+ * 15m is ltfTrigger (separate).
+ */
+export function mtfAllows(
+  side: Side,
+  fourHour: Candle[],
+  hourly: Candle[],
+  thesis = "",
+): { ok: boolean; why: string } {
+  if (!htfAllows(side, fourHour)) return { ok: false, why: "4h reject" };
+  if (hourly.length >= 24) {
+    const closes = hourly.map((c) => c.close);
+    const e = ema(closes, 21);
+    const last = closes[closes.length - 1];
+    if (e != null && last != null) {
+      if (side === "long" && last < e * 0.997) return { ok: false, why: "1h reject" };
+      if (side === "short" && last > e * 1.003) return { ok: false, why: "1h reject" };
+    }
+  }
+  if (side === "short" && fourHour.length >= 16) {
+    const c4 = fourHour.map((c) => c.close);
+    const rsi4 = rsiAt(c4, c4.length - 1);
+    if (rsi4 != null && rsi4 <= 28) return { ok: false, why: "4h washout — no short" };
+    const mid = sma(c4, 21);
+    const last4 = c4[c4.length - 1];
+    if (mid != null && last4 != null && last4 < mid * 0.96) {
+      return { ok: false, why: "4h extended — no chase short" };
+    }
+    const bar = fourHour[fourHour.length - 1]!;
+    const range = bar.high - bar.low;
+    if (range > 0 && bar.close > bar.open && (bar.close - bar.low) / range > 0.62) {
+      return { ok: false, why: "4h bounce bar — no short" };
+    }
+  }
+  if (side === "short" && /Failed bounce|lower high/i.test(thesis) && hourly.length >= 16) {
+    const rsi1 = rsiAt(hourly.map((c) => c.close), hourly.length - 1);
+    if (rsi1 != null && rsi1 < 42) return { ok: false, why: "failed bounce late" };
+    const h = hourly;
+    const a = h[h.length - 1]!;
+    const b = h[h.length - 2];
+    const c = h[h.length - 3];
+    if (b && c && a.high >= b.high && a.high >= c.high) {
+      return { ok: false, why: "no 1h lower high" };
+    }
+  }
+  return { ok: true, why: "" };
 }
 
 export function whyTookTrade(opts: {
