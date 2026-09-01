@@ -819,13 +819,13 @@ async function ensureTakes(
   const [st] = await sql<{ stats_from: string | null }>`
     select stats_from from auto_settings where user_id = ${pos.user_id} limit 1
   `;
-  const closed = st ? await closedStats(sql, pos.user_id, st.stats_from) : { wins: 0 };
-  const runners = closed.wins >= 8;
+  const closed = st ? await closedStats(sql, pos.user_id, st.stats_from) : { wins: 0, expectancyR: 0 };
+  const runners = closed.wins >= 20 && (closed.expectancyR ?? 0) > 0;
   const afterTp1 = Boolean(pos.tp1_hit) || Boolean(pos.be_moved);
   const rawTps = parseNums(pos.targets).slice(0, runners ? 2 : 1);
   const tps: number[] = [];
   for (let i = 0; i < rawTps.length; i += 1) {
-    if (afterTp1 && i === 0) continue;
+    if (runners && afterTp1 && i === 0) continue;
     const px = Number(formatWeexPx(rawTps[i]!, spec.pricePrecision));
     if (!(px > 0)) continue;
     if (tps.some((t) => t === px)) continue;
@@ -2766,9 +2766,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     }
 
     const learned =
-      stats.wins >= 8
-        ? "A++ only · with BTC · 85%+ or continuation · 70/30 runner back after 8 wins."
-        : `A++ only · with BTC · 85%+ or continuation · full size at 1 TP (${stats.wins}/8 wins to restore runner).`;
+      stats.wins >= 20 && (stats.expectancyR ?? 0) > 0
+        ? "A++ · 4h+15m · score not a win-rate · 70/30 runner (E[R]>0 and 20 wins)."
+        : `A++ · 4h+15m · 1 TP full size (${stats.wins}/20 wins and E[R]>0 before 2.5R runner).`;
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))
