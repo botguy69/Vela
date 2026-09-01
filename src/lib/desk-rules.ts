@@ -337,10 +337,23 @@ export function spreadBps(bid: number, ask: number): number {
   return ((ask - bid) / mid) * 10_000;
 }
 
+export function closedCandles(candles: Candle[], intervalMs: number): Candle[] {
+  const openMs = (t: number) => (t > 0 && t < 1e12 ? t * 1000 : t);
+  const cutoff = Date.now() - intervalMs;
+  return candles.filter((c) => openMs(c.time) <= cutoff);
+}
+
+export function sizeMult(weex: string): number {
+  if (weex === "BTCUSDT" || weex === "ETHUSDT") return 1;
+  if (weex === "BNBUSDT" || weex === "XRPUSDT" || weex === "SOLUSDT") return 0.7;
+  return 0.45;
+}
+
 export function spreadTooWide(weex: string, bid: number, ask: number): boolean {
   const bps = spreadBps(bid, ask);
   if (weex === "BTCUSDT" || weex === "ETHUSDT") return bps > 8;
-  return bps > 25;
+  if (weex === "BNBUSDT" || weex === "XRPUSDT" || weex === "SOLUSDT") return bps > 15;
+  return bps > 18;
 }
 
 export function limitMaxAgeMs(style: Style): number {

@@ -21,12 +21,13 @@ export function sizeSetup(
   accountUsd: number,
   riskPct: number,
   coinMaxLev: number,
+  sizeMult = 1,
 ): SizedSetup | null {
   const alloc = clampRiskPct(riskPct);
   if (setup.entry <= 0 || accountUsd < 5) return null;
 
   const leverage = Math.max(1, Math.round(coinMaxLev));
-  const marginUsd = accountUsd * (alloc / 100);
+  const marginUsd = accountUsd * (alloc / 100) * Math.min(1, Math.max(0.25, sizeMult));
   const notional = marginUsd * leverage;
   if (notional < 8) return null;
 

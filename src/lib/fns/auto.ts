@@ -2447,10 +2447,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             spec: Awaited<ReturnType<typeof specFor>>;
           }[] = [];
           let room = roomN;
-          const [burst] = await sql<{ n: number }>`
-            select count(*)::int as n from auto_signals
+          const [burst] = await sql<{ n: number; side: string | null }>`
+            select count(*)::int as n, (array_agg(side order by coalesce(filled_at, created_at) desc))[1] as side
+            from auto_signals
             where user_id = ${userId}
-              and created_at > now() - interval '4 minutes'
+              and created_at > now() - interval '15 minutes'
               and status = 'filled'
           `;
           if ((burst?.n ?? 0) >= 1 && atRiskN >= AT_RISK) room = 0;
@@ -2516,8 +2517,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           for (const s of elite) {
             const conf = s.confidence ?? scoreToConf(s.score);
             const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(conf)}%`;
-            const h4 = h4map[s.weexSymbol] ?? [];
-            const hour = books[s.weexSymbol] ?? [];
+            const h4 = rules.closedCandles(h4map[s.weexSymbol] ?? [], 4 * 60 * 60 * 1000);
+            const hour = rules.closedCandles(books[s.weexSymbol] ?? [], 60 * 60 * 1000);
             const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "");
             if (!mtf.ok) {
               whyNot.push(`${tag} ${mtf.why}`);
@@ -2539,7 +2540,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Dry-up = skip not entry. BTC is heat (chop → 1 seat). Patterns still need 4h.";
+          const aPlusLine = "Closed 15m only. Burst 15m same-side lock. Memes 0.45× BTC size. Dry-up skip.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2573,7 +2574,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
-            const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 210).catch(() => []);
+            const coin15raw = await getWeexKlines(pick.weexSymbol, "15m", 210).catch(() => []);
+            const coin15 = rules.closedCandles(coin15raw, 15 * 60 * 1000);
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
             const withBtc = compass.bias === "chop" || pick.side === compass.bias;
             if (!withBtc) {
@@ -2581,8 +2583,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} vs BTC ${compass.bias} — no dip-buy / fade`);
               continue;
             }
-            const hourPick = books[pick.weexSymbol] ?? [];
-            const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "");
+            const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
+            const h4Closed = rules.closedCandles(h4, 4 * 60 * 60 * 1000);
+            const mtfPick = rules.mtfAllows(pick.side, h4Closed, hourPick, pick.thesis ?? "");
             if (!mtfPick.ok) {
               veto = `${pick.weexSymbol} ${pick.side} ${mtfPick.why}`;
               whyNot.push(`${tag} ${mtfPick.why}`);
@@ -2593,6 +2596,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const trig = rules.ltfTrigger(pick.side, coin15);
+            if ((burst?.n ?? 0) >= 1 && burst?.side && pick.side === burst.side) {
+              whyNot.push(`${tag} burst lock — same side as last fill (15m)`);
+              continue;
+            }
+            if ((burst?.n ?? 0) >= 1 && heat.side !== "chop" && pick.side === heat.side) {
+              whyNot.push(`${tag} burst lock — with BTC heat`);
+              continue;
+            }
             if (compass.bias === "chop") {
               if (!trig.ok && !trig.wait) {
                 veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
@@ -2676,7 +2687,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               compass.bias === "chop" && trig.wait
                 ? { ...timed1, entryType: "limit" as const }
                 : timed1;
-            const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
+            const sz = sizeSetup(
+              timed,
+              equity,
+              corrected.marginPct,
+              spec.maxLeverage,
+              rules.sizeMult(pick.weexSymbol),
+            );
             if (!sz) continue;
             if (sz.entryType === "limit" && openLimits >= 1) {
               whyNot.push(`${tag} one unfilled limit already — need a market A+ for another slot`);
