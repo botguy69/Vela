@@ -69,9 +69,9 @@ export function htfAllows(side: Side, fourHour: Candle[]): boolean {
   const sh = Math.max(...prior.map((c) => c.high));
   const sl = Math.min(...prior.map((c) => c.low));
   const a = atr(fourHour, 14) ?? 0;
-  const bar = fourHour[fourHour.length - 1]!;
-  if (side === "long" && a > 0 && last >= sh - 0.15 * a && bar.close < bar.open) return false;
-  if (side === "short" && a > 0 && last <= sl + 0.15 * a && bar.close > bar.open) return false;
+  if (a <= 0) return true;
+  if (side === "long" && last >= sh - 0.2 * a) return false;
+  if (side === "short" && last <= sl + 0.2 * a) return false;
   return true;
 }
 
@@ -162,6 +162,34 @@ export function ltfTrigger(
   if (e9 == null || e21 == null || a == null || a <= 0 || last == null) {
     return { ok: true, wait: false, reason: "thin 15m", pullback: null };
   }
+  const lastBar = fifteen[fifteen.length - 1]!;
+  const trs: number[] = [];
+  for (let i = Math.max(1, fifteen.length - 50); i < fifteen.length; i += 1) {
+    const c = fifteen[i]!;
+    const p = fifteen[i - 1]!;
+    trs.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+  }
+  const medAtr = [...trs].sort((x, y) => x - y)[Math.floor(trs.length / 2)] ?? a;
+  if (a < 0.45 * medAtr || a / last < 0.0012) {
+    return { ok: false, wait: false, reason: "ATR dead — fees eat 1R", pullback: null };
+  }
+  const vols = fifteen.slice(-20).map((c) => c.volume).filter((v) => v > 0).sort((x, y) => x - y);
+  const medVol = vols[Math.floor(vols.length / 2)] ?? 0;
+  const volR = medVol > 0 ? lastBar.volume / medVol : 1;
+  if (volR < 0.5) return { ok: false, wait: false, reason: "15m dry-up", pullback: null };
+  const chaseVol =
+    volR >= 2.2 &&
+    ((side === "long" && lastBar.close > lastBar.open && last > e21 + 0.35 * a) ||
+      (side === "short" && lastBar.close < lastBar.open && last < e21 - 0.35 * a));
+  if (chaseVol) return { ok: false, wait: false, reason: "15m climax chase", pullback: null };
+  let fails = 0;
+  for (const c of fifteen.slice(-8)) {
+    const tagged = Math.abs(c.close - e21) <= 0.2 * a;
+    if (!tagged) continue;
+    if (side === "long" && c.close < c.open) fails += 1;
+    if (side === "short" && c.close > c.open) fails += 1;
+  }
+  if (fails >= 2) return { ok: false, wait: false, reason: "15m level already failed", pullback: null };
   const vwap = sessionVwap(fifteen);
   if (vwap != null && vwapCrosses(fifteen, 8, vwap) >= 3) {
     return { ok: false, wait: false, reason: "VWAP chop", pullback: null };
@@ -201,6 +229,24 @@ export function ltfTrigger(
     return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
   }
   return { ok: true, wait: false, reason: reclaim ? "VWAP reject" : "15m bounce + VWAP", pullback: mean };
+}
+
+/** Stop: 1.0–1.5× 15m ATR or beyond the pullback swing. Never a tick behind VWAP. */
+export function structureStop(side: Side, entry: number, stop: number, fifteen: Candle[]): number {
+  const a = atr(fifteen, 14);
+  if (a == null || a <= 0 || entry <= 0) return stop;
+  const win = fifteen.slice(-8);
+  const swing = side === "long" ? Math.min(...win.map((c) => c.low)) : Math.max(...win.map((c) => c.high));
+  const atrStop = side === "long" ? entry - 1.25 * a : entry + 1.25 * a;
+  const swingStop = side === "long" ? swing - 0.2 * a : swing + 0.2 * a;
+  let s = side === "long" ? Math.min(stop, atrStop, swingStop) : Math.max(stop, atrStop, swingStop);
+  const vwap = sessionVwap(fifteen);
+  if (vwap != null && Math.abs(s - vwap) / vwap < 0.0018) {
+    s = side === "long" ? Math.min(s, vwap - 0.45 * a, swingStop) : Math.max(s, vwap + 0.45 * a, swingStop);
+  }
+  if (side === "long" && !(s < entry)) s = entry - 1.25 * a;
+  if (side === "short" && !(s > entry)) s = entry + 1.25 * a;
+  return s;
 }
 
 /** Coin 15m is doing the side while BTC 15m is not — 2nd same-side name is allowed. */
@@ -520,9 +566,10 @@ export function mtfAllows(
       if (side === "short" && e9 > e21 * 1.003) return { ok: false, why: "1h momentum up" };
     }
     const rsi1 = rsiAt(closes, closes.length - 1);
-    if (!knife && rsi1 != null) {
-      if (side === "long" && rsi1 < 38) return { ok: false, why: "1h RSI no bid" };
-      if (side === "short" && rsi1 > 62) return { ok: false, why: "1h RSI no offer" };
+    const rsiAgo = rsiAt(closes, Math.max(15, closes.length - 4));
+    if (!knife && rsi1 != null && rsiAgo != null) {
+      if (side === "long" && rsi1 < rsiAgo - 6 && rsi1 < 48) return { ok: false, why: "1h selling impulse" };
+      if (side === "short" && rsi1 > rsiAgo + 6 && rsi1 > 52) return { ok: false, why: "1h buying impulse" };
     }
   }
   if (fourHour.length >= 16) {

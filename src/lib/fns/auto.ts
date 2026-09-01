@@ -2547,7 +2547,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}`
             : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "4h trend+S/R · 1h EMA9/21+RSI · 15m EMA9/21/200 + VWAP. No failed-bounce. No continuation.";
+          const aPlusLine = "4h location → 1h permission → 15m VWAP trigger. ATR dead / climax chase / dry skip.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2662,10 +2662,26 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             const timed0 =
               compass.bias === "chop" ? rules.withLtfEntry(pick, trig.pullback) : pick;
+            const stopped = {
+              ...timed0,
+              stop: rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15),
+            };
+            const dist = Math.abs(stopped.entry - stopped.stop);
+            const timed1 =
+              dist > 0
+                ? {
+                    ...stopped,
+                    target: stopped.side === "long" ? stopped.entry + dist : stopped.entry - dist,
+                    targets: [
+                      stopped.side === "long" ? stopped.entry + dist : stopped.entry - dist,
+                    ],
+                    rr: 1,
+                  }
+                : stopped;
             const timed =
               compass.bias === "chop" && trig.wait
-                ? { ...timed0, entryType: "limit" as const }
-                : timed0;
+                ? { ...timed1, entryType: "limit" as const }
+                : timed1;
             const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
             if (!sz) continue;
             if (sz.entryType === "limit" && openLimits >= 1) {
