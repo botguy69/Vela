@@ -2535,7 +2535,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (q) return q;
             return (b.confidence ?? b.score) - (a.confidence ?? a.score);
           });
-          if (pool.length > 4) pool.splice(4);
+          if (pool.length > 12) pool.splice(12);
           const primes = pool.filter((s) => rules.setupQuality(s.thesis ?? "") >= 2);
           const eyeing = (primes.length ? primes : pool.slice(0, 1)).slice(0, 2).map((s) => {
             const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
@@ -2546,8 +2546,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "A++ 5m fill. 4 seats, any mix. Best setup. 4h dump-long / bounce-short still off.";
+          const aPlusLine = "A++ 5m fill. Scan 181 → 4h → best 5m. 4 seats any mix.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
+          const ready: {
+            sized: NonNullable<ReturnType<typeof sizeSetup>>;
+            spec: Awaited<ReturnType<typeof specFor>>;
+            score: number;
+          }[] = [];
 
           for (const pick of pool) {
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
@@ -2605,10 +2610,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             if ((burst?.n ?? 0) >= 1 && burst?.side && pick.side === burst.side) {
               whyNot.push(`${tag} burst lock — same side as last fill (5m)`);
-              continue;
-            }
-            if ((burst?.n ?? 0) >= 1 && heat.side !== "chop" && pick.side === heat.side) {
-              whyNot.push(`${tag} burst lock — with BTC heat`);
               continue;
             }
             const book = await getBookTicker(pick.weexSymbol);
@@ -2686,14 +2687,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} thin book — 1R would walk`);
               continue;
             }
-            if (sz.entryType === "limit" && openLimits >= 1) {
-              whyNot.push(`${tag} one unfilled limit already — need a market A+ for another slot`);
-              continue;
-            }
-            batch.push({ sized: sz, spec });
-            if (sz.entryType === "limit") openLimits += 1;
+            ready.push({ sized: sz, spec, score: conf });
+          }
+          ready.sort((a, b) => b.score - a.score);
+          const best = ready.find((r) => r.sized.entryType !== "limit" || openLimits < 1) ?? null;
+          if (best) {
+            batch.push({ sized: best.sized, spec: best.spec });
+            if (best.sized.entryType === "limit") openLimits += 1;
             room -= 1;
-            break;
           }
 
           let tookLine = veto;
