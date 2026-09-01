@@ -2528,8 +2528,19 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not location structure`);
               continue;
             }
-            if (pool.length < 4) pool.push(s);
+            pool.push(s);
           }
+          if (heat.side !== "chop") {
+            pool.sort((a, b) => {
+              const aH = a.side === heat.side ? 1 : 0;
+              const bH = b.side === heat.side ? 1 : 0;
+              if (aH !== bH) return bH - aH;
+              const q = rules.setupQuality(b.thesis ?? "") - rules.setupQuality(a.thesis ?? "");
+              if (q) return q;
+              return (b.confidence ?? b.score) - (a.confidence ?? a.score);
+            });
+          }
+          if (pool.length > 4) pool.splice(4);
           const primes = pool.filter((s) => rules.setupQuality(s.thesis ?? "") >= 2);
           const eyeing = (primes.length ? primes : pool.slice(0, 1)).slice(0, 2).map((s) => {
             const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
@@ -2540,7 +2551,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "A++ 5m fill. With-trend shorts if 4h+1h down. No longs into a 4h dump.";
+          const aPlusLine = "A++ 5m fill. Pool ranks with BTC heat first. No dump-longs. No bounce-shorts.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
