@@ -2465,7 +2465,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             heat.side === "chop"
               ? 0
               : liveN.filter((p) => (p.side === "short" ? "short" : "long") === heat.side).length;
-          if (heat.chop && liveN.length >= 1) room = 0;
+          if (liveN.length >= heat.maxSeats) room = 0;
           if (!heat.chop && sameAsBtc >= 3) room = 0;
           const compass = {
             bias: "chop" as const,
@@ -2551,7 +2551,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "A++ 5m fill. Heat-ranked. No against-heat fill if shorts fail 5m.";
+          const aPlusLine = "A++ 5m fill. Mixed = 2 same-side. Hard chop = 1. No against-heat.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2587,6 +2587,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (heat.side !== "chop" && pick.side !== heat.side) {
               whyNot.unshift(`${tag} vs BTC ${heat.side} — no against-heat fill`);
               continue;
+            }
+            if (heat.side === "chop" && liveN.length >= 1) {
+              const liveSide = liveN[0]!.side === "short" ? "short" : "long";
+              if (pick.side !== liveSide) {
+                whyNot.unshift(`${tag} mixed tape — 2nd seat must match live ${liveSide}`);
+                continue;
+              }
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
             const coin5raw = await getWeexKlines(pick.weexSymbol, "5m", 320).catch(() => []);

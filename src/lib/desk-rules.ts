@@ -228,32 +228,33 @@ export function ltfTrigger(
   return { ok: true, wait: false, reason: reclaim ? "VWAP reject" : "15m bounce + VWAP", pullback: mean };
 }
 
-/** BTC is heat, not a compass. Chop → 1 seat. 3 same-side with BTC → no 4th. */
+/** BTC is heat, not a compass. Hard chop → 1 seat. Mixed → 2 same-side. Offer/bid → 4. */
 export function btcHeat(fifteen: Candle[]): {
   chop: boolean;
   side: "long" | "short" | "chop";
+  maxSeats: number;
   note: string;
 } {
-  if (fifteen.length < 24) return { chop: true, side: "chop", note: "BTC 15m thin — max 1 seat" };
+  if (fifteen.length < 24) return { chop: true, side: "chop", maxSeats: 1, note: "BTC 15m thin — max 1 seat" };
   const closes = fifteen.map((c) => c.close);
   const last = closes[closes.length - 1];
   const e9 = ema(closes, 9);
   const e21 = ema(closes, 21);
   const vwap = sessionVwap(fifteen);
-  if (last == null) return { chop: true, side: "chop", note: "BTC 15m thin — max 1 seat" };
+  if (last == null) return { chop: true, side: "chop", maxSeats: 1, note: "BTC 15m thin — max 1 seat" };
   const crosses = vwap != null ? vwapCrosses(fifteen, 8, vwap) : 0;
   const tangled = e9 != null && e21 != null && Math.abs(e9 - e21) / e21 < 0.0015;
   const midVwap = vwap != null && Math.abs(last - vwap) / vwap < 0.002;
   if (crosses >= 3 || (tangled && midVwap)) {
-    return { chop: true, side: "chop", note: "BTC 15m chop — max 1 seat. Side count, not 181 names." };
+    return { chop: true, side: "chop", maxSeats: 1, note: "BTC 15m chop — max 1 seat. Side count, not 181 names." };
   }
   if (e9 != null && e21 != null && last > e21 && e9 >= e21 * 0.999) {
-    return { chop: false, side: "long", note: "BTC 15m bid — heat cap, not a signal." };
+    return { chop: false, side: "long", maxSeats: 4, note: "BTC 15m bid — heat cap, not a signal." };
   }
   if (e9 != null && e21 != null && last < e21 && e9 <= e21 * 1.001) {
-    return { chop: false, side: "short", note: "BTC 15m offer — heat cap, not a signal." };
+    return { chop: false, side: "short", maxSeats: 4, note: "BTC 15m offer — heat cap, not a signal." };
   }
-  return { chop: true, side: "chop", note: "BTC 15m mixed — max 1 seat" };
+  return { chop: true, side: "chop", maxSeats: 2, note: "BTC 15m mixed — max 2 same-side." };
 }
 
 /** Stop: 1.0–1.5× 15m ATR or beyond the pullback swing. Never a tick behind VWAP. */
