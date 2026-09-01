@@ -2544,7 +2544,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           });
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}`
-            : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. Seat ${atRiskN}/${AT_RISK} open.`;
+            : elite.length === 0
+              ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
+              : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
           const aPlusLine = "Location only. No mid-range engulf. No 4h bounce. No 1R into demand.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
