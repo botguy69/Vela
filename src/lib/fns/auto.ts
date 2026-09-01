@@ -406,7 +406,13 @@ async function closedStats(
     return true;
   });
   const closed = window.length;
-  const wins = window.filter((r) => n(r.pnl) > 0).length;
+  const isFullWin = (r: (typeof window)[number]) => {
+    const rr = rOf(r);
+    if (rr != null && rr >= 0.9) return true;
+    if (n(r.pnl) > 0 && /targeted|Hit TP|TP1|TP2/i.test(r.close_reason ?? "")) return true;
+    return false;
+  };
+  const wins = window.filter(isFullWin).length;
   const winR = window.map(rOf).filter((x): x is number => x != null && x > 0);
   const lossR = window.map(rOf).filter((x): x is number => x != null && x < 0);
   const allR = window.map(rOf).filter((x): x is number => x != null);
