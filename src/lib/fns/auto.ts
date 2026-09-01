@@ -2531,11 +2531,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} ${mtf.why}`);
               continue;
             }
-            if (rules.setupQuality(s.thesis ?? "") === 0) {
-              if (!rules.rsiDivergence(hour, s.side)) {
-                whyNot.push(`${tag} RSI-knife, no divergence`);
-                continue;
-              }
+            if (rules.setupQuality(s.thesis ?? "") < 2) {
+              whyNot.push(`${tag} not location structure`);
+              continue;
             }
             if (pool.length < 4) pool.push(s);
           }
@@ -2547,7 +2545,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}`
             : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "No 4h bounce shorts. 4h location → 1h HL/LH → 15m VWAP. Failed-bounce still dead.";
+          const aPlusLine = "Location only. No mid-range engulf. No 4h bounce. No 1R into demand.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2596,12 +2594,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} ${mtfPick.why}`);
               continue;
             }
-            if (rules.setupQuality(pick.thesis ?? "") === 0) {
-              const hour = books[pick.weexSymbol] ?? [];
-              if (!rules.rsiDivergence(hour, pick.side)) {
-                whyNot.push(`${tag} RSI-knife, no divergence`);
-                continue;
-              }
+            if (rules.setupQuality(pick.thesis ?? "") < 2) {
+              whyNot.push(`${tag} not location structure`);
+              continue;
             }
             const trig = rules.ltfTrigger(pick.side, coin15);
             if (compass.bias === "chop") {
@@ -2678,6 +2673,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                     rr: 1,
                   }
                 : stopped;
+            if (rules.targetIntoLocation(timed1.side, timed1.entry, timed1.stop, h4)) {
+              veto = `${pick.weexSymbol} ${pick.side}: 1R into 4h S/R`;
+              whyNot.push(`${tag} 1R into 4h demand/supply`);
+              continue;
+            }
             const timed =
               compass.bias === "chop" && trig.wait
                 ? { ...timed1, entryType: "limit" as const }

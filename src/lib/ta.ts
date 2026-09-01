@@ -370,7 +370,7 @@ export function analyzeMarket(
   const body = Math.abs(lastBar.close - lastBar.open);
   const upperWick = lastBar.high - Math.max(lastBar.close, lastBar.open);
   const lowerWick = Math.min(lastBar.close, lastBar.open) - lastBar.low;
-  if (body > 0 && lowerWick >= 1.6 * body && lastBar.close >= lastBar.open && r <= 48 && last <= mid + 0.35 * a) {
+  if (body > 0 && lowerWick >= 1.6 * body && lastBar.close >= lastBar.open && r <= 40 && last <= mid) {
     ideas.push({
       side: "long",
       entry: last,
@@ -382,7 +382,7 @@ export function analyzeMarket(
       plan: "scale2",
     });
   }
-  if (body > 0 && upperWick >= 1.6 * body && lastBar.close <= lastBar.open && r >= 52 && last >= mid - 0.35 * a) {
+  if (body > 0 && upperWick >= 1.6 * body && lastBar.close <= lastBar.open && r >= 60 && last >= mid) {
     ideas.push({
       side: "short",
       entry: last,
@@ -403,15 +403,15 @@ export function analyzeMarket(
       lastBar.open <= prevBar.close &&
       lastBar.close >= prevBar.open &&
       prevBear &&
-      r <= 55 &&
-      last >= mid * 0.994;
+      r <= 42 &&
+      last <= mid;
     const bearEngulf =
       lastBar.close < lastBar.open &&
       lastBar.open >= prevBar.close &&
       lastBar.close <= prevBar.open &&
       prevBull &&
-      r >= 45 &&
-      last <= mid * 1.006;
+      r >= 58 &&
+      last >= mid;
     if (bullEngulf) {
       ideas.push({
         side: "long",

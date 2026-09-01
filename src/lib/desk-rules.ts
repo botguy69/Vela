@@ -481,7 +481,7 @@ export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
   return filtered.length ? filtered : setups;
 }
 
-/** A++ — structure at 85%+. Failed-bounce and continuation are off the book. */
+/** A++ — location structure only. No mid-range engulf, no dip-buy, no failed-bounce. */
 export function eliteScalp(
   thesis: string,
   conf: number,
@@ -489,16 +489,21 @@ export function eliteScalp(
   bias?: "long" | "short" | "chop",
 ): boolean {
   const floor = Math.max(85, bar);
-  if (/Failed bounce|lower high|Continuation (on|short on) 21h/i.test(thesis)) return false;
+  if (
+    /Failed bounce|lower high|Continuation (on|short on) 21h|Oversold bounce|washout RSI|Trend cooling/i.test(
+      thesis,
+    )
+  )
+    return false;
   const structure =
-    /double (top|bottom)|failed range|vol fade|washout RSI (1\d|2[0-5])|climax rejection|Dry-up at|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-5])|Overbought RSI (7[0-9]|8\d)/i.test(
+    /double (top|bottom)|failed range|vol fade|climax rejection|Dry-up at|Pin bar|engulf|buyers on 2nd|supply on 2nd/i.test(
       thesis,
     );
   return structure && conf >= floor;
 }
 
 export const APLUS_MENU =
-  "Engulf · double · pin · climax · dry-up · failed range · washout. No failed-bounce. No continuation.";
+  "Double · pin-at-extreme · engulf-at-extreme · climax · dry-up · failed range. No mid-range. No dip-buy.";
 
 /** Higher = cleaner. Oversold/washout last so a 92 RSI dump doesn't beat an 86 double. */
 export function setupQuality(thesis: string): number {
@@ -642,6 +647,26 @@ export function mtfAllows(
     }
   }
   return { ok: true, why: "" };
+}
+
+/** 1R would print into 4h demand/supply — skip. ONDO TP sat on the 4h low. */
+export function targetIntoLocation(
+  side: Side,
+  entry: number,
+  stop: number,
+  fourHour: Candle[],
+): boolean {
+  if (fourHour.length < 16 || !(entry > 0) || !(stop > 0)) return false;
+  const risk = Math.abs(entry - stop);
+  if (!(risk > 0)) return false;
+  const tp = side === "short" ? entry - risk : entry + risk;
+  const prior = fourHour.slice(-21, -1);
+  const sl = Math.min(...prior.map((c) => c.low));
+  const sh = Math.max(...prior.map((c) => c.high));
+  const a = atr(fourHour, 14) ?? 0;
+  if (side === "short" && tp <= sl + 0.4 * a) return true;
+  if (side === "long" && tp >= sh - 0.4 * a) return true;
+  return false;
 }
 
 export function whyTookTrade(opts: {
