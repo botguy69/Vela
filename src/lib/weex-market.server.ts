@@ -121,15 +121,18 @@ export async function getWeexLast(symbol: string): Promise<number> {
 
 export async function loadTop25Hours(): Promise<Record<string, Candle[]>> {
   const out: Record<string, Candle[]> = {};
-  await Promise.all(
-    TOP25.map(async (c) => {
-      try {
-        out[c.weex] = await getWeexKlines(c.weex, "1h", 120);
-      } catch {
-        /* skip thin */
-      }
-    }),
-  );
+  const chunk = 12;
+  for (let i = 0; i < TOP25.length; i += chunk) {
+    await Promise.all(
+      TOP25.slice(i, i + chunk).map(async (c) => {
+        try {
+          out[c.weex] = await getWeexKlines(c.weex, "1h", 120);
+        } catch {
+          /* skip thin */
+        }
+      }),
+    );
+  }
   return out;
 }
 

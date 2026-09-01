@@ -218,18 +218,21 @@ export function AutoDesk() {
         </div>
 
         <section className="mt-8">
-          <h2 className="font-display text-2xl font-medium tracking-tight">Majors</h2>
+          <h2 className="font-display text-2xl font-medium tracking-tight">Universe</h2>
           <p className="mt-1 text-sm text-muted">
-            Known WEEX perps only (INJ, ARB, OP, ATOM, FIL, RENDER, and the rest of the board). New listings stay out. Leverage pulled live.
+            {(desk.data?.universe ?? []).length} known WEEX perps. Same A++ / 4h+1h rules. No HYPE · TON · TRX.
           </p>
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
-            {(desk.data?.universe ?? []).map((c) => (
-              <div key={c.weex} className="rounded-lg bg-surface px-3 py-2 shadow-border">
-                <p className="text-sm font-medium">{c.id}</p>
-                <p className="font-mono text-[11px] text-subtle">{c.maxLeverage}x · {c.weex}</p>
-              </div>
-            ))}
-          </div>
+          <details className="mt-3 rounded-xl bg-surface p-4 shadow-border">
+            <summary className="cursor-pointer text-sm text-subtle">Show pairs</summary>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {(desk.data?.universe ?? []).map((c) => (
+                <div key={c.weex} className="rounded-lg bg-black/20 px-3 py-2 shadow-border">
+                  <p className="text-sm font-medium">{c.id}</p>
+                  <p className="font-mono text-[11px] text-subtle">{c.maxLeverage}x · {c.weex}</p>
+                </div>
+              ))}
+            </div>
+          </details>
         </section>
 
         <ReviewBlock />
