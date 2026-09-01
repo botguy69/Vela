@@ -170,66 +170,6 @@ export function analyzeMarket(
 
   const ideas: Idea[] = [];
 
-  if (r <= 25 && last > (slow ?? last) * 0.96) {
-    const entry = last;
-    const stop = lo - 0.8 * a;
-    ideas.push({
-      side: "long",
-      entry,
-      stop,
-      entryType: "market",
-      score: 86 + (25 - r) * 0.4,
-      thesis: `Washout RSI ${r.toFixed(0)}, slow mean intact`,
-      invalidation: `Break of the local swing low.`,
-      plan: "scale2",
-    });
-  }
-
-  if (r <= 28 && last < mid && last > (slow ?? last) * 0.93) {
-    ideas.push({
-      side: "long",
-      entry: last,
-      stop: lo - stopPad * a * 0.35,
-      entryType: "market",
-      score: 84 + Math.min(6, 28 - r) * 0.5,
-      thesis: `Oversold bounce RSI ${r.toFixed(0)} under 21h`,
-      invalidation: `Hourly close through the swing low.`,
-      plan: "scale2",
-    });
-  }
-
-  if (r >= 70 && lastBar.close <= lastBar.open && last < (slow ?? last) * 1.08) {
-    const entry = last;
-    const stop = hi + 0.8 * a;
-    ideas.push({
-      side: "short",
-      entry,
-      stop,
-      entryType: "market",
-      score: 86 + Math.min(6, r - 70) * 0.35,
-      thesis: `Overbought RSI ${r.toFixed(0)} reject`,
-      invalidation: `Break of the local swing high.`,
-      plan: "scale2",
-    });
-  }
-
-  const rAgo = rsi(closes.slice(0, -4), 14);
-  if (rAgo != null && r >= 64 && r <= rAgo + 0.5 && last > mid * 0.997) {
-    const bearBar = lastBar.close <= lastBar.open;
-    if (bearBar || r >= 70) {
-      ideas.push({
-        side: "short",
-        entry: last,
-        stop: Math.max(hi, last) + stopPad * a * 0.35,
-        entryType: "market",
-        score: 83 + Math.min(6, r - 64) * 0.3,
-        thesis: `Trend cooling, RSI ${r.toFixed(0)} off ${rAgo.toFixed(0)}`,
-        invalidation: `Hourly close makes a new high.`,
-        plan: "scale2",
-      });
-    }
-  }
-
   const prior = hourly.slice(0, -1);
   if (prior.length >= 24) {
     const hiPrior = swing(prior, 20, "high");

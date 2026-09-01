@@ -2500,7 +2500,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (!rules.eliteScalp(s.thesis ?? "", conf, bar.minConf, compass.bias)) continue;
             if (held.has(s.weexSymbol) || dark.has(s.weexSymbol)) continue;
             if (SKIP_WEEX.has(s.weexSymbol) || !TOP25_WEEX.includes(s.weexSymbol)) continue;
-            if (compass.bias !== "chop" && s.side !== compass.bias) continue;
             const key = `${s.weexSymbol}:${s.side}`;
             if (seen.has(key)) continue;
             seen.add(key);
@@ -2578,12 +2577,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const coin15raw = await getWeexKlines(pick.weexSymbol, "15m", 210).catch(() => []);
             const coin15 = rules.closedCandles(coin15raw, 15 * 60 * 1000);
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
-            const withBtc = compass.bias === "chop" || pick.side === compass.bias;
-            if (!withBtc) {
-              veto = `${pick.weexSymbol} ${pick.side} vs BTC ${compass.bias} — with-tape only`;
-              whyNot.push(`${tag} vs BTC ${compass.bias} — no dip-buy / fade`);
-              continue;
-            }
             const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
             const h4Closed = rules.closedCandles(h4, 4 * 60 * 60 * 1000);
             const mtfPick = rules.mtfAllows(pick.side, h4Closed, hourPick, pick.thesis ?? "");
@@ -2597,23 +2590,17 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const trig = rules.ltfTrigger(pick.side, coin15);
+            if (!trig.ok && !trig.wait) {
+              veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
+              whyNot.push(`${tag} ${trig.reason}`);
+              continue;
+            }
             if ((burst?.n ?? 0) >= 1 && burst?.side && pick.side === burst.side) {
               whyNot.push(`${tag} burst lock — same side as last fill (15m)`);
               continue;
             }
             if ((burst?.n ?? 0) >= 1 && heat.side !== "chop" && pick.side === heat.side) {
               whyNot.push(`${tag} burst lock — with BTC heat`);
-              continue;
-            }
-            if (compass.bias === "chop") {
-              if (!trig.ok && !trig.wait) {
-                veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
-                whyNot.push(`${tag} ${trig.reason}`);
-                continue;
-              }
-            } else if (!rules.ltfAllows(pick.side, coin15)) {
-              veto = `${pick.weexSymbol} ${pick.side} 15m fighting BTC ${compass.bias}`;
-              whyNot.push(`${tag} 15m fighting`);
               continue;
             }
             const book = await getBookTicker(pick.weexSymbol);
@@ -2661,8 +2648,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} already parked — leave the limit`);
               continue;
             }
-            const timed0 =
-              compass.bias === "chop" ? rules.withLtfEntry(pick, trig.pullback) : pick;
+            const timed0 = rules.withLtfEntry(pick, trig.pullback);
             const stopped = {
               ...timed0,
               stop: rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15),
@@ -2679,15 +2665,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                     rr: 1,
                   }
                 : stopped;
-            if (rules.targetIntoLocation(timed1.side, timed1.entry, timed1.stop, h4)) {
+            if (rules.targetIntoLocation(timed1.side, timed1.entry, timed1.stop, h4Closed)) {
               veto = `${pick.weexSymbol} ${pick.side}: 1R into 4h S/R`;
               whyNot.push(`${tag} 1R into 4h demand/supply`);
               continue;
             }
-            const timed =
-              compass.bias === "chop" && trig.wait
-                ? { ...timed1, entryType: "limit" as const }
-                : timed1;
+            const timed = trig.wait ? { ...timed1, entryType: "limit" as const } : timed1;
             const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
             if (!sz) continue;
             const depth = await getBookDepth(pick.weexSymbol);
