@@ -2547,7 +2547,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}`
             : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Full board. Engulf · double · pin · climax · failed range. No failed-bounce. No continuation.";
+          const aPlusLine = "4h trend+S/R · 1h EMA9/21+RSI · 15m EMA9/21/200 + VWAP. No failed-bounce. No continuation.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2581,7 +2581,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
-            const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 48).catch(() => []);
+            const coin15 = await getWeexKlines(pick.weexSymbol, "15m", 210).catch(() => []);
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
             const withBtc = compass.bias === "chop" || pick.side === compass.bias;
             if (!withBtc) {

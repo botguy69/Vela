@@ -55,15 +55,24 @@ export function atr(candles: Candle[], period = 14): number | null {
   return sma(trs, period);
 }
 
-/** 4h mean must agree with the 1h idea. */
+/** 4h trend (21 SMA) + major S/R. Longs don't buy 4h highs; shorts don't fade 4h lows. */
 export function htfAllows(side: Side, fourHour: Candle[]): boolean {
   if (fourHour.length < 24) return true;
   const closes = fourHour.map((c) => c.close);
   const mid = sma(closes, 21);
   const last = closes[closes.length - 1];
   if (mid == null || last == null) return true;
-  if (side === "long") return last >= mid * 0.997;
-  return last <= mid * 1.003;
+  if (side === "long" && last < mid * 0.997) return false;
+  if (side === "short" && last > mid * 1.003) return false;
+  const prior = fourHour.slice(-21, -1);
+  if (prior.length < 8) return true;
+  const sh = Math.max(...prior.map((c) => c.high));
+  const sl = Math.min(...prior.map((c) => c.low));
+  const a = atr(fourHour, 14) ?? 0;
+  const bar = fourHour[fourHour.length - 1]!;
+  if (side === "long" && a > 0 && last >= sh - 0.15 * a && bar.close < bar.open) return false;
+  if (side === "short" && a > 0 && last <= sl + 0.15 * a && bar.close > bar.open) return false;
+  return true;
 }
 
 function rsiAt(closes: number[], end: number, period = 14): number | null {
@@ -110,9 +119,34 @@ export function ltfAllows(side: Side, fifteen: Candle[]): boolean {
 }
 
 /**
- * 1h already picked the side. Fill only on a 15m pullback to EMA 9/21 — not the spike of the hour.
- * Does not move the stop.
+ * 15m entry: EMA 9/21 pullback + session VWAP.
+ * Above VWAP favor longs. Below favor shorts. Chop across VWAP = skip.
  */
+export function sessionVwap(candles: Candle[], bars = 96): number | null {
+  const win = candles.slice(-Math.min(bars, candles.length));
+  if (win.length < 12) return null;
+  let pv = 0;
+  let vol = 0;
+  for (const c of win) {
+    const tp = (c.high + c.low + c.close) / 3;
+    const v = c.volume > 0 ? c.volume : 1;
+    pv += tp * v;
+    vol += v;
+  }
+  return vol > 0 ? pv / vol : null;
+}
+
+function vwapCrosses(candles: Candle[], n: number, vwap: number): number {
+  const win = candles.slice(-n);
+  let x = 0;
+  for (let i = 1; i < win.length; i += 1) {
+    const a = win[i - 1]!.close - vwap;
+    const b = win[i]!.close - vwap;
+    if (a * b < 0) x += 1;
+  }
+  return x;
+}
+
 export function ltfTrigger(
   side: Side,
   fifteen: Candle[],
@@ -121,24 +155,52 @@ export function ltfTrigger(
   const closes = fifteen.map((c) => c.close);
   const e9 = ema(closes, 9);
   const e21 = ema(closes, 21);
+  const e200 = ema(closes, 200);
   const a = atr(fifteen, 14);
   const last = closes[closes.length - 1];
+  const prev = closes[closes.length - 2];
   if (e9 == null || e21 == null || a == null || a <= 0 || last == null) {
     return { ok: true, wait: false, reason: "thin 15m", pullback: null };
   }
+  const vwap = sessionVwap(fifteen);
+  if (vwap != null && vwapCrosses(fifteen, 8, vwap) >= 3) {
+    return { ok: false, wait: false, reason: "VWAP chop", pullback: null };
+  }
+  if (e200 != null) {
+    if (side === "long" && last < e200 * 0.995) {
+      return { ok: false, wait: false, reason: "15m below EMA200", pullback: null };
+    }
+    if (side === "short" && last > e200 * 1.005) {
+      return { ok: false, wait: false, reason: "15m above EMA200", pullback: null };
+    }
+  }
   const mean = (e9 + e21) / 2;
+  const reclaim =
+    vwap != null && prev != null
+      ? side === "long"
+        ? prev < vwap && last >= vwap
+        : prev > vwap && last <= vwap
+      : false;
+  if (vwap != null && !reclaim) {
+    if (side === "long" && last < vwap * 0.998) {
+      return { ok: false, wait: false, reason: "below VWAP", pullback: null };
+    }
+    if (side === "short" && last > vwap * 1.002) {
+      return { ok: false, wait: false, reason: "above VWAP", pullback: null };
+    }
+  }
   if (side === "long") {
     if (last < e21 - 0.7 * a) return { ok: false, wait: false, reason: "15m still dumping", pullback: null };
-    if (last > e21 + 0.35 * a) {
-      return { ok: false, wait: true, reason: "limit at 15m mean", pullback: mean };
+    if (last > e21 + 0.35 * a && !reclaim) {
+      return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
     }
-    return { ok: true, wait: false, reason: "15m pullback", pullback: mean };
+    return { ok: true, wait: false, reason: reclaim ? "VWAP reclaim" : "15m pullback + VWAP", pullback: mean };
   }
   if (last > e21 + 0.7 * a) return { ok: false, wait: false, reason: "15m still ripping", pullback: null };
-  if (last < e21 - 0.35 * a) {
-    return { ok: false, wait: true, reason: "limit at 15m mean", pullback: mean };
+  if (last < e21 - 0.35 * a && !reclaim) {
+    return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
   }
-  return { ok: true, wait: false, reason: "15m bounce", pullback: mean };
+  return { ok: true, wait: false, reason: reclaim ? "VWAP reject" : "15m bounce + VWAP", pullback: mean };
 }
 
 /** Coin 15m is doing the side while BTC 15m is not — 2nd same-side name is allowed. */
@@ -433,8 +495,8 @@ export function setupTag(thesis: string): string {
 }
 
 /**
- * 4h + 1h must agree both ways. No chase, no 4h blow-off/washout, no late bounce.
- * 15m is ltfTrigger (separate).
+ * 4h trend + S/R. 1h EMA 9/21 + RSI momentum. No chase / blow-off.
+ * 15m + VWAP is ltfTrigger.
  */
 export function mtfAllows(
   side: Side,
@@ -443,13 +505,24 @@ export function mtfAllows(
   thesis = "",
 ): { ok: boolean; why: string } {
   if (!htfAllows(side, fourHour)) return { ok: false, why: "4h reject" };
+  const knife = /washout|Oversold|Overbought/i.test(thesis);
   if (hourly.length >= 24) {
     const closes = hourly.map((c) => c.close);
-    const e = ema(closes, 21);
+    const e9 = ema(closes, 9);
+    const e21 = ema(closes, 21);
     const last = closes[closes.length - 1];
-    if (e != null && last != null) {
-      if (side === "long" && last < e * 0.997) return { ok: false, why: "1h reject" };
-      if (side === "short" && last > e * 1.003) return { ok: false, why: "1h reject" };
+    if (e21 != null && last != null) {
+      if (side === "long" && last < e21 * 0.997) return { ok: false, why: "1h reject" };
+      if (side === "short" && last > e21 * 1.003) return { ok: false, why: "1h reject" };
+    }
+    if (!knife && e9 != null && e21 != null) {
+      if (side === "long" && e9 < e21 * 0.997) return { ok: false, why: "1h momentum down" };
+      if (side === "short" && e9 > e21 * 1.003) return { ok: false, why: "1h momentum up" };
+    }
+    const rsi1 = rsiAt(closes, closes.length - 1);
+    if (!knife && rsi1 != null) {
+      if (side === "long" && rsi1 < 38) return { ok: false, why: "1h RSI no bid" };
+      if (side === "short" && rsi1 > 62) return { ok: false, why: "1h RSI no offer" };
     }
   }
   if (fourHour.length >= 16) {
