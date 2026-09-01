@@ -318,30 +318,6 @@ export function analyzeMarket(
     }
   }
 
-  if (tape === "dry_extreme" && last >= Math.max(bbUpper * 0.997, hi) * 0.999 && r >= 58) {
-    ideas.push({
-      side: "short",
-      entry: last,
-      stop: Math.max(hi, lastBar.high) + stopPad * a * 0.35,
-      entryType: "limit",
-      score: 85,
-      thesis: `Dry-up at high, vol ${volRatio.toFixed(1)}× RSI ${r.toFixed(0)}`,
-      invalidation: `Hourly close makes a new high on volume.`,
-      plan: "scale2",
-    });
-  }
-  if (tape === "dry_extreme" && last <= Math.min(bbLower * 1.003, lo) * 1.001 && r <= 42) {
-    ideas.push({
-      side: "long",
-      entry: last,
-      stop: Math.min(lo, lastBar.low) - stopPad * a * 0.35,
-      entryType: "limit",
-      score: 85,
-      thesis: `Dry-up at low, vol ${volRatio.toFixed(1)}× RSI ${r.toFixed(0)}`,
-      invalidation: `Hourly close makes a new low on volume.`,
-      plan: "scale2",
-    });
-  }
   if (tape === "climax" && last >= bbUpper * 0.998 && lastBar.close <= lastBar.open && r >= 60) {
     ideas.push({
       side: "short",

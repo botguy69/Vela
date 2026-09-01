@@ -2457,25 +2457,17 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           let openLimits = stillOpenRaw.filter(
             (s) => s.status === "working" || s.status === "proposed",
           ).length;
-          const btcLast = btcBook[btcBook.length - 1]?.close;
-          const btcCloses = btcBook.map((c) => c.close);
-          let btcRsi = 0;
-          if (btcCloses.length > 15) {
-            let gain = 0;
-            let loss = 0;
-            for (let i = btcCloses.length - 14; i < btcCloses.length; i += 1) {
-              const d = btcCloses[i]! - btcCloses[i - 1]!;
-              if (d >= 0) gain += d;
-              else loss -= d;
-            }
-            btcRsi = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
-          }
-          const btc15 = await getWeexKlines("BTCUSDT", "15m", 48).catch(() => []);
-          const btc4 = await getWeexFourHour("BTCUSDT").catch(() => []);
-          const tape = rules.marketBias(btc4, btcBook, btc15);
+          const btc15 = await getWeexKlines("BTCUSDT", "15m", 210).catch(() => []);
+          const heat = rules.btcHeat(btc15);
+          const sameAsBtc =
+            heat.side === "chop"
+              ? 0
+              : liveN.filter((p) => (p.side === "short" ? "short" : "long") === heat.side).length;
+          if (heat.chop && liveN.length >= 1) room = 0;
+          if (!heat.chop && sameAsBtc >= 3) room = 0;
           const compass = {
             bias: "chop" as const,
-            note: `Per coin. 4h + 15m. BTC ${tape.bias} is info only — not a compass.`,
+            note: heat.note,
           };
           const ordered = [...raw].sort((a, b) => {
             const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf, compass.bias) ? 1 : 0;
@@ -2547,7 +2539,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Location only. No mid-range engulf. No 4h bounce. No 1R into demand.";
+          const aPlusLine = "Dry-up = skip not entry. BTC is heat (chop → 1 seat). Patterns still need 4h.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
