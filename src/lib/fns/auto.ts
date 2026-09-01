@@ -216,7 +216,7 @@ function composePass(
     .split("\n")
     .map((ln) => ln.trim())
     .filter((ln) =>
-      /^(Eying |Took |Skip |BTC |Book |One |A\+\+)/i.test(ln),
+      /^(Eying |Took |Skip |BTC |Book |One |A\+\+|Closed )/i.test(ln),
     )
     .filter((ln) => !/trend cooling|80%\+|21h-mean|No dip-buy vs a dump/i.test(ln));
   const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
@@ -2540,7 +2540,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Closed 5m fill. 15m stop. Same 4h/1h. Burst 5m. 3% all names.";
+          const aPlusLine = "A++ closed 5m fill · 15m stop · 4h/1h location · burst 5m · 3% all names.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2824,8 +2824,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
     const learned =
       (stats.tpWins ?? 0) >= 20 && (stats.expectancyR ?? 0) > 0
-        ? "A++ · 4h+15m · score not a win-rate · 70/30 runner (E[R]>0 and 20 TP hits)."
-        : `A++ · 4h+15m · 1 TP full size (${stats.tpWins ?? 0}/20 TP hits and E[R]>0 before 2.5R runner).`;
+        ? "A++ · 5m fill / 15m stop · score not a win-rate · 70/30 runner (E[R]>0 and 20 TP hits)."
+        : `A++ · 5m fill / 15m stop · 1 TP full size (${stats.tpWins ?? 0}/20 TP hits and E[R]>0 before 2.5R runner).`;
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))
