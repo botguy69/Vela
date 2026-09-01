@@ -147,6 +147,7 @@ export async function universeCard() {
 }
 
 const bookCache = new Map<string, CacheEntry<{ bid: number; ask: number }>>();
+const depthCache = new Map<string, CacheEntry<{ bids: [number, number][]; asks: [number, number][] }>>();
 const fundCache = new Map<string, CacheEntry<number>>();
 
 export async function getBookTicker(symbol: string): Promise<{ bid: number; ask: number } | null> {
@@ -163,6 +164,34 @@ export async function getBookTicker(symbol: string): Promise<{ bid: number; ask:
     if (!(bid > 0 && ask > 0)) return null;
     const value = { bid, ask };
     bookCache.set(symbol, { at: now, value });
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+export async function getBookDepth(
+  symbol: string,
+): Promise<{ bids: [number, number][]; asks: [number, number][] } | null> {
+  const now = Date.now();
+  const hit = depthCache.get(symbol);
+  if (hit && now - hit.at < 12_000) return hit.value;
+  try {
+    const raw = await fetchJson<{
+      bids?: [string, string][];
+      asks?: [string, string][];
+      data?: { bids?: [string, string][]; asks?: [string, string][] };
+    }>(`https://api-contract.weex.com/capi/v3/market/depth?symbol=${encodeURIComponent(symbol)}&limit=15`);
+    const book = raw.data ?? raw;
+    const parse = (rows: [string, string][] | undefined) =>
+      (rows ?? [])
+        .map(([p, q]) => [Number(p), Number(q)] as [number, number])
+        .filter(([p, q]) => p > 0 && q > 0);
+    const bids = parse(book.bids);
+    const asks = parse(book.asks);
+    if (!bids.length && !asks.length) return null;
+    const value = { bids, asks };
+    depthCache.set(symbol, { at: now, value });
     return value;
   } catch {
     return null;

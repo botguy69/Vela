@@ -1608,6 +1608,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       formatWeexPx,
       formatWeexQty,
       getBookTicker,
+      getBookDepth,
       getFundingRate,
       getWeexFourHour,
       getWeexKlines,
@@ -2540,7 +2541,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Closed 15m only. Burst 15m same-side lock. 3% margin all names.";
+          const aPlusLine = "Closed 15m. Burst lock. 3% all names. Thin depth skip. BTC heat not compass.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2687,14 +2688,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               compass.bias === "chop" && trig.wait
                 ? { ...timed1, entryType: "limit" as const }
                 : timed1;
-            const sz = sizeSetup(
-              timed,
-              equity,
-              corrected.marginPct,
-              spec.maxLeverage,
-              rules.sizeMult(pick.weexSymbol),
-            );
+            const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
             if (!sz) continue;
+            const depth = await getBookDepth(pick.weexSymbol);
+            if (depth && rules.depthTooThin(sz.side, sz.entry, sz.notional, depth.bids, depth.asks)) {
+              whyNot.push(`${tag} thin book — 1R would walk`);
+              continue;
+            }
             if (sz.entryType === "limit" && openLimits >= 1) {
               whyNot.push(`${tag} one unfilled limit already — need a market A+ for another slot`);
               continue;

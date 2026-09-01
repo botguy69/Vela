@@ -356,6 +356,26 @@ export function spreadTooWide(weex: string, bid: number, ask: number): boolean {
   return bps > 18;
 }
 
+/** True if lifting/hitting our size would walk > ~0.2% of the book. Fail open if depth missing. */
+export function depthTooThin(
+  side: Side,
+  entry: number,
+  notional: number,
+  bids: [number, number][],
+  asks: [number, number][],
+): boolean {
+  if (!(entry > 0) || !(notional > 0)) return false;
+  const band = entry * 0.002;
+  const levels = side === "long" ? asks : bids;
+  let usd = 0;
+  for (const [px, qty] of levels) {
+    if (side === "long" && px > entry + band) continue;
+    if (side === "short" && px < entry - band) continue;
+    usd += px * qty;
+  }
+  return usd < notional * 2;
+}
+
 export function limitMaxAgeMs(style: Style): number {
   return style === "scalp" ? 4 * 3600_000 : 10 * 3600_000;
 }
