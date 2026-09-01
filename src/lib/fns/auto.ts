@@ -2452,7 +2452,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             select count(*)::int as n, (array_agg(side order by coalesce(filled_at, created_at) desc))[1] as side
             from auto_signals
             where user_id = ${userId}
-              and created_at > now() - interval '15 minutes'
+              and created_at > now() - interval '5 minutes'
               and status = 'filled'
           `;
           if ((burst?.n ?? 0) >= 1 && atRiskN >= AT_RISK) room = 0;
@@ -2540,7 +2540,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Closed 15m. Burst lock. 3% all names. Thin depth skip. BTC heat not compass.";
+          const aPlusLine = "Closed 5m fill. 15m stop. Same 4h/1h. Burst 5m. 3% all names.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2574,6 +2574,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
+            const coin5raw = await getWeexKlines(pick.weexSymbol, "5m", 320).catch(() => []);
+            const coin5 = rules.closedCandles(coin5raw, 5 * 60 * 1000);
             const coin15raw = await getWeexKlines(pick.weexSymbol, "15m", 210).catch(() => []);
             const coin15 = rules.closedCandles(coin15raw, 15 * 60 * 1000);
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
@@ -2589,14 +2591,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not location structure`);
               continue;
             }
-            const trig = rules.ltfTrigger(pick.side, coin15);
+            const trig = rules.ltfTrigger(pick.side, coin5);
             if (!trig.ok && !trig.wait) {
               veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
               whyNot.push(`${tag} ${trig.reason}`);
               continue;
             }
             if ((burst?.n ?? 0) >= 1 && burst?.side && pick.side === burst.side) {
-              whyNot.push(`${tag} burst lock — same side as last fill (15m)`);
+              whyNot.push(`${tag} burst lock — same side as last fill (5m)`);
               continue;
             }
             if ((burst?.n ?? 0) >= 1 && heat.side !== "chop" && pick.side === heat.side) {

@@ -190,7 +190,7 @@ export function ltfTrigger(
     if (side === "short" && c.close > c.open) fails += 1;
   }
   if (fails >= 2) return { ok: false, wait: false, reason: "15m level already failed", pullback: null };
-  const vwap = sessionVwap(fifteen);
+  const vwap = sessionVwap(fifteen, Math.min(288, fifteen.length));
   if (vwap != null && vwapCrosses(fifteen, 8, vwap) >= 3) {
     return { ok: false, wait: false, reason: "VWAP chop", pullback: null };
   }
