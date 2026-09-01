@@ -412,7 +412,8 @@ async function closedStats(
     if (n(r.pnl) > 0 && /targeted|Hit TP|TP1|TP2/i.test(r.close_reason ?? "")) return true;
     return false;
   };
-  const wins = window.filter(isFullWin).length;
+  const wins = window.filter((r) => n(r.pnl) > 0).length;
+  const tpWins = window.filter(isFullWin).length;
   const winR = window.map(rOf).filter((x): x is number => x != null && x > 0);
   const lossR = window.map(rOf).filter((x): x is number => x != null && x < 0);
   const allR = window.map(rOf).filter((x): x is number => x != null);
@@ -439,6 +440,7 @@ async function closedStats(
     avgLossR: avg(lossR),
     expectancyR: avg(allR),
     setupTape,
+    tpWins,
     names: [...window]
       .reverse()
       .map((r) => {
@@ -825,8 +827,8 @@ async function ensureTakes(
   const [st] = await sql<{ stats_from: string | null }>`
     select stats_from from auto_settings where user_id = ${pos.user_id} limit 1
   `;
-  const closed = st ? await closedStats(sql, pos.user_id, st.stats_from) : { wins: 0, expectancyR: 0 };
-  const runners = closed.wins >= 20 && (closed.expectancyR ?? 0) > 0;
+  const closed = st ? await closedStats(sql, pos.user_id, st.stats_from) : { wins: 0, tpWins: 0, expectancyR: 0 };
+  const runners = (closed.tpWins ?? 0) >= 20 && (closed.expectancyR ?? 0) > 0;
   const afterTp1 = Boolean(pos.tp1_hit) || Boolean(pos.be_moved);
   const rawTps = parseNums(pos.targets).slice(0, runners ? 2 : 1);
   const tps: number[] = [];
@@ -2772,9 +2774,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     }
 
     const learned =
-      stats.wins >= 20 && (stats.expectancyR ?? 0) > 0
-        ? "A++ · 4h+15m · score not a win-rate · 70/30 runner (E[R]>0 and 20 wins)."
-        : `A++ · 4h+15m · 1 TP full size (${stats.wins}/20 wins and E[R]>0 before 2.5R runner).`;
+      (stats.tpWins ?? 0) >= 20 && (stats.expectancyR ?? 0) > 0
+        ? "A++ · 4h+15m · score not a win-rate · 70/30 runner (E[R]>0 and 20 TP hits)."
+        : `A++ · 4h+15m · 1 TP full size (${stats.tpWins ?? 0}/20 TP hits and E[R]>0 before 2.5R runner).`;
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))
