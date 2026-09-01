@@ -2448,14 +2448,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             spec: Awaited<ReturnType<typeof specFor>>;
           }[] = [];
           let room = roomN;
-          const [burst] = await sql<{ n: number; side: string | null }>`
-            select count(*)::int as n, (array_agg(side order by coalesce(filled_at, created_at) desc))[1] as side
-            from auto_signals
-            where user_id = ${userId}
-              and created_at > now() - interval '5 minutes'
-              and status = 'filled'
-          `;
-          if ((burst?.n ?? 0) >= 1 && atRiskN >= AT_RISK) room = 0;
           let openLimits = stillOpenRaw.filter(
             (s) => s.status === "working" || s.status === "proposed",
           ).length;
@@ -2546,7 +2538,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "A++ 5m fill. Scan 181 → 4h → best 5m. 4 seats any mix.";
+          const aPlusLine = "A++ 5m fill. 4 seats any mix. One per tick. No 5m same-side lock.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2606,10 +2598,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (!trig.ok && !trig.wait) {
               veto = `Skip ${tag} ${trig.reason}`;
               whyNot.unshift(`${tag} ${trig.reason}`);
-              continue;
-            }
-            if ((burst?.n ?? 0) >= 1 && burst?.side && pick.side === burst.side) {
-              whyNot.push(`${tag} burst lock — same side as last fill (5m)`);
               continue;
             }
             const book = await getBookTicker(pick.weexSymbol);
@@ -2698,8 +2686,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
 
           let tookLine = veto;
-          if (!batch.length && (burst?.n ?? 0) >= 1) {
-            tookLine = "One A++ per tick — just placed. Empty slots stay empty.";
+          if (!batch.length && room <= 0) {
+            tookLine = `Book ${atRiskN}/4 at-risk · ${seatN} seats. Not adding.`;
           }
 
           if (!batch.length) {
