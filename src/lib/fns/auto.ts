@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { adaptMethod, clampPeak, GOAL_USD, STAGE2_USD, multipleToGoal, phaseForRun, progressPct, stageTarget } from "@/lib/goal";
+import { setupTag } from "@/lib/desk-rules";
 
 /** WR / streaks start when 4h confirm went live. Older tape is junk. */
 const TAPE_FROM = "2026-08-31T02:30:00.000Z";
@@ -69,6 +70,10 @@ type SignalRow = {
   score: string | number | null;
   confidence: string | number | null;
   close_reason: string | null;
+  setup_tag?: string | null;
+  mae_r?: string | number | null;
+  mfe_r?: string | number | null;
+  fees_usd?: string | number | null;
   created_at: string;
   updated_at: string;
 };
@@ -220,7 +225,7 @@ function composePass(
 
 function publicSettings(
   row: SettingsRow,
-  stats: { closed: number; wins: number; winRate?: number; avgWinR?: number; avgLossR?: number; names?: string[] } = { closed: 0, wins: 0 },
+  stats: { closed: number; wins: number; winRate?: number; avgWinR?: number; avgLossR?: number; expectancyR?: number; setupTape?: string; names?: string[] } = { closed: 0, wins: 0 },
   live?: { equity: number; available: number } | null,
   weexError?: string | null,
   book?: { liveL?: number; liveS?: number; liveLines?: string[]; beN?: number; liveTotal?: number },
@@ -275,6 +280,8 @@ function publicSettings(
     winRate: stats.winRate ?? 0,
     avgWinR: stats.avgWinR ?? 0,
     avgLossR: stats.avgLossR ?? 0,
+    expectancyR: stats.expectancyR ?? 0,
+    setupTape: stats.setupTape ?? "",
     recordNames: stats.names ?? [],
     keepAlive: Boolean(row.keep_alive),
     lastCronAt: row.last_cron_at,
@@ -348,9 +355,12 @@ async function closedStats(
     plan: string | null;
     rr: string | number | null;
     status: string | null;
+    thesis: string | null;
+    setup_tag: string | null;
   }>`
     select id, pnl, entry, stop, qty, fill_px, risk_usd, notional, targets, target, be_moved,
-           weex_symbol, side, filled_at, updated_at, created_at, close_reason, plan, rr, status
+           weex_symbol, side, filled_at, updated_at, created_at, close_reason, plan, rr, status,
+           thesis, setup_tag
     from auto_signals
     where user_id = ${userId}
       and status in ('stopped','targeted','skipped')
@@ -399,13 +409,30 @@ async function closedStats(
   const wins = window.filter((r) => n(r.pnl) > 0).length;
   const winR = window.map(rOf).filter((x): x is number => x != null && x > 0);
   const lossR = window.map(rOf).filter((x): x is number => x != null && x < 0);
+  const allR = window.map(rOf).filter((x): x is number => x != null);
   const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+  const bySetup = new Map<string, number[]>();
+  for (const r of window) {
+    const tag = (r.setup_tag && String(r.setup_tag)) || setupTag(r.thesis ?? "");
+    const rr = rOf(r);
+    if (rr == null) continue;
+    const list = bySetup.get(tag) ?? [];
+    list.push(rr);
+    bySetup.set(tag, list);
+  }
+  const setupTape = [...bySetup.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .slice(0, 6)
+    .map(([tag, rs]) => `${tag} n=${rs.length} E=${avg(rs) >= 0 ? "+" : ""}${avg(rs).toFixed(2)}R`)
+    .join(" · ");
   return {
     closed,
     wins,
     winRate: closed > 0 ? (wins / closed) * 100 : 0,
     avgWinR: avg(winR),
     avgLossR: avg(lossR),
+    expectancyR: avg(allR),
+    setupTape,
     names: [...window]
       .reverse()
       .map((r) => {
@@ -1716,6 +1743,25 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const style = pos.style === "swing" ? "swing" : "scalp";
       const hitStop = side === "long" ? px <= stop : px >= stop;
       const hitTp = side === "long" ? px >= target : px <= target;
+      if (pos.status === "filled" && px > 0) {
+        const unit = oneRUsd(pos);
+        const q = origQty(pos);
+        if (unit > 0.05 && q > 0 && entry > 0) {
+          const dollars = side === "long" ? (px - entry) * q : (entry - px) * q;
+          const rNow = dollars / unit;
+          const mfe = Math.max(n(pos.mfe_r), rNow > 0 ? rNow : 0);
+          const mae = Math.max(n(pos.mae_r), rNow < 0 ? -rNow : 0);
+          if (mfe !== n(pos.mfe_r) || mae !== n(pos.mae_r)) {
+            pos.mae_r = mae;
+            pos.mfe_r = mfe;
+            await sql`
+              update auto_signals
+              set mae_r = ${mae}, mfe_r = ${mfe}, updated_at = now()
+              where id = ${pos.id} and user_id = ${userId}
+            `.catch(() => null);
+          }
+        }
+      }
 
       if (pos.status === "working") {
         if (rules.shouldCancelStaleLimit(pos.created_at, style)) {
@@ -1944,7 +1990,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           continue;
         }
         const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
-        const hours = style === "scalp" ? "5h" : "12h";
+        const hours = style === "scalp" ? "6h" : "12h";
         const why =
           pnl < 0
             ? `Sold at a loss to move on — still red after ${hours}`
@@ -2624,7 +2670,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                 insert into auto_signals (
                   user_id, symbol, weex_symbol, side, style, entry_type, entry, stop, target,
                   qty, leverage, risk_usd, notional, rr, thesis, invalidation, status, venue,
-                  client_oid, targets, scale, plan, score, confidence
+                  client_oid, targets, scale, plan, score, confidence, setup_tag
                 ) values (
                   ${userId}, ${sized.symbol}, ${sized.weexSymbol}, ${sized.side}, ${sized.style},
                   ${sized.entryType}, ${sized.entry}, ${sized.stop}, ${sized.target}, ${sized.qty},
@@ -2632,7 +2678,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                   ${sized.thesis}, ${sized.invalidation}, ${"proposed"}, 'weex',
                   ${`vela${Date.now().toString(36)}`.slice(0, 36)},
                   ${JSON.stringify(sized.targets.length ? sized.targets : [sized.target])},
-                  ${JSON.stringify(sized.scale)}, ${sized.plan}, ${sized.score}, ${sized.confidence}
+                  ${JSON.stringify(sized.scale)}, ${sized.plan}, ${sized.score}, ${sized.confidence},
+                  ${setupTag(sized.thesis ?? "")}
                 ) returning id
               `;
               ticketId = claim?.id ?? null;
@@ -2666,7 +2713,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               tookLines.push(`WEEX rejected ${sized.weexSymbol.replace("USDT", "")} ${sized.side} ${Math.round(sized.confidence)}% — ${(replies[0] ?? "empty").slice(0, 90)}`);
             } else {
               notes.push(
-                `${corrected.name} ${sized.leverage}x ${sized.side} ${sized.weexSymbol} · ${sized.rr.toFixed(1)}R · conf ${sized.confidence}% · $${sized.marginUsd.toFixed(2)}`,
+                `${corrected.name} ${sized.leverage}x ${sized.side} ${sized.weexSymbol} · ${sized.rr.toFixed(1)}R · score ${sized.confidence} · $${sized.marginUsd.toFixed(2)}`,
               );
               tookLines.push(rules.whyTookTrade({
                 symbol: sized.weexSymbol,

@@ -138,14 +138,21 @@ export function AutoDesk() {
           />
         </div>
         {s?.weexLive && (
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <div className="mt-3 grid gap-3 sm:grid-cols-4">
             <Stat label="Win rate" value={s.closed ? `${s.winRate.toFixed(0)}%  (${s.wins}/${s.closed})` : "—"} />
             <Stat label="Avg win" value={s.avgWinR ? `+${s.avgWinR.toFixed(2)}R` : "—"} />
             <Stat label="Avg loss" value={s.avgLossR ? `${s.avgLossR.toFixed(2)}R` : "—"} />
+            <Stat
+              label="Expectancy"
+              value={s.closed ? `${(s.expectancyR ?? 0) >= 0 ? "+" : ""}${(s.expectancyR ?? 0).toFixed(2)}R` : "—"}
+            />
           </div>
         )}
         {s?.weexLive && s.recordNames?.length ? (
           <p className="mt-2 text-xs text-subtle">{s.recordNames.join(" · ")}</p>
+        ) : null}
+        {s?.weexLive && s.setupTape ? (
+          <p className="mt-1 text-xs text-subtle">Setups · {s.setupTape}</p>
         ) : null}
 
         {s && (
@@ -364,7 +371,7 @@ function TicketSheet({
                 const why = live
                   ? [
                       t.rr > 0 ? `${t.rr.toFixed(1)}R` : null,
-                      t.confidence != null ? `${Math.round(t.confidence)}%` : null,
+                      t.confidence != null ? `score ${Math.round(t.confidence)}` : null,
                     ]
                       .filter(Boolean)
                       .join(" · ")
