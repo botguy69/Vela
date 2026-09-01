@@ -2517,6 +2517,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (pool.length < 4) pool.push(s);
           }
           const primes = pool.filter((s) => rules.setupQuality(s.thesis ?? "") >= 2);
+          const eyeing = (primes.length ? primes : pool.slice(0, 1)).slice(0, 2).map((s) => {
+            const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
+            return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
+          });
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}`
             : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. Seat ${atRiskN}/${AT_RISK} open.`;
