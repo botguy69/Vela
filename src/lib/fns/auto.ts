@@ -2551,7 +2551,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "A++ 5m fill. Pool ranks with BTC heat first. No dump-longs. No bounce-shorts.";
+          const aPlusLine = "A++ 5m fill. Heat-ranked. No 5m EMA200 veto. 1R into the 4h low is allowed.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2604,8 +2604,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             const trig = rules.ltfTrigger(pick.side, coin5);
             if (!trig.ok && !trig.wait) {
-              veto = `${pick.weexSymbol} ${pick.side}: ${trig.reason}`;
-              whyNot.push(`${tag} ${trig.reason}`);
+              veto = `Skip ${tag} ${trig.reason}`;
+              whyNot.unshift(`${tag} ${trig.reason}`);
               continue;
             }
             if ((burst?.n ?? 0) >= 1 && burst?.side && pick.side === burst.side) {
@@ -2679,8 +2679,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                   }
                 : stopped;
             if (rules.targetIntoLocation(timed1.side, timed1.entry, timed1.stop, h4Closed)) {
-              veto = `${pick.weexSymbol} ${pick.side}: 1R into 4h S/R`;
-              whyNot.push(`${tag} 1R into 4h demand/supply`);
+              veto = `Skip ${tag} entry into 4h S/R`;
+              whyNot.unshift(`${tag} entry into 4h S/R`);
               continue;
             }
             const timed = trig.wait ? { ...timed1, entryType: "limit" as const } : timed1;

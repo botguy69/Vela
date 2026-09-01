@@ -199,14 +199,6 @@ export function ltfTrigger(
   if (vwap != null && vwapCrosses(fifteen, 8, vwap) >= 3) {
     return { ok: false, wait: false, reason: "VWAP chop", pullback: null };
   }
-  if (e200 != null) {
-    if (side === "long" && last < e200 * 0.995) {
-      return { ok: false, wait: false, reason: "15m below EMA200", pullback: null };
-    }
-    if (side === "short" && last > e200 * 1.005) {
-      return { ok: false, wait: false, reason: "15m above EMA200", pullback: null };
-    }
-  }
   const mean = (e9 + e21) / 2;
   const reclaim =
     vwap != null && prev != null
@@ -732,8 +724,8 @@ export function targetIntoLocation(
   const sl = Math.min(...prior.map((c) => c.low));
   const sh = Math.max(...prior.map((c) => c.high));
   const a = atr(fourHour, 14) ?? 0;
-  if (side === "short" && tp <= sl + 0.4 * a) return true;
-  if (side === "long" && tp >= sh - 0.4 * a) return true;
+  if (side === "short" && entry <= sl + 0.35 * a) return true;
+  if (side === "long" && entry >= sh - 0.35 * a) return true;
   return false;
 }
 
