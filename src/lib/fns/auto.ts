@@ -2208,7 +2208,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const LIVE_CAP = 4;
     const AT_RISK = 4;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
-    const bar = { minConf: 85, note: "A++ per coin · 85%+ structure or continuation. 4h + 15m." };
+    const bar = { minConf: 85, note: "A++ · engulf/double/pin/climax. Failed-bounce + continuation off." };
 
     const bookUnread = weexBook == null;
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
@@ -2547,7 +2547,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}`
             : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Full board each tick. One best A++. 4h+1h both ways. 15m trigger.";
+          const aPlusLine = "Full board. Engulf · double · pin · climax · failed range. No failed-bounce. No continuation.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {

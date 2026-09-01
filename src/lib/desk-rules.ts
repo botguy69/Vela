@@ -373,7 +373,7 @@ export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
   return filtered.length ? filtered : setups;
 }
 
-/** A++ — structure at 85%+, plus with-BTC continuation (pullback, not the spike). */
+/** A++ — structure at 85%+. Failed-bounce and continuation are off the book. */
 export function eliteScalp(
   thesis: string,
   conf: number,
@@ -381,21 +381,21 @@ export function eliteScalp(
   bias?: "long" | "short" | "chop",
 ): boolean {
   const floor = Math.max(85, bar);
+  if (/Failed bounce|lower high|Continuation (on|short on) 21h/i.test(thesis)) return false;
   const structure =
-    /double (top|bottom)|failed range|Failed bounce|vol fade|washout RSI (1\d|2[0-5])|climax rejection|Dry-up at|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-5])|Overbought RSI (7[0-9]|8\d)/i.test(
+    /double (top|bottom)|failed range|vol fade|washout RSI (1\d|2[0-5])|climax rejection|Dry-up at|Pin bar|engulf|buyers on 2nd|supply on 2nd|Oversold bounce RSI (1\d|2[0-5])|Overbought RSI (7[0-9]|8\d)/i.test(
       thesis,
     );
-  if (structure && conf >= floor) return true;
-  if (/Continuation (on|short on) 21h/i.test(thesis) && conf >= 85) return true;
-  return false;
+  return structure && conf >= floor;
 }
 
 export const APLUS_MENU =
-  "One best A++ on the list. 4h confirm. Structure over RSI. Knife only with divergence.";
+  "Engulf · double · pin · climax · dry-up · failed range · washout. No failed-bounce. No continuation.";
 
 /** Higher = cleaner. Oversold/washout last so a 92 RSI dump doesn't beat an 86 double. */
 export function setupQuality(thesis: string): number {
   const k = aPlusKind(thesis);
+  if (k === "continuation" || k === "failed bounce") return -1;
   if (
     k === "double" ||
     k === "pin" ||
@@ -405,7 +405,6 @@ export function setupQuality(thesis: string): number {
     k === "dry-up"
   )
     return 2;
-  if (k === "continuation" || k === "failed bounce") return 1;
   return 0;
 }
 

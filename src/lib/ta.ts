@@ -170,37 +170,6 @@ export function analyzeMarket(
 
   const ideas: Idea[] = [];
 
-  // Continuation: with the mean, not already 1 ATR into the spike.
-  if (up && r >= 42 && r <= 62 && last <= mid + 0.85 * a && last >= mid * 0.998) {
-    const entry = Math.min(last, fast + 0.1 * a);
-    const stop = Math.min(lo, mid) - stopPad * a * 0.4;
-    ideas.push({
-      side: "long",
-      entry,
-      stop,
-      entryType: last - entry < 0.25 * a ? "market" : "limit",
-      score: 82 + (66 - r) * 0.2,
-      thesis: `Continuation on 21h, RSI ${r.toFixed(0)}`,
-      invalidation: `Lose the 21-hour average.`,
-      plan: "scale2",
-    });
-  }
-
-  if (down && r >= 38 && r <= 58 && last >= mid - 0.85 * a && last <= mid * 1.002) {
-    const entry = Math.max(last, fast - 0.1 * a);
-    const stop = Math.max(hi, mid) + stopPad * a * 0.4;
-    ideas.push({
-      side: "short",
-      entry,
-      stop,
-      entryType: entry - last < 0.25 * a ? "market" : "limit",
-      score: 82 + (r - 34) * 0.2,
-      thesis: `Continuation short on 21h, RSI ${r.toFixed(0)}`,
-      invalidation: `Reclaim the 21-hour average.`,
-      plan: "scale2",
-    });
-  }
-
   if (r <= 25 && last > (slow ?? last) * 0.96) {
     const entry = last;
     const stop = lo - 0.8 * a;
@@ -290,29 +259,6 @@ export function analyzeMarket(
         score: 85,
         thesis: `Failed range low, RSI ${r.toFixed(0)}`,
         invalidation: `Hourly close back below the failed low.`,
-        plan: "scale2",
-      });
-    }
-  }
-
-  if (hourly.length >= 12) {
-    const win = hourly.slice(-12, -1);
-    const priorHi = Math.max(...win.map((c) => c.high));
-    const failedBounce =
-      lastBar.high < priorHi &&
-      lastBar.close <= lastBar.open &&
-      r >= 52 &&
-      r <= 72 &&
-      last >= mid - 0.2 * a;
-    if (failedBounce) {
-      ideas.push({
-        side: "short",
-        entry: last,
-        stop: Math.max(lastBar.high, priorHi) + stopPad * a * 0.3,
-        entryType: "market",
-        score: 86,
-        thesis: `Failed bounce, lower high, RSI ${r.toFixed(0)}`,
-        invalidation: `Hourly close through the lower high.`,
         plan: "scale2",
       });
     }
