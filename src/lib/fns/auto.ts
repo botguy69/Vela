@@ -2547,7 +2547,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}`
             : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "4h location → 1h permission → 15m VWAP trigger. ATR dead / climax chase / dry skip.";
+          const aPlusLine = "No 4h bounce shorts. 4h location → 1h HL/LH → 15m VWAP. Failed-bounce still dead.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
