@@ -2465,8 +2465,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             heat.side === "chop"
               ? 0
               : liveN.filter((p) => (p.side === "short" ? "short" : "long") === heat.side).length;
-          if (liveN.length >= heat.maxSeats) room = 0;
-          if (!heat.chop && sameAsBtc >= 3) room = 0;
+          if (liveN.length >= LIVE_CAP) room = 0;
+          if (sameAsBtc >= 4) room = 0;
           const compass = {
             bias: "chop" as const,
             note: heat.note,
@@ -2530,16 +2530,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             pool.push(s);
           }
-          if (heat.side !== "chop") {
-            pool.sort((a, b) => {
-              const aH = a.side === heat.side ? 1 : 0;
-              const bH = b.side === heat.side ? 1 : 0;
-              if (aH !== bH) return bH - aH;
-              const q = rules.setupQuality(b.thesis ?? "") - rules.setupQuality(a.thesis ?? "");
-              if (q) return q;
-              return (b.confidence ?? b.score) - (a.confidence ?? a.score);
-            });
-          }
+          pool.sort((a, b) => {
+            const q = rules.setupQuality(b.thesis ?? "") - rules.setupQuality(a.thesis ?? "");
+            if (q) return q;
+            return (b.confidence ?? b.score) - (a.confidence ?? a.score);
+          });
           if (pool.length > 4) pool.splice(4);
           const primes = pool.filter((s) => rules.setupQuality(s.thesis ?? "") >= 2);
           const eyeing = (primes.length ? primes : pool.slice(0, 1)).slice(0, 2).map((s) => {
@@ -2551,7 +2546,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "A++ 5m fill. Mixed = 2 same-side. Hard chop = 1. No against-heat.";
+          const aPlusLine = "A++ 5m fill. 4 seats, any mix. Best setup. 4h dump-long / bounce-short still off.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
@@ -2583,17 +2578,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (room <= 0) {
               whyNot.push(`${tag} book full`);
               continue;
-            }
-            if (heat.side !== "chop" && pick.side !== heat.side) {
-              whyNot.unshift(`${tag} vs BTC ${heat.side} — no against-heat fill`);
-              continue;
-            }
-            if (heat.side === "chop" && liveN.length >= 1) {
-              const liveSide = liveN[0]!.side === "short" ? "short" : "long";
-              if (pick.side !== liveSide) {
-                whyNot.unshift(`${tag} mixed tape — 2nd seat must match live ${liveSide}`);
-                continue;
-              }
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
             const coin5raw = await getWeexKlines(pick.weexSymbol, "5m", 320).catch(() => []);

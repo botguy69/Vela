@@ -235,26 +235,26 @@ export function btcHeat(fifteen: Candle[]): {
   maxSeats: number;
   note: string;
 } {
-  if (fifteen.length < 24) return { chop: true, side: "chop", maxSeats: 1, note: "BTC 15m thin — max 1 seat" };
+  if (fifteen.length < 24) return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m thin — info only. 4 seats, best A++." };
   const closes = fifteen.map((c) => c.close);
   const last = closes[closes.length - 1];
   const e9 = ema(closes, 9);
   const e21 = ema(closes, 21);
   const vwap = sessionVwap(fifteen);
-  if (last == null) return { chop: true, side: "chop", maxSeats: 1, note: "BTC 15m thin — max 1 seat" };
+  if (last == null) return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m thin — info only. 4 seats, best A++." };
   const crosses = vwap != null ? vwapCrosses(fifteen, 8, vwap) : 0;
   const tangled = e9 != null && e21 != null && Math.abs(e9 - e21) / e21 < 0.0015;
   const midVwap = vwap != null && Math.abs(last - vwap) / vwap < 0.002;
   if (crosses >= 3 || (tangled && midVwap)) {
-    return { chop: true, side: "chop", maxSeats: 1, note: "BTC 15m chop — max 1 seat. Side count, not 181 names." };
+    return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m chop — info only. 4 seats, best A++." };
   }
   if (e9 != null && e21 != null && last > e21 && e9 >= e21 * 0.999) {
-    return { chop: false, side: "long", maxSeats: 4, note: "BTC 15m bid — heat cap, not a signal." };
+    return { chop: false, side: "long", maxSeats: 4, note: "BTC 15m bid — info only. 4 seats, best A++." };
   }
   if (e9 != null && e21 != null && last < e21 && e9 <= e21 * 1.001) {
-    return { chop: false, side: "short", maxSeats: 4, note: "BTC 15m offer — heat cap, not a signal." };
+    return { chop: false, side: "short", maxSeats: 4, note: "BTC 15m offer — info only. 4 seats, best A++." };
   }
-  return { chop: true, side: "chop", maxSeats: 2, note: "BTC 15m mixed — max 2 same-side." };
+  return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m mixed — 4 seats, long or short, best A++." };
 }
 
 /** Stop: 1.0–1.5× 15m ATR or beyond the pullback swing. Never a tick behind VWAP. */
