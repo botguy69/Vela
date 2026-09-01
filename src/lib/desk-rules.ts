@@ -434,7 +434,7 @@ export function setupTag(thesis: string): string {
 }
 
 /**
- * 4h + 1h must agree. Shorts: no 4h washout, no bounce bar, no late failed-bounce.
+ * 4h + 1h must agree both ways. No chase, no 4h blow-off/washout, no late bounce.
  * 15m is ltfTrigger (separate).
  */
 export function mtfAllows(
@@ -453,30 +453,47 @@ export function mtfAllows(
       if (side === "short" && last > e * 1.003) return { ok: false, why: "1h reject" };
     }
   }
-  if (side === "short" && fourHour.length >= 16) {
+  if (fourHour.length >= 16) {
     const c4 = fourHour.map((c) => c.close);
     const rsi4 = rsiAt(c4, c4.length - 1);
-    if (rsi4 != null && rsi4 <= 28) return { ok: false, why: "4h washout — no short" };
     const mid = sma(c4, 21);
     const last4 = c4[c4.length - 1];
-    if (mid != null && last4 != null && last4 < mid * 0.96) {
-      return { ok: false, why: "4h extended — no chase short" };
-    }
     const bar = fourHour[fourHour.length - 1]!;
     const range = bar.high - bar.low;
-    if (range > 0 && bar.close > bar.open && (bar.close - bar.low) / range > 0.62) {
-      return { ok: false, why: "4h bounce bar — no short" };
+    if (side === "short") {
+      if (rsi4 != null && rsi4 <= 28) return { ok: false, why: "4h washout — no short" };
+      if (mid != null && last4 != null && last4 < mid * 0.96) {
+        return { ok: false, why: "4h extended — no chase short" };
+      }
+      if (range > 0 && bar.close > bar.open && (bar.close - bar.low) / range > 0.62) {
+        return { ok: false, why: "4h bounce bar — no short" };
+      }
+    } else {
+      if (rsi4 != null && rsi4 >= 72) return { ok: false, why: "4h blow-off — no long" };
+      if (mid != null && last4 != null && last4 > mid * 1.04) {
+        return { ok: false, why: "4h extended — no chase long" };
+      }
+      if (range > 0 && bar.close < bar.open && (bar.high - bar.close) / range > 0.62) {
+        return { ok: false, why: "4h rejection bar — no long" };
+      }
     }
   }
-  if (side === "short" && /Failed bounce|lower high/i.test(thesis) && hourly.length >= 16) {
+  const late = /Failed bounce|lower high|failed range|double (top|bottom)/i.test(thesis);
+  if (late && hourly.length >= 16) {
     const rsi1 = rsiAt(hourly.map((c) => c.close), hourly.length - 1);
-    if (rsi1 != null && rsi1 < 42) return { ok: false, why: "failed bounce late" };
-    const h = hourly;
-    const a = h[h.length - 1]!;
-    const b = h[h.length - 2];
-    const c = h[h.length - 3];
-    if (b && c && a.high >= b.high && a.high >= c.high) {
-      return { ok: false, why: "no 1h lower high" };
+    const a = hourly[hourly.length - 1]!;
+    const b = hourly[hourly.length - 2];
+    const c = hourly[hourly.length - 3];
+    if (side === "short") {
+      if (rsi1 != null && rsi1 < 42) return { ok: false, why: "failed bounce late" };
+      if (b && c && a.high >= b.high && a.high >= c.high) {
+        return { ok: false, why: "no 1h lower high" };
+      }
+    } else {
+      if (rsi1 != null && rsi1 > 58) return { ok: false, why: "bounce late" };
+      if (b && c && a.low <= b.low && a.low <= c.low) {
+        return { ok: false, why: "no 1h higher low" };
+      }
     }
   }
   return { ok: true, why: "" };

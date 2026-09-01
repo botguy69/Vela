@@ -2514,7 +2514,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")}`
             : `Eying no A++ through 4h. Scanned ${withTape.length}. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "One best A++. 4h+1h agree. 15m trigger. No late failed-bounce shorts.";
+          const aPlusLine = "One best A++. 4h+1h both ways. 15m trigger. No chase / late bounce.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
 
           for (const pick of pool) {
