@@ -2210,6 +2210,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 85, note: "A++ per coin · 85%+ structure or continuation. 4h + 15m." };
 
+    const bookUnread = weexBook == null;
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
     const beFree = new Set<string>();
     for (const p of liveN) {
@@ -2223,6 +2224,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       );
       if (row) beFree.add(k);
     }
+    const keyOf = (sym: string) => sym.replace(/_/g, "").toUpperCase();
+    const seatSyms = new Set<string>();
+    for (const p of liveN) seatSyms.add(keyOf(p.symbol));
+    for (const s of stillOpen) {
+      if (flattened.has(s.weex_symbol)) continue;
+      seatSyms.add(keyOf(s.weex_symbol));
+    }
+    const seatN = seatSyms.size;
     let hiddenLive = 0;
     if (liveN.length === 0 && flattened.size) {
       const credsGate = await credsFrom(settings);
@@ -2249,13 +2258,25 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     };
     let riskL = countAtRisk("long");
     let riskS = countAtRisk("short");
-    const atRiskN = riskL + riskS;
-    const beNLive = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-    const blocked = liveN.length >= LIVE_CAP || (liveN.length > 0 && atRiskN >= AT_RISK);
+    const beNLive =
+      liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length ||
+      stillOpen.filter((s) => Boolean(s.be_moved) && Boolean(s.tp1_hit)).length;
+    if (riskL + riskS === 0 && seatN > 0) {
+      riskL = stillOpen.filter((s) => s.side !== "short" && !(s.be_moved && s.tp1_hit)).length;
+      riskS = stillOpen.filter((s) => s.side === "short" && !(s.be_moved && s.tp1_hit)).length;
+    }
+    const atRiskN = Math.max(riskL + riskS, seatN - beNLive);
+    const blocked =
+      bookUnread ||
+      liveN.length >= LIVE_CAP ||
+      seatN >= LIVE_CAP ||
+      (seatN > 0 && atRiskN >= AT_RISK);
     const roomN = blocked ? 0 : 1;
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
-      : huntHeader(riskL, riskS, beNLive, liveN.length);
+      : bookUnread
+        ? "WEEX unread — not hunting. Cap 4. Leave live tickets."
+        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN));
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -2346,8 +2367,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           !extras.some((e) => e.id === s.id),
       );
       leftoverWorking.sort((a, b) => n(b.confidence) - n(a.confidence));
-      const keyOf = (sym: string) => sym.replace(/_/g, "").toUpperCase();
-      let slotN = liveN.filter((p) => !beFree.has(keyOf(p.symbol))).length;
+      let slotN = Math.max(
+        liveN.filter((p) => !beFree.has(keyOf(p.symbol))).length,
+        seatN,
+      );
       parked = null;
       for (const row of leftoverWorking) {
         if (slotN >= AT_RISK) {
@@ -2394,9 +2417,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ];
       huntTape = [huntStatus, ...whyLive].filter(Boolean).join("\n");
       notes.push(
-        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk, ${beNLive} BE · cap 3.`,
+        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk, ${beNLive} BE · cap 4. Leave live.`,
       );
-    } else if (settings.armed && liveN.length < LIVE_CAP) {
+    } else if (settings.armed && !bookUnread && liveN.length < LIVE_CAP && seatN < LIVE_CAP) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
         notes.push("Armed with no keys. Store keys on this page.");
       } else if (!live) {
