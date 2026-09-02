@@ -658,22 +658,6 @@ export function mtfAllows(
   heat: "long" | "short" | "chop" = "chop",
 ): { ok: boolean; why: string } {
   if (!htfAllows(side, fourHour, heat)) return { ok: false, why: "4h reject" };
-  if (fourHour.length >= 16) {
-    const a4 = atr(fourHour, 14) ?? 0;
-    const prior4 = fourHour.slice(-21, -1);
-    const sl4 = Math.min(...prior4.map((c) => c.low));
-    const sh4 = Math.max(...prior4.map((c) => c.high));
-    const last4px = fourHour[fourHour.length - 1]!.close;
-    const recent4 = fourHour.slice(-3);
-    const greens4 = recent4.filter((c) => c.close >= c.open).length;
-    const reds4 = recent4.filter((c) => c.close < c.open).length;
-    if (side === "short" && a4 > 0 && greens4 >= 2 && last4px > sl4 + 0.4 * a4) {
-      return { ok: false, why: "4h bounce off demand — no short" };
-    }
-    if (side === "long" && a4 > 0 && reds4 >= 2 && last4px < sh4 - 0.4 * a4) {
-      return { ok: false, why: "4h dump off supply — no long" };
-    }
-  }
   const knife = /washout|Oversold|Overbought/i.test(thesis);
   if (hourly.length >= 24) {
     const closes = hourly.map((c) => c.close);
@@ -693,16 +677,6 @@ export function mtfAllows(
     if (!knife && rsi1 != null && rsiAgo != null) {
       if (side === "long" && rsi1 < rsiAgo - 6 && rsi1 < 48) return { ok: false, why: "1h selling impulse" };
       if (side === "short" && rsi1 > rsiAgo + 6 && rsi1 > 52) return { ok: false, why: "1h buying impulse" };
-    }
-    const priorLo = Math.min(...hourly.slice(-16, -4).map((c) => c.low));
-    const nowLo = Math.min(...hourly.slice(-4).map((c) => c.low));
-    const priorHi = Math.max(...hourly.slice(-16, -4).map((c) => c.high));
-    const nowHi = Math.max(...hourly.slice(-4).map((c) => c.high));
-    if (side === "short" && nowLo > priorLo * 1.001 && last != null && (e9 == null || last >= e9)) {
-      return { ok: false, why: "1h higher low — no short" };
-    }
-    if (side === "long" && nowHi < priorHi * 0.999 && last != null && (e9 == null || last <= e9)) {
-      return { ok: false, why: "1h lower high — no long" };
     }
   }
   if (fourHour.length >= 16) {

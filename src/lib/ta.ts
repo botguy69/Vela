@@ -170,7 +170,7 @@ export function analyzeMarket(
 
   const ideas: Idea[] = [];
 
-  if (down && lastBar.close < lastBar.open && r >= 44 && r <= 66 && last < mid) {
+  if (down && r >= 44 && r <= 66 && last < mid) {
     ideas.push({
       side: "short",
       entry: last,
@@ -182,7 +182,7 @@ export function analyzeMarket(
       plan: "scale2",
     });
   }
-  if (up && lastBar.close > lastBar.open && r <= 56 && r >= 34 && last > mid) {
+  if (up && r <= 56 && r >= 34 && last > mid) {
     ideas.push({
       side: "long",
       entry: last,
