@@ -1855,7 +1855,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             set stop = ${be}, be_moved = true, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
-          notes.push(`${pos.weex_symbol} 0.8R · SL → WEEX BE ${be.toFixed(4)}`);
+          notes.push(`${pos.weex_symbol} 0.35R · SL → WEEX BE ${be.toFixed(4)}`);
         }
       } else if (pos.be_moved) {
         if (reduced && !pos.tp1_hit) {
@@ -1999,7 +1999,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           continue;
         }
         const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
-        const hours = style === "scalp" ? "6h" : "12h";
+        const hours = style === "scalp" ? "90m" : "12h";
         const why =
           pnl < 0
             ? `Sold at a loss to move on — still red after ${hours}`
@@ -2543,7 +2543,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Shorts on offer (with-trend 1h offer ok). No 1h-bid longs. 1 special opposite after 2+.";
+          const aPlusLine = "Fast rotate: 0.6R full take, BE 0.35R, 90m then flatten if <0.4R. Shorts on offer.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2667,15 +2667,16 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               stop: rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15),
             };
             const dist = Math.abs(stopped.entry - stopped.stop);
+            const reach = dist * 0.6;
             const timed1 =
               dist > 0
                 ? {
                     ...stopped,
-                    target: stopped.side === "long" ? stopped.entry + dist : stopped.entry - dist,
+                    target: stopped.side === "long" ? stopped.entry + reach : stopped.entry - reach,
                     targets: [
-                      stopped.side === "long" ? stopped.entry + dist : stopped.entry - dist,
+                      stopped.side === "long" ? stopped.entry + reach : stopped.entry - reach,
                     ],
-                    rr: 1,
+                    rr: 0.6,
                   }
                 : stopped;
             if (rules.targetIntoLocation(timed1.side, timed1.entry, timed1.stop, h4Closed)) {
