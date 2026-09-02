@@ -2453,15 +2453,16 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           ).length;
           const btc15 = await getWeexKlines("BTCUSDT", "15m", 210).catch(() => []);
           const heat = rules.btcHeat(btc15);
+          const tape = rules.btcBook(rules.closedCandles(books.BTCUSDT ?? [], 60 * 60 * 1000));
           const sameAsBtc =
-            heat.side === "chop"
+            tape.side === "chop"
               ? 0
-              : liveN.filter((p) => (p.side === "short" ? "short" : "long") === heat.side).length;
+              : liveN.filter((p) => (p.side === "short" ? "short" : "long") === tape.side).length;
           if (liveN.length >= LIVE_CAP) room = 0;
           if (sameAsBtc >= 4) room = 0;
           const compass = {
             bias: "chop" as const,
-            note: heat.note,
+            note: `${tape.note} ${heat.note}`,
           };
           const ordered = [...raw].sort((a, b) => {
             const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf, compass.bias) ? 1 : 0;
@@ -2511,7 +2512,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(conf)}%`;
             const h4 = rules.closedCandles(h4map[s.weexSymbol] ?? [], 4 * 60 * 60 * 1000);
             const hour = rules.closedCandles(books[s.weexSymbol] ?? [], 60 * 60 * 1000);
-            const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", heat.side);
+            const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", tape.side);
             if (!mtf.ok) {
               whyNot.push(`${tag} ${mtf.why}`);
               continue;
@@ -2523,9 +2524,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             pool.push(s);
           }
           pool.sort((a, b) => {
-            if (heat.side !== "chop") {
-              const aH = a.side === heat.side ? 1 : 0;
-              const bH = b.side === heat.side ? 1 : 0;
+            if (tape.side !== "chop") {
+              const aH = a.side === tape.side ? 1 : 0;
+              const bH = b.side === tape.side ? 1 : 0;
               if (aH !== bH) return bH - aH;
             }
             const q = rules.setupQuality(b.thesis ?? "") - rules.setupQuality(a.thesis ?? "");
@@ -2543,7 +2544,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Failed 5m 21 → limit, not skip. 0.6R take. Shorts on offer. No 1h-bid longs.";
+          const aPlusLine = "BTC 1h = book side. 15m = heat info. 0.6R. 2 limits. No 1h-bid longs.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2585,7 +2586,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               pick.side,
               pick.thesis ?? "",
               confNow,
-              heat.side,
+              tape.side,
               liveN.map((p) => ({ side: p.side === "short" ? "short" : "long" })),
             );
             if (!mix.ok) {
@@ -2600,7 +2601,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
             const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
             const h4Closed = rules.closedCandles(h4, 4 * 60 * 60 * 1000);
-            const mtfPick = rules.mtfAllows(pick.side, h4Closed, hourPick, pick.thesis ?? "", heat.side);
+            const mtfPick = rules.mtfAllows(pick.side, h4Closed, hourPick, pick.thesis ?? "", tape.side);
             if (!mtfPick.ok) {
               veto = `${pick.weexSymbol} ${pick.side} ${mtfPick.why}`;
               whyNot.push(`${tag} ${mtfPick.why}`);
@@ -2695,9 +2696,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             ready.push({ sized: sz, spec, score: conf });
           }
           ready.sort((a, b) => {
-            if (heat.side !== "chop") {
-              const aH = a.sized.side === heat.side ? 1 : 0;
-              const bH = b.sized.side === heat.side ? 1 : 0;
+            if (tape.side !== "chop") {
+              const aH = a.sized.side === tape.side ? 1 : 0;
+              const bH = b.sized.side === tape.side ? 1 : 0;
               if (aH !== bH) return bH - aH;
             }
             return b.score - a.score;

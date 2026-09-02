@@ -248,15 +248,28 @@ export function btcHeat(fifteen: Candle[]): {
   const tangled = e9 != null && e21 != null && Math.abs(e9 - e21) / e21 < 0.0015;
   const midVwap = vwap != null && Math.abs(last - vwap) / vwap < 0.002;
   if (crosses >= 3 || (tangled && midVwap)) {
-    return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m chop — book from live majority. 4 seats." };
+    return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m chop — heat info only." };
   }
   if (e9 != null && e21 != null && last > e21 && e9 >= e21 * 0.999) {
-    return { chop: false, side: "long", maxSeats: 4, note: "BTC 15m bid — longs. 1 special short only after 2 longs." };
+    return { chop: false, side: "long", maxSeats: 4, note: "BTC 15m bid — heat info." };
   }
   if (e9 != null && e21 != null && last < e21 && e9 <= e21 * 1.001) {
-    return { chop: false, side: "short", maxSeats: 4, note: "BTC 15m offer — shorts. 1 special long only after 2 shorts." };
+    return { chop: false, side: "short", maxSeats: 4, note: "BTC 15m offer — heat info." };
   }
-  return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m mixed — book from live majority." };
+  return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m mixed — heat info only." };
+}
+
+/** 1h decides long-book vs short-book. 15m heat is display only. */
+export function btcBook(hourly: Candle[]): { side: "long" | "short" | "chop"; note: string } {
+  if (hourly.length < 24) return { side: "chop", note: "BTC 1h thin — no book side." };
+  const closes = hourly.map((c) => c.close);
+  const last = closes[closes.length - 1];
+  const e9 = ema(closes, 9);
+  const e21 = ema(closes, 21);
+  if (last == null || e9 == null || e21 == null) return { side: "chop", note: "BTC 1h thin — no book side." };
+  if (last > e21 && e9 >= e21 * 0.999) return { side: "long", note: "BTC 1h bid — long book." };
+  if (last < e21 && e9 <= e21 * 1.001) return { side: "short", note: "BTC 1h offer — short book." };
+  return { side: "chop", note: "BTC 1h mixed — book from live majority." };
 }
 
 /** Stop: 1.0–1.5× 15m ATR or beyond the pullback swing. Never a tick behind VWAP. */
