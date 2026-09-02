@@ -246,15 +246,15 @@ export function btcHeat(fifteen: Candle[]): {
   const tangled = e9 != null && e21 != null && Math.abs(e9 - e21) / e21 < 0.0015;
   const midVwap = vwap != null && Math.abs(last - vwap) / vwap < 0.002;
   if (crosses >= 3 || (tangled && midVwap)) {
-    return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m chop — info only. 4 seats, best A++." };
+    return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m chop — book from live majority. 4 seats." };
   }
   if (e9 != null && e21 != null && last > e21 && e9 >= e21 * 0.999) {
-    return { chop: false, side: "long", maxSeats: 4, note: "BTC 15m bid — info only. 4 seats, best A++." };
+    return { chop: false, side: "long", maxSeats: 4, note: "BTC 15m bid — longs. 1 special short only after 2 longs." };
   }
   if (e9 != null && e21 != null && last < e21 && e9 <= e21 * 1.001) {
-    return { chop: false, side: "short", maxSeats: 4, note: "BTC 15m offer — info only. 4 seats, best A++." };
+    return { chop: false, side: "short", maxSeats: 4, note: "BTC 15m offer — shorts. 1 special long only after 2 shorts." };
   }
-  return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m mixed — 4 seats, long or short, best A++." };
+  return { chop: true, side: "chop", maxSeats: 4, note: "BTC 15m mixed — book from live majority." };
 }
 
 /** Stop: 1.0–1.5× 15m ATR or beyond the pullback swing. Never a tick behind VWAP. */
@@ -577,14 +577,14 @@ export function eliteScalp(
   )
     return false;
   const structure =
-    /double (top|bottom)|failed range|vol fade|climax rejection|Pin bar|engulf|buyers on 2nd|supply on 2nd/i.test(
+    /double (top|bottom)|failed range|vol fade|climax rejection|Pin bar|engulf|buyers on 2nd|supply on 2nd|With-trend 1h offer/i.test(
       thesis,
     );
   return structure && conf >= floor;
 }
 
 export const APLUS_MENU =
-  "Double · pin · engulf · climax. No with-trend 1h bid. No dump-longs. No bounce-shorts.";
+  "Double · pin · engulf · climax · with-trend SHORT only. No 1h-bid longs. No dump-longs.";
 
 /** Higher = cleaner. Oversold/washout last so a 92 RSI dump doesn't beat an 86 double. */
 export function setupQuality(thesis: string): number {
@@ -595,7 +595,8 @@ export function setupQuality(thesis: string): number {
     k === "pin" ||
     k === "engulf" ||
     k === "failed range" ||
-    k === "climax"
+    k === "climax" ||
+    k === "with-trend"
   )
     return 2;
   return 0;
@@ -609,6 +610,7 @@ export function aPlusKind(thesis: string): string | null {
   if (/Pin bar/i.test(t)) return "pin";
   if (/engulf/i.test(t)) return "engulf";
   if (/climax rejection/i.test(t)) return "climax";
+  if (/With-trend 1h offer/i.test(t)) return "with-trend";
   if (/Dry-up at/i.test(t)) return "dry-up";
   if (/washout RSI/i.test(t)) return "washout";
   if (/Trend cooling/i.test(t)) return "trend cooling";
