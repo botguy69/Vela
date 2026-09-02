@@ -24,17 +24,17 @@ export function sizeSetup(
   sizeMult = 1,
 ): SizedSetup | null {
   const alloc = clampRiskPct(riskPct);
-  if (setup.entry <= 0 || accountUsd < 5) return null;
+  if (setup.entry <= 0 || accountUsd < 1) return null;
 
   const leverage = Math.max(1, Math.round(coinMaxLev));
   const marginUsd = accountUsd * (alloc / 100) * Math.min(1, Math.max(0.25, sizeMult));
   const notional = marginUsd * leverage;
-  if (notional < 8) return null;
+  if (notional < 5) return null;
 
   const qty = notional / setup.entry;
   const stopDist = Math.abs(setup.entry - setup.stop);
   const stopAccountPct = stopDist > 0 ? (notional * (stopDist / setup.entry) / accountUsd) * 100 : 0;
-  if (stopAccountPct > 25) return null;
+  if (stopAccountPct > 40) return null;
 
   return {
     ...setup,

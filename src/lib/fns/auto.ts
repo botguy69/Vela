@@ -2544,7 +2544,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "With-trend 1h offer: 5m skip → limit. BTC 1h = book. 0.6R.";
+          const aPlusLine = "Size misses now show on Last Pass. With-trend offer → limit. BTC 1h book.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2697,7 +2697,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             const timed = trig.wait ? { ...timed1, entryType: "limit" as const } : timed1;
             const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
-            if (!sz) continue;
+            if (!sz) {
+              whyNot.unshift(`${tag} size rejected (min notional / stop too wide)`);
+              continue;
+            }
             const depth = await getBookDepth(pick.weexSymbol);
             if (depth && rules.depthTooThin(sz.side, sz.entry, sz.notional, depth.bids, depth.asks)) {
               whyNot.push(`${tag} thin book — 1R would walk`);
