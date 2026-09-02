@@ -210,20 +210,24 @@ export function ltfTrigger(
       : false;
   if (vwap != null && !reclaim) {
     if (side === "long" && last < vwap * 0.998) {
-      return { ok: false, wait: false, reason: "below VWAP", pullback: null };
+      return { ok: false, wait: true, reason: "limit — below VWAP", pullback: vwap };
     }
     if (side === "short" && last > vwap * 1.002) {
-      return { ok: false, wait: false, reason: "above VWAP", pullback: null };
+      return { ok: false, wait: true, reason: "limit — above VWAP", pullback: vwap };
     }
   }
   if (side === "long") {
-    if (last < e21 - 0.7 * a) return { ok: false, wait: false, reason: "15m still dumping", pullback: null };
+    if (last < e21 - 0.7 * a) {
+      return { ok: false, wait: true, reason: "limit at 21 — still dumping", pullback: e21 };
+    }
     if (last > e21 + 0.35 * a && !reclaim) {
       return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
     }
     return { ok: true, wait: false, reason: reclaim ? "VWAP reclaim" : "15m pullback + VWAP", pullback: mean };
   }
-  if (last > e21 + 0.7 * a) return { ok: false, wait: false, reason: "15m still ripping", pullback: null };
+  if (last > e21 + 0.7 * a) {
+    return { ok: false, wait: true, reason: "limit at 21 — still ripping", pullback: e21 };
+  }
   if (last < e21 - 0.35 * a && !reclaim) {
     return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
   }
@@ -592,14 +596,14 @@ export function eliteScalp(
   )
     return false;
   const structure =
-    /double (top|bottom)|failed range|vol fade|climax rejection|Pin bar|engulf|buyers on 2nd|supply on 2nd|With-trend 1h offer/i.test(
+    /double (top|bottom)|failed range|vol fade|climax rejection|Pin bar|engulf|buyers on 2nd|supply on 2nd|With-trend 1h/i.test(
       thesis,
     );
   return structure && conf >= floor;
 }
 
 export const APLUS_MENU =
-  "Double · pin · engulf · climax · with-trend SHORT only. No 1h-bid longs. No dump-longs.";
+  "Double · pin · engulf · climax · with-trend with the 1h book. No dump-longs. No bounce-shorts.";
 
 /** Higher = cleaner. Oversold/washout last so a 92 RSI dump doesn't beat an 86 double. */
 export function setupQuality(thesis: string): number {
@@ -625,7 +629,7 @@ export function aPlusKind(thesis: string): string | null {
   if (/Pin bar/i.test(t)) return "pin";
   if (/engulf/i.test(t)) return "engulf";
   if (/climax rejection/i.test(t)) return "climax";
-  if (/With-trend 1h offer/i.test(t)) return "with-trend";
+  if (/With-trend 1h/i.test(t)) return "with-trend";
   if (/Dry-up at/i.test(t)) return "dry-up";
   if (/washout RSI/i.test(t)) return "washout";
   if (/Trend cooling/i.test(t)) return "trend cooling";

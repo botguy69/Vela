@@ -2544,7 +2544,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Size misses now show on Last Pass. With-trend offer → limit. BTC 1h book.";
+          const aPlusLine = "With-trend longs on a 1h bid book. Shorts on offer. Mix still 2+ then 1 special.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2612,9 +2612,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const trig0 = rules.ltfTrigger(pick.side, coin5);
-            const withOffer = /With-trend 1h offer/i.test(pick.thesis ?? "");
+            const withBook =
+              (tape.side === "short" && /With-trend 1h offer/i.test(pick.thesis ?? "")) ||
+              (tape.side === "long" && /With-trend 1h bid/i.test(pick.thesis ?? ""));
             const trig =
-              !trig0.ok && !trig0.wait && withOffer
+              !trig0.ok && !trig0.wait && withBook
                 ? {
                     ok: false as const,
                     wait: true as const,
