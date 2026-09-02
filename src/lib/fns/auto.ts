@@ -2523,6 +2523,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             pool.push(s);
           }
           pool.sort((a, b) => {
+            if (heat.side !== "chop") {
+              const aH = a.side === heat.side ? 1 : 0;
+              const bH = b.side === heat.side ? 1 : 0;
+              if (aH !== bH) return bH - aH;
+            }
             const q = rules.setupQuality(b.thesis ?? "") - rules.setupQuality(a.thesis ?? "");
             if (q) return q;
             return (b.confidence ?? b.score) - (a.confidence ?? a.score);
@@ -2538,7 +2543,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Hunt ~60s. Closed 5m fill. BTC offer = shorts only. No 1h-bid longs.";
+          const aPlusLine = "One book side (BTC 15m). Max 1 special opposite after 2+ with-tape, 88% extreme only.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2576,8 +2581,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} book full`);
               continue;
             }
-            if (heat.side !== "chop" && pick.side !== heat.side) {
-              whyNot.unshift(`${tag} vs BTC ${heat.side} — no against-tape fill`);
+            const mix = rules.mixAllows(
+              pick.side,
+              pick.thesis ?? "",
+              confNow,
+              heat.side,
+              liveN.map((p) => ({ side: p.side === "short" ? "short" : "long" })),
+            );
+            if (!mix.ok) {
+              whyNot.unshift(`${tag} ${mix.why}`);
               continue;
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
@@ -2681,7 +2693,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             ready.push({ sized: sz, spec, score: conf });
           }
-          ready.sort((a, b) => b.score - a.score);
+          ready.sort((a, b) => {
+            if (heat.side !== "chop") {
+              const aH = a.sized.side === heat.side ? 1 : 0;
+              const bH = b.sized.side === heat.side ? 1 : 0;
+              if (aH !== bH) return bH - aH;
+            }
+            return b.score - a.score;
+          });
           const best = ready.find((r) => r.sized.entryType !== "limit" || openLimits < 1) ?? null;
           if (best) {
             batch.push({ sized: best.sized, spec: best.spec });

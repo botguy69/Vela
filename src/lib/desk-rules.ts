@@ -275,7 +275,29 @@ export function structureStop(side: Side, entry: number, stop: number, fifteen: 
   return s;
 }
 
-/** Coin 15m is doing the side while BTC 15m is not — 2nd same-side name is allowed. */
+/** Book side from BTC heat, else live majority. Max one opposite, and only extreme A++ after 2+ with-tape. */
+export function mixAllows(
+  pickSide: Side,
+  thesis: string,
+  conf: number,
+  heat: "long" | "short" | "chop",
+  live: { side: string }[],
+): { ok: boolean; why: string } {
+  const liveL = live.filter((p) => (p.side === "short" ? "short" : "long") === "long").length;
+  const liveS = live.filter((p) => p.side === "short").length;
+  const book: Side | "chop" =
+    heat !== "chop" ? heat : liveL + liveS === 0 ? "chop" : liveL >= liveS ? "long" : "short";
+  if (book === "chop" || pickSide === book) return { ok: true, why: "with book" };
+  const withN = book === "short" ? liveS : liveL;
+  const againstN = book === "short" ? liveL : liveS;
+  if (againstN >= 1) return { ok: false, why: `already 1 ${pickSide} vs ${book} book` };
+  if (withN < 2) return { ok: false, why: `need 2+ ${book} before a special ${pickSide}` };
+  const extreme = /double (top|bottom)|Pin bar|failed range|climax rejection|vol fade|buyers on 2nd|supply on 2nd/i.test(
+    thesis,
+  );
+  if (!extreme || conf < 88) return { ok: false, why: `special ${pickSide} needs 88% extreme vs ${book}` };
+  return { ok: true, why: "special 1-lot vs book" };
+}
 export function divergesFromBtc(side: Side, coin15: Candle[], btc15: Candle[]): boolean {
   if (coin15.length < 24 || btc15.length < 24) return false;
   const coinWith = ltfAllows(side, coin15);
