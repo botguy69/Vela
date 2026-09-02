@@ -194,13 +194,16 @@ function feeBePx(side: "long" | "short", entry: number, mark: number, weexBe: nu
 function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
   const at = liveL + liveS;
   const live = liveTotal ?? at + beN;
-  if (live >= 4 || at >= 4) {
-    return `Not hunting — ${live} live (${at} at-risk). Cap 4.`;
+  if (live >= 6) {
+    return `Not hunting — ${live} live. Cap 6 (4 at-risk + BE extras).`;
+  }
+  if (at >= 4) {
+    return `4/4 at-risk (${liveL}L/${liveS}S, ${beN} BE). Next ticket only after TP1→BE.`;
   }
   if (at >= 1) {
-    return `Hunting next A++ (${at}/4 at-risk, ${liveL}L/${liveS}S). One per tick.`;
+    return `Hunting next A++ (${at}/4 at-risk, ${liveL}L/${liveS}S, ${beN} BE). Mix from the chart. One per tick.`;
   }
-  return `Hunting 1 A++ per tick, long or short (0/4 at-risk).`;
+  return `Hunting 1 A++ per tick. 4 at-risk any mix. BE extras to 6.`;
 }
 
 function composePass(
@@ -828,7 +831,7 @@ async function ensureTakes(
     select stats_from from auto_settings where user_id = ${pos.user_id} limit 1
   `;
   const closed = st ? await closedStats(sql, pos.user_id, st.stats_from) : { wins: 0, tpWins: 0, expectancyR: 0 };
-  const runners = (closed.tpWins ?? 0) >= 20 && (closed.expectancyR ?? 0) > 0;
+  const runners = true;
   const afterTp1 = Boolean(pos.tp1_hit) || Boolean(pos.be_moved);
   const rawTps = parseNums(pos.targets).slice(0, runners ? 2 : 1);
   const tps: number[] = [];
@@ -1855,7 +1858,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             set stop = ${be}, be_moved = true, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
-          notes.push(`${pos.weex_symbol} 0.35R · SL → WEEX BE ${be.toFixed(4)}`);
+          notes.push(`${pos.weex_symbol} 0.8R / TP1 · SL → WEEX BE ${be.toFixed(4)}`);
         }
       } else if (pos.be_moved) {
         if (reduced && !pos.tp1_hit) {
@@ -1999,7 +2002,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           continue;
         }
         const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
-        const hours = style === "scalp" ? "90m" : "12h";
+        const hours = style === "scalp" ? "6h" : "12h";
         const why =
           pnl < 0
             ? `Sold at a loss to move on — still red after ${hours}`
@@ -2206,7 +2209,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const atRisk = stillOpen.filter(
       (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
     );
-    const LIVE_CAP = 4;
+    const LIVE_CAP = 6;
     const AT_RISK = 4;
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 85, note: "A++ · engulf/double/pin/climax. Failed-bounce + continuation off." };
@@ -2270,13 +2273,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const blocked =
       bookUnread ||
       liveN.length >= LIVE_CAP ||
-      seatN >= LIVE_CAP ||
-      (seatN > 0 && atRiskN >= AT_RISK);
+      atRiskN >= AT_RISK;
     const roomN = blocked ? 0 : 1;
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
       : bookUnread
-        ? "WEEX unread — not hunting. Cap 4. Leave live tickets."
+        ? "WEEX unread — not hunting. Leave live tickets."
         : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN));
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
@@ -2418,9 +2420,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ];
       huntTape = [huntStatus, ...whyLive].filter(Boolean).join("\n");
       notes.push(
-        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk, ${beNLive} BE · cap 4. Leave live.`,
+        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk, ${beNLive} BE · 4 at-risk / 6 live. Leave live.`,
       );
-    } else if (settings.armed && !bookUnread && liveN.length < LIVE_CAP && seatN < LIVE_CAP) {
+    } else if (settings.armed && !bookUnread && liveN.length < LIVE_CAP && atRiskN < AT_RISK) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
         notes.push("Armed with no keys. Store keys on this page.");
       } else if (!live) {
@@ -2454,15 +2456,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const btc15 = await getWeexKlines("BTCUSDT", "15m", 210).catch(() => []);
           const heat = rules.btcHeat(btc15);
           const tape = rules.btcBook(rules.closedCandles(books.BTCUSDT ?? [], 60 * 60 * 1000));
-          const sameAsBtc =
-            tape.side === "chop"
-              ? 0
-              : liveN.filter((p) => (p.side === "short" ? "short" : "long") === tape.side).length;
           if (liveN.length >= LIVE_CAP) room = 0;
-          if (sameAsBtc >= 4) room = 0;
           const compass = {
             bias: "chop" as const,
-            note: `${tape.note} ${heat.note}`,
+            note: `${tape.note} (info). ${heat.note} Chart picks L/S.`,
           };
           const ordered = [...raw].sort((a, b) => {
             const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf, compass.bias) ? 1 : 0;
@@ -2524,11 +2521,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             pool.push(s);
           }
           pool.sort((a, b) => {
-            if (tape.side !== "chop") {
-              const aH = a.side === tape.side ? 1 : 0;
-              const bH = b.side === tape.side ? 1 : 0;
-              if (aH !== bH) return bH - aH;
-            }
             const q = rules.setupQuality(b.thesis ?? "") - rules.setupQuality(a.thesis ?? "");
             if (q) return q;
             return (b.confidence ?? b.score) - (a.confidence ?? a.score);
@@ -2544,7 +2536,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "With-trend longs on a 1h bid book. Shorts on offer. Mix still 2+ then 1 special.";
+          const aPlusLine = "3% · 4 at-risk any mix from the chart · BE extras to 6 · 1R + TP2 · 181 names.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2582,20 +2574,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} book full`);
               continue;
             }
-            const mix = rules.mixAllows(
-              pick.side,
-              pick.thesis ?? "",
-              confNow,
-              tape.side,
-              liveN.map((p) => ({ side: p.side === "short" ? "short" : "long" })),
-            );
-            if (!mix.ok) {
-              whyNot.unshift(`${tag} ${mix.why}`);
-              continue;
-            }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
-            const coin5raw = await getWeexKlines(pick.weexSymbol, "5m", 320).catch(() => []);
-            const coin5 = rules.closedCandles(coin5raw, 5 * 60 * 1000);
             const coin15raw = await getWeexKlines(pick.weexSymbol, "15m", 210).catch(() => []);
             const coin15 = rules.closedCandles(coin15raw, 15 * 60 * 1000);
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
@@ -2611,17 +2590,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not location structure`);
               continue;
             }
-            const trig0 = rules.ltfTrigger(pick.side, coin5);
-            const withBook =
-              (tape.side === "short" && /With-trend 1h offer/i.test(pick.thesis ?? "")) ||
-              (tape.side === "long" && /With-trend 1h bid/i.test(pick.thesis ?? ""));
+            const trig0 = rules.ltfTrigger(pick.side, coin15);
+            const withTrend = /With-trend 1h/i.test(pick.thesis ?? "");
             const trig =
-              !trig0.ok && !trig0.wait && withBook
+              !trig0.ok && !trig0.wait && withTrend
                 ? {
                     ok: false as const,
                     wait: true as const,
                     reason: `limit — ${trig0.reason}`,
-                    pullback: trig0.pullback ?? coin5[coin5.length - 1]?.close ?? null,
+                    pullback: trig0.pullback ?? coin15[coin15.length - 1]?.close ?? null,
                   }
                 : trig0;
             if (!trig.ok && !trig.wait) {
@@ -2680,16 +2657,16 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               stop: rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15),
             };
             const dist = Math.abs(stopped.entry - stopped.stop);
-            const reach = dist * 0.6;
             const timed1 =
               dist > 0
                 ? {
                     ...stopped,
-                    target: stopped.side === "long" ? stopped.entry + reach : stopped.entry - reach,
+                    target: stopped.side === "long" ? stopped.entry + dist : stopped.entry - dist,
                     targets: [
-                      stopped.side === "long" ? stopped.entry + reach : stopped.entry - reach,
+                      stopped.side === "long" ? stopped.entry + dist : stopped.entry - dist,
+                      stopped.side === "long" ? stopped.entry + 2 * dist : stopped.entry - 2 * dist,
                     ],
-                    rr: 0.6,
+                    rr: 1,
                   }
                 : stopped;
             if (rules.targetIntoLocation(timed1.side, timed1.entry, timed1.stop, h4Closed)) {
@@ -2710,14 +2687,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             ready.push({ sized: sz, spec, score: conf });
           }
-          ready.sort((a, b) => {
-            if (tape.side !== "chop") {
-              const aH = a.sized.side === tape.side ? 1 : 0;
-              const bH = b.sized.side === tape.side ? 1 : 0;
-              if (aH !== bH) return bH - aH;
-            }
-            return b.score - a.score;
-          });
+          ready.sort((a, b) => b.score - a.score);
           const best = ready.find((r) => r.sized.entryType !== "limit" || openLimits < 2) ?? null;
           if (best) {
             batch.push({ sized: best.sized, spec: best.spec });
@@ -2859,8 +2829,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
     const learned =
       (stats.tpWins ?? 0) >= 20 && (stats.expectancyR ?? 0) > 0
-        ? "A++ · 5m fill / 15m stop · score not a win-rate · 70/30 runner (E[R]>0 and 20 TP hits)."
-        : `A++ · 5m fill / 15m stop · 1 TP full size (${stats.tpWins ?? 0}/20 TP hits and E[R]>0 before 2.5R runner).`;
+        ? "A++ · 15m fill / 15m stop · 2 TPs (1R + 2R). BE after TP1. 4 at-risk, 6 with BE."
+        : "A++ · 15m fill / 15m stop · 2 TPs. 3%. Mix L/S from the chart.";
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))

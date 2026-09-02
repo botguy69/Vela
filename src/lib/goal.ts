@@ -62,11 +62,11 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       name: "Stage 1",
       marginPct: 3,
       style: "scalp",
-      maxOpen: 4,
+      maxOpen: 6,
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1 · 3% · up to 4 at-risk. One A++ per tick.",
+      note: "Stage 1 · 3% · 4 at-risk any mix · BE extras to 6 · 2 TPs.",
     };
   }
   if (equity < 1000) {
@@ -75,11 +75,11 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       name: "Stage 1",
       marginPct: 3,
       style: "scalp",
-      maxOpen: 4,
+      maxOpen: 6,
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1 · 3% (1.8% after 3 losses). Up to 4 at-risk. One A++ per tick.",
+      note: "Stage 1 · 3% (1.8% after 3 losses, 2 wins restore). 4 at-risk any mix. BE extras to 6.",
     };
   }
   return {
@@ -87,11 +87,11 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
     name: "Stage 2",
     marginPct: 3,
     style: "scalp",
-    maxOpen: 4,
+    maxOpen: 6,
     minRr: 1.9,
     minConf: 78,
     method: "trend",
-    note: "Stage 2: $1k → $10k. 3% size. Up to 4 at-risk. One A++ per tick. Stop at $10k.",
+    note: "Stage 2: $1k → $10k. 3%. 4 at-risk any mix. BE extras to 6. Stop at $10k.",
   };
 }
 
@@ -103,7 +103,7 @@ export function afterCheckpoint(equity: number): Phase {
       name: "Scale",
       marginPct: 1.2,
       style: "swing",
-      maxOpen: 4,
+      maxOpen: 6,
       minRr: 2,
       minConf: 68,
       method: "trend",
@@ -150,8 +150,7 @@ export function adaptMethod(opts: {
 
   next = { ...next, marginPct: 3 };
 
-  // One counted win restores 3%. Drawdown does not keep 1.2% after that.
-  if (opts.winStreak >= 1 || opts.lossStreak < 3) return next;
+  if (opts.winStreak >= 2 || opts.lossStreak < 3) return next;
 
   if (opts.lossStreak >= 5) {
     next = {

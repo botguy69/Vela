@@ -529,5 +529,5 @@ export function shouldLockBreakeven(opts: {
   const risk = Math.abs(opts.entry - opts.stop);
   if (!(risk > 0)) return false;
   const run = opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last;
-  return run >= 0.35 * risk;
+  return run >= 0.8 * risk;
 }
