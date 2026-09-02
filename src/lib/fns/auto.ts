@@ -2702,7 +2702,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             return b.score - a.score;
           });
-          const best = ready.find((r) => r.sized.entryType !== "limit" || openLimits < 1) ?? null;
+          const best = ready.find((r) => r.sized.entryType !== "limit" || openLimits < 2) ?? null;
           if (best) {
             batch.push({ sized: best.sized, spec: best.spec });
             if (best.sized.entryType === "limit") openLimits += 1;
