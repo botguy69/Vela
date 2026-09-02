@@ -2538,7 +2538,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Hunt every minute. Fill on closed 5m. Stop 15m. 4 seats any mix.";
+          const aPlusLine = "Hunt ~60s. Closed 5m fill. BTC offer = shorts only. No 1h-bid longs.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2574,6 +2574,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             if (room <= 0) {
               whyNot.push(`${tag} book full`);
+              continue;
+            }
+            if (heat.side !== "chop" && pick.side !== heat.side) {
+              whyNot.unshift(`${tag} vs BTC ${heat.side} — no against-tape fill`);
               continue;
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;

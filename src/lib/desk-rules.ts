@@ -555,14 +555,14 @@ export function eliteScalp(
   )
     return false;
   const structure =
-    /double (top|bottom)|failed range|vol fade|climax rejection|Pin bar|engulf|buyers on 2nd|supply on 2nd|With-trend 1h/i.test(
+    /double (top|bottom)|failed range|vol fade|climax rejection|Pin bar|engulf|buyers on 2nd|supply on 2nd/i.test(
       thesis,
     );
   return structure && conf >= floor;
 }
 
 export const APLUS_MENU =
-  "Double · pin · engulf · climax · with-trend (4h+1h same way). No dump-longs. No bounce-shorts.";
+  "Double · pin · engulf · climax. No with-trend 1h bid. No dump-longs. No bounce-shorts.";
 
 /** Higher = cleaner. Oversold/washout last so a 92 RSI dump doesn't beat an 86 double. */
 export function setupQuality(thesis: string): number {
@@ -573,8 +573,7 @@ export function setupQuality(thesis: string): number {
     k === "pin" ||
     k === "engulf" ||
     k === "failed range" ||
-    k === "climax" ||
-    k === "with-trend"
+    k === "climax"
   )
     return 2;
   return 0;
@@ -588,7 +587,6 @@ export function aPlusKind(thesis: string): string | null {
   if (/Pin bar/i.test(t)) return "pin";
   if (/engulf/i.test(t)) return "engulf";
   if (/climax rejection/i.test(t)) return "climax";
-  if (/With-trend 1h/i.test(t)) return "with-trend";
   if (/Dry-up at/i.test(t)) return "dry-up";
   if (/washout RSI/i.test(t)) return "washout";
   if (/Trend cooling/i.test(t)) return "trend cooling";

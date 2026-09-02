@@ -170,31 +170,6 @@ export function analyzeMarket(
 
   const ideas: Idea[] = [];
 
-  if (down && lastBar.close < lastBar.open && r >= 44 && r <= 66 && last < mid) {
-    ideas.push({
-      side: "short",
-      entry: last,
-      stop: Math.max(hi, lastBar.high) + stopPad * a * 0.4,
-      entryType: "limit",
-      score: 86,
-      thesis: `With-trend 1h offer, RSI ${r.toFixed(0)}`,
-      invalidation: `Hourly close back through the 21h.`,
-      plan: "scale2",
-    });
-  }
-  if (up && lastBar.close > lastBar.open && r <= 56 && r >= 34 && last > mid) {
-    ideas.push({
-      side: "long",
-      entry: last,
-      stop: Math.min(lo, lastBar.low) - stopPad * a * 0.4,
-      entryType: "limit",
-      score: 86,
-      thesis: `With-trend 1h bid, RSI ${r.toFixed(0)}`,
-      invalidation: `Hourly close back through the 21h.`,
-      plan: "scale2",
-    });
-  }
-
   const prior = hourly.slice(0, -1);
   if (prior.length >= 24) {
     const hiPrior = swing(prior, 20, "high");
