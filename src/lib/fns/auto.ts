@@ -2515,6 +2515,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const tape = rules.btcBook(rules.closedCandles(books.BTCUSDT ?? [], 60 * 60 * 1000));
           const btc4h = await getWeexFourHour("BTCUSDT").catch(() => []);
           const ext = rules.btcExtended(btc4h);
+          const fade: "high" | "low" | null = ext.longChase ? "high" : ext.shortChase ? "low" : null;
           if (liveN.length >= LIVE_CAP) room = 0;
           const compass = {
             bias: "chop" as const,
@@ -2568,7 +2569,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(conf)}%`;
             const h4 = h4map[s.weexSymbol] ?? [];
             const hour = rules.closedCandles(books[s.weexSymbol] ?? [], 60 * 60 * 1000);
-            const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", tape.side);
+            const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", tape.side, fade);
             if (!mtf.ok) {
               whyNot.push(`${tag} ${mtf.why}`);
               continue;
@@ -2579,6 +2580,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             if (ext.shortChase && s.side === "short") {
               whyNot.push(`${tag} BTC 4h low — no new shorts`);
+              continue;
+            }
+            if (fade && !rules.fadeAtExtreme(s.thesis ?? "", s.side)) {
+              whyNot.push(`${tag} not a ${fade} reject — no with-trend fade`);
               continue;
             }
             if (rules.setupQuality(s.thesis ?? "") < 2) {
@@ -2646,7 +2651,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const coin15 = rules.closedCandles(coin15raw, 15 * 60 * 1000);
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
             const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
-            const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "", tape.side);
+            const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "", tape.side, fade);
             if (!mtfPick.ok) {
               veto = `${pick.weexSymbol} ${pick.side} ${mtfPick.why}`;
               whyNot.push(`${tag} ${mtfPick.why}`);
@@ -2660,6 +2665,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (ext.shortChase && pick.side === "short") {
               veto = `BTC 4h low — no new shorts`;
               whyNot.push(`${tag} BTC 4h low — no new shorts`);
+              continue;
+            }
+            if (fade && !rules.fadeAtExtreme(pick.thesis ?? "", pick.side)) {
+              veto = `${tag} not a ${fade} reject`;
+              whyNot.push(`${tag} not a ${fade} reject — no with-trend fade`);
               continue;
             }
             if (rules.setupQuality(pick.thesis ?? "") < 2) {

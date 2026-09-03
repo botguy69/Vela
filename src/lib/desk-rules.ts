@@ -62,6 +62,7 @@ export function htfAllows(
   side: Side,
   fourHour: Candle[],
   heat: "long" | "short" | "chop" = "chop",
+  fade?: "high" | "low" | null,
 ): boolean {
   if (fourHour.length < 24) return true;
   const closed = closedCandles(fourHour, FOUR_H_MS);
@@ -74,8 +75,11 @@ export function htfAllows(
   const mid = sma(smaSrc.length >= 21 ? smaSrc : fourHour.map((c) => c.close), 21);
   if (mid == null || last == null) return true;
   const band = heat === side ? 0.02 : 0.003;
-  if (side === "long" && last < mid * (1 - band)) return false;
-  if (side === "short" && last > mid * (1 + band)) return false;
+  const skip21 = (fade === "high" && side === "short") || (fade === "low" && side === "long");
+  if (!skip21) {
+    if (side === "long" && last < mid * (1 - band)) return false;
+    if (side === "short" && last > mid * (1 + band)) return false;
+  }
   const prior = (closed.length >= 8 ? closed : fourHour).slice(-21);
   if (prior.length < 8) return true;
   const sh = Math.max(...prior.map((c) => c.high));
@@ -111,9 +115,9 @@ export function btcExtended(fourHour: Candle[]): {
     longChase,
     shortChase,
     note: longChase
-      ? "BTC 4h high — no new longs."
+      ? "BTC 4h high — no new longs. Shorts only pin/double/climax at the high."
       : shortChase
-        ? "BTC 4h low — no new shorts."
+        ? "BTC 4h low — no new shorts. Longs only pin/double/climax at the low."
         : "BTC 4h mid — both sides if the coin is A++.",
   };
 }
@@ -677,7 +681,14 @@ export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
   return filtered.length ? filtered : setups;
 }
 
-/** A++ — location structure only. No mid-range engulf, no dip-buy, no failed-bounce. */
+/** Pin / double / climax / failed-range at the extreme. Not with-trend, not mid engulf. */
+export function fadeAtExtreme(thesis: string, side: Side): boolean {
+  if (side === "short") {
+    return /double top|Failed range high|Pin bar at highs|climax rejection at highs/i.test(thesis);
+  }
+  return /double bottom|Failed range low|Pin bar at lows|climax rejection at lows/i.test(thesis);
+}
+
 export function eliteScalp(
   thesis: string,
   conf: number,
@@ -752,25 +763,28 @@ export function mtfAllows(
   hourly: Candle[],
   thesis = "",
   heat: "long" | "short" | "chop" = "chop",
+  fade?: "high" | "low" | null,
 ): { ok: boolean; why: string } {
-  if (!htfAllows(side, fourHour, heat)) return { ok: false, why: "4h reject" };
+  if (!htfAllows(side, fourHour, heat, fade)) return { ok: false, why: "4h reject" };
   const knife = /washout|Oversold|Overbought/i.test(thesis);
+  const fadeHigh = fade === "high" && side === "short";
+  const fadeLow = fade === "low" && side === "long";
   if (hourly.length >= 24) {
     const closes = hourly.map((c) => c.close);
     const e9 = ema(closes, 9);
     const e21 = ema(closes, 21);
     const last = closes[closes.length - 1];
-    if (e21 != null && last != null) {
+    if (e21 != null && last != null && !fadeHigh && !fadeLow) {
       if (side === "long" && last < e21 * 0.997) return { ok: false, why: "1h reject" };
       if (side === "short" && last > e21 * 1.003) return { ok: false, why: "1h reject" };
     }
-    if (!knife && e9 != null && e21 != null) {
+    if (!knife && e9 != null && e21 != null && !fadeHigh && !fadeLow) {
       if (side === "long" && e9 < e21 * 0.997) return { ok: false, why: "1h momentum down" };
       if (side === "short" && e9 > e21 * 1.003) return { ok: false, why: "1h momentum up" };
     }
     const rsi1 = rsiAt(closes, closes.length - 1);
     const rsiAgo = rsiAt(closes, Math.max(15, closes.length - 4));
-    if (!knife && rsi1 != null && rsiAgo != null) {
+    if (!knife && rsi1 != null && rsiAgo != null && !fadeHigh && !fadeLow) {
       if (side === "long" && rsi1 < rsiAgo - 6 && rsi1 < 48) return { ok: false, why: "1h selling impulse" };
       if (side === "short" && rsi1 > rsiAgo + 6 && rsi1 > 52) return { ok: false, why: "1h buying impulse" };
     }
@@ -808,7 +822,7 @@ export function mtfAllows(
     }
   }
   const late = /Failed bounce|lower high|failed range|double (top|bottom)/i.test(thesis);
-  if (late && hourly.length >= 16) {
+  if (late && hourly.length >= 16 && !fadeHigh && !fadeLow) {
     const rsi1 = rsiAt(hourly.map((c) => c.close), hourly.length - 1);
     const a = hourly[hourly.length - 1]!;
     const b = hourly[hourly.length - 2];
