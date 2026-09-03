@@ -2513,10 +2513,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const btc15 = await getWeexKlines("BTCUSDT", "15m", 210).catch(() => []);
           const heat = rules.btcHeat(btc15);
           const tape = rules.btcBook(rules.closedCandles(books.BTCUSDT ?? [], 60 * 60 * 1000));
+          const btc4h = await getWeexFourHour("BTCUSDT").catch(() => []);
+          const ext = rules.btcExtended(btc4h);
           if (liveN.length >= LIVE_CAP) room = 0;
           const compass = {
             bias: "chop" as const,
-            note: `${tape.note} (info). ${heat.note} Chart picks L/S.`,
+            note: `${ext.note} ${tape.note} (info). ${heat.note}`,
           };
           const ordered = [...raw].sort((a, b) => {
             const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf, compass.bias) ? 1 : 0;
@@ -2569,6 +2571,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", tape.side);
             if (!mtf.ok) {
               whyNot.push(`${tag} ${mtf.why}`);
+              continue;
+            }
+            if (ext.longChase && s.side === "long") {
+              whyNot.push(`${tag} BTC 4h high — no new longs`);
+              continue;
+            }
+            if (ext.shortChase && s.side === "short") {
+              whyNot.push(`${tag} BTC 4h low — no new shorts`);
               continue;
             }
             if (rules.setupQuality(s.thesis ?? "") < 2) {
@@ -2640,6 +2650,16 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (!mtfPick.ok) {
               veto = `${pick.weexSymbol} ${pick.side} ${mtfPick.why}`;
               whyNot.push(`${tag} ${mtfPick.why}`);
+              continue;
+            }
+            if (ext.longChase && pick.side === "long") {
+              veto = `BTC 4h high — no new longs`;
+              whyNot.push(`${tag} BTC 4h high — no new longs`);
+              continue;
+            }
+            if (ext.shortChase && pick.side === "short") {
+              veto = `BTC 4h low — no new shorts`;
+              whyNot.push(`${tag} BTC 4h low — no new shorts`);
               continue;
             }
             if (rules.setupQuality(pick.thesis ?? "") < 2) {

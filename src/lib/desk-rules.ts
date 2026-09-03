@@ -87,6 +87,37 @@ export function htfAllows(
   return true;
 }
 
+/** BTC 4h location for the whole book. Top of the impulse → no new longs. Bottom → no new shorts. */
+export function btcExtended(fourHour: Candle[]): {
+  longChase: boolean;
+  shortChase: boolean;
+  note: string;
+} {
+  if (fourHour.length < 16) return { longChase: false, shortChase: false, note: "" };
+  const closed = closedCandles(fourHour, FOUR_H_MS);
+  const bars = closed.length >= 16 ? closed : fourHour;
+  const live = fourHour[fourHour.length - 1];
+  const last = live?.close ?? bars[bars.length - 1]?.close;
+  if (last == null) return { longChase: false, shortChase: false, note: "" };
+  const win = bars.slice(-21);
+  const sh = Math.max(...win.map((c) => c.high));
+  const sl = Math.min(...win.map((c) => c.low));
+  const rng = sh - sl;
+  const rsi4 = rsiAt(bars.map((c) => c.close), bars.length - 1);
+  const pos = rng > 0 ? (last - sl) / rng : 0.5;
+  const longChase = pos >= 0.78 || (rsi4 != null && rsi4 >= 68);
+  const shortChase = pos <= 0.22 || (rsi4 != null && rsi4 <= 32);
+  return {
+    longChase,
+    shortChase,
+    note: longChase
+      ? "BTC 4h high — no new longs."
+      : shortChase
+        ? "BTC 4h low — no new shorts."
+        : "BTC 4h mid — both sides if the coin is A++.",
+  };
+}
+
 function rsiAt(closes: number[], end: number, period = 14): number | null {
   if (end - period < 1) return null;
   let gain = 0;
