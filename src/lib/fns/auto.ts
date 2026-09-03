@@ -111,7 +111,7 @@ function takeQtys(
     if (i === count - 1) {
       slices.push(fmt(Math.max(0, total - used), precision));
     } else {
-      const part = count === 2 && i === 0 ? total * 0.7 : total / count;
+      const part = total / count;
       const s = fmt(part, precision);
       used += Number(s);
       slices.push(s);
@@ -402,17 +402,13 @@ async function closedStats(
   };
   const window = uniq.filter((r) => {
     if (closeAt(r) < tFrom - 2000) return false;
-    const rr = rOf(r);
-    if (rr != null && rr > 0 && rr < 0.4) return false;
-    const reason = r.close_reason ?? "";
-    if (/BE scratch|Closed in green/i.test(reason) && n(r.pnl) > 0 && (rr == null || rr < 0.4)) return false;
     return true;
   });
   const closed = window.length;
   const isFullWin = (r: (typeof window)[number]) => {
     const rr = rOf(r);
     if (rr != null && rr >= 0.9) return true;
-    if (n(r.pnl) > 0 && /targeted|Hit TP|TP1|TP2/i.test(r.close_reason ?? "")) return true;
+    if (n(r.pnl) > 0 && /targeted|Hit TP|TP2/i.test(r.close_reason ?? "")) return true;
     return false;
   };
   const wins = window.filter((r) => n(r.pnl) > 0).length;
@@ -915,7 +911,11 @@ async function ensureTakes(
     const slices = takeQtys(liveQty, tps.length, spec.quantityPrecision, formatWeexQty);
     const start = extras || trimmed.listed === 0 ? 0 : trimmed.haveTp;
     for (let i = start; i < tps.length; i += 1) {
-      const slice = slices[i]!;
+      const slice0 = slices[i]!;
+      const slice =
+        runners && !afterTp1 && i === 0 && liveQty > 0 && Number(slice0) >= liveQty * 0.8
+          ? formatWeexQty(liveQty * 0.5, spec.quantityPrecision)
+          : slice0;
       if (Number(slice) <= 0) continue;
       if (!runners && liveQty > 0 && Number(slice) < liveQty * 0.85) continue;
       const sent = await placeWeexTake(creds, {
@@ -1750,11 +1750,20 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         }
       }
       const stop = n(pos.stop);
-      const target = n(pos.target);
+      const tpsLive = parseNums(pos.targets);
+      const tp1Px = tpsLive[0] ?? n(pos.target);
+      const tp2Px = tpsLive[1] ?? 0;
+      const target = tp1Px;
       const entry = n(pos.fill_px ?? pos.entry);
       const style = pos.style === "swing" ? "swing" : "scalp";
       const hitStop = side === "long" ? px <= stop : px >= stop;
-      const hitTp = side === "long" ? px >= target : px <= target;
+      const hitTp1Px = tp1Px > 0 && (side === "long" ? px >= tp1Px : px <= tp1Px);
+      const hitFinalTp =
+        tp2Px > 0
+          ? side === "long"
+            ? px >= tp2Px
+            : px <= tp2Px
+          : hitTp1Px;
       if (pos.status === "filled" && px > 0) {
         const unit = oneRUsd(pos);
         const q = origQty(pos);
@@ -1925,7 +1934,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       if (pos.status === "filled" && credsNow && left != null && left > 0) {
         const orig = origQty(pos);
         const dust = orig > 0 && left <= orig * 0.05;
-        if (dust && !hitTp) {
+        if (dust && !hitFinalTp) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));
           const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
           await cancelWeexProtective(credsNow, pos.weex_symbol).catch(() => null);
@@ -1962,7 +1971,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       }
       if (
         !hitStop &&
-        !hitTp
+        !hitFinalTp
       ) {
         const tpsLive = parseNums(pos.targets);
         const tp1Live = tpsLive[0] ?? n(pos.target);
@@ -2042,10 +2051,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         }
       }
 
-      if (hitStop || hitTp) {
+      if (hitStop || hitFinalTp) {
         const orig = origQty(pos);
         const dust = left != null && left > 0 && orig > 0 && left <= orig * 0.05;
-        if (credsNow && left != null && left > 0 && (hitStop || hitTp || dust)) {
+        if (credsNow && left != null && left > 0 && (hitStop || hitFinalTp || dust)) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));
           const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
           await cancelWeexProtective(credsNow, pos.weex_symbol).catch(() => null);
