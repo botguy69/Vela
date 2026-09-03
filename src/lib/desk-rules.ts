@@ -283,21 +283,47 @@ export function btcBook(hourly: Candle[]): { side: "long" | "short" | "chop"; no
   return { side: "chop", note: "BTC 1h mixed — book from live majority." };
 }
 
-/** Stop: 1.0–1.5× 15m ATR or beyond the pullback swing. Never a tick behind VWAP. */
-export function structureStop(side: Side, entry: number, stop: number, fifteen: Candle[]): number {
+/** Invalidation: 1h swing (else 15m), pad 0.15 ATR. Clamp 0.55–1.25× 15m ATR. Tightest wins — not the widest. */
+export function structureStop(
+  side: Side,
+  entry: number,
+  stop: number,
+  fifteen: Candle[],
+  hourly?: Candle[],
+): number {
   const a = atr(fifteen, 14);
   if (a == null || a <= 0 || entry <= 0) return stop;
-  const win = fifteen.slice(-8);
-  const swing = side === "long" ? Math.min(...win.map((c) => c.low)) : Math.max(...win.map((c) => c.high));
-  const atrStop = side === "long" ? entry - 1.25 * a : entry + 1.25 * a;
-  const swingStop = side === "long" ? swing - 0.2 * a : swing + 0.2 * a;
-  let s = side === "long" ? Math.min(stop, atrStop, swingStop) : Math.max(stop, atrStop, swingStop);
-  const vwap = sessionVwap(fifteen);
-  if (vwap != null && Math.abs(s - vwap) / vwap < 0.0018) {
-    s = side === "long" ? Math.min(s, vwap - 0.45 * a, swingStop) : Math.max(s, vwap + 0.45 * a, swingStop);
+  const pad = 0.15 * a;
+  const win15 = fifteen.slice(-16);
+  const s15 =
+    win15.length >= 4
+      ? side === "long"
+        ? Math.min(...win15.map((c) => c.low)) - pad
+        : Math.max(...win15.map((c) => c.high)) + pad
+      : stop;
+  const win1 = (hourly ?? []).slice(-24);
+  const s1 =
+    win1.length >= 6
+      ? side === "long"
+        ? Math.min(...win1.map((c) => c.low)) - pad
+        : Math.max(...win1.map((c) => c.high)) + pad
+      : null;
+  let swing = s1 ?? s15;
+  if (stop > 0) {
+    swing = side === "long" ? Math.max(swing, stop) : Math.min(swing, stop);
   }
-  if (side === "long" && !(s < entry)) s = entry - 1.25 * a;
-  if (side === "short" && !(s > entry)) s = entry + 1.25 * a;
+  const cap = side === "long" ? entry - 1.25 * a : entry + 1.25 * a;
+  const noise = side === "long" ? entry - 0.55 * a : entry + 0.55 * a;
+  let s = swing;
+  if (side === "long") {
+    s = Math.min(s, noise);
+    s = Math.max(s, cap);
+    if (!(s < entry)) s = noise;
+  } else {
+    s = Math.max(s, noise);
+    s = Math.min(s, cap);
+    if (!(s > entry)) s = noise;
+  }
   return s;
 }
 

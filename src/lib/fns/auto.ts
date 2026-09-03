@@ -1753,7 +1753,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           continue;
         }
       }
-      const stop = n(pos.stop);
+      let stop = n(pos.stop);
       const tpsLive = parseNums(pos.targets);
       const tp1Px = tpsLive[0] ?? n(pos.target);
       const tp2Px = tpsLive[1] ?? 0;
@@ -1840,6 +1840,24 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const beLocked = Boolean(pos.be_moved) && stopLooksBe;
       let mark = px;
       let reduced = false;
+      if (pos.status === "filled" && !beLocked && credsTp && entry > 0 && stop > 0) {
+        const fifteenNow = await getWeexKlines(pos.weex_symbol, "15m", 48).catch(() => []);
+        const hourlyNow = await getWeexKlines(pos.weex_symbol, "1h", 30).catch(() => []);
+        const tight = rules.structureStop(side, entry, stop, fifteenNow, hourlyNow);
+        const wider = side === "long" ? stop < tight * 0.997 : stop > tight * 1.003;
+        const stillValid = side === "long" ? tight < (mark || px) && tight < entry : tight > (mark || px) && tight > entry;
+        if (wider && stillValid && tight > 0) {
+          pos.stop = tight;
+          stop = tight;
+          await ensureTakes(pos, notes, credsTp, tight);
+          await sql`
+            update auto_signals
+            set stop = ${tight}, updated_at = now()
+            where id = ${pos.id} and user_id = ${userId}
+          `;
+          notes.push(`${pos.weex_symbol} SL tightened to 1h swing ${tight.toFixed(4)}`);
+        }
+      }
       if (pos.status === "filled" && !beLocked) {
         const credsForPos = await credsFrom(settings);
         if (credsForPos) {
@@ -2678,7 +2696,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const timed0 = rules.withLtfEntry(pick, trig.pullback);
             const stopped = {
               ...timed0,
-              stop: rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15),
+              stop: rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15, hourPick),
             };
             const dist = Math.abs(stopped.entry - stopped.stop);
             const timed1 =
