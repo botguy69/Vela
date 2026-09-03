@@ -111,7 +111,7 @@ function takeQtys(
     if (i === count - 1) {
       slices.push(fmt(Math.max(0, total - used), precision));
     } else {
-      const part = total / count;
+      const part = count === 2 && i === 0 ? total * 0.8 : total / count;
       const s = fmt(part, precision);
       used += Number(s);
       slices.push(s);
@@ -913,8 +913,8 @@ async function ensureTakes(
     for (let i = start; i < tps.length; i += 1) {
       const slice0 = slices[i]!;
       const slice =
-        runners && !afterTp1 && i === 0 && liveQty > 0 && Number(slice0) >= liveQty * 0.8
-          ? formatWeexQty(liveQty * 0.5, spec.quantityPrecision)
+        runners && !afterTp1 && i === 0 && liveQty > 0 && Number(slice0) >= liveQty * 0.95
+          ? formatWeexQty(liveQty * 0.8, spec.quantityPrecision)
           : slice0;
       if (Number(slice) <= 0) continue;
       if (!runners && liveQty > 0 && Number(slice) < liveQty * 0.85) continue;
