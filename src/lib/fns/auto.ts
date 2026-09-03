@@ -318,12 +318,15 @@ function uniqueFills<T extends {
   updated_at?: string | Date | null;
   created_at?: string | Date | null;
   id?: number;
+  client_oid?: string | null;
 }>(rows: T[]): T[] {
   const best = new Map<string, T>();
   for (const r of rows) {
+    const oid = String(r.client_oid ?? "").trim();
     const fill = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
-    const bucket = Number.isFinite(fill) ? Math.floor(fill / (2 * 3600_000)) : 0;
-    const key = `${r.weex_symbol ?? "?"}|${r.side ?? "?"}|${bucket}`;
+    const key = oid
+      ? `oid:${oid}`
+      : `${r.weex_symbol ?? "?"}|${r.side ?? "?"}|${Number.isFinite(fill) ? Math.floor(fill / 3600_000) : 0}`;
     const prev = best.get(key);
     const rp = Math.abs(n((r as { pnl?: string | number | null }).pnl));
     const pp = prev ? Math.abs(n((prev as { pnl?: string | number | null }).pnl)) : -1;
@@ -360,14 +363,16 @@ async function closedStats(
     status: string | null;
     thesis: string | null;
     setup_tag: string | null;
+    client_oid: string | null;
   }>`
     select id, pnl, entry, stop, qty, fill_px, risk_usd, notional, targets, target, be_moved,
            weex_symbol, side, filled_at, updated_at, created_at, close_reason, plan, rr, status,
-           thesis, setup_tag
+           thesis, setup_tag, client_oid
     from auto_signals
     where user_id = ${userId}
-      and status in ('stopped','targeted','skipped')
+      and status in ('stopped','targeted')
       and filled_at is not null
+      and filled_at >= ${TAPE_FROM}::timestamptz
       and client_oid is not null
       and abs(coalesce(pnl, 0)) > 0.15
       and (
@@ -380,14 +385,16 @@ async function closedStats(
           and close_reason not like 'Stale claim%'
           and close_reason not like 'Duplicate%'
           and close_reason not like 'off the book%'
+          and close_reason not like '%leftover%'
+          and close_reason not like 'dust%'
         )
       )
   `;
-  const closeAt = (r: { updated_at?: string | null; filled_at?: string | null; created_at?: string | null }) => {
-    const f = new Date(r.updated_at ?? r.filled_at ?? r.created_at ?? 0).getTime();
+  const fillAt = (r: { filled_at?: string | null; created_at?: string | null }) => {
+    const f = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
     return Number.isFinite(f) ? f : 0;
   };
-  const uniq = uniqueFills(rows).sort((a, b) => closeAt(a) - closeAt(b));
+  const uniq = uniqueFills(rows).sort((a, b) => fillAt(a) - fillAt(b));
   const STATS_RESET = TAPE_FROM;
   const resetAt = new Date(STATS_RESET).getTime();
   let tFrom = statsFrom ? new Date(statsFrom).getTime() : 0;
@@ -400,10 +407,7 @@ async function closedStats(
     if (!(unit > 0.05)) return null;
     return n(r.pnl) / unit;
   };
-  const window = uniq.filter((r) => {
-    if (closeAt(r) < tFrom - 2000) return false;
-    return true;
-  });
+  const window = uniq.filter((r) => fillAt(r) >= tFrom - 2000);
   const closed = window.length;
   const isFullWin = (r: (typeof window)[number]) => {
     const rr = rOf(r);
