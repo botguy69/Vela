@@ -419,11 +419,11 @@ export function limitMaxAgeMs(style: Style): number {
   return style === "scalp" ? 4 * 3600_000 : 10 * 3600_000;
 }
 
-/** Fills before this keep the old clock. Scalp fills still red after 6h flatten. Green / BE hold. */
+/** Fills before this keep the old clock. Scalp fills still red after 12h flatten. Green / BE hold. */
 export const CHOP_V2_SINCE = Date.parse("2026-08-24T02:00:00.000Z");
 
 export function fillMaxAgeMs(style: Style): number {
-  return style === "scalp" ? 6 * 3600_000 : 12 * 3600_000;
+  return style === "scalp" ? 12 * 3600_000 : 12 * 3600_000;
 }
 
 export function shouldCancelStaleLimit(createdAt: string | Date, style: Style): boolean {
@@ -432,7 +432,7 @@ export function shouldCancelStaleLimit(createdAt: string | Date, style: Style): 
   return Date.now() - t > limitMaxAgeMs(style);
 }
 
-/** Dead loser after 6h → flatten. Green / BE hold. */
+/** Dead loser after 12h → flatten. Green / BE hold. */
 export function chopAction(opts: {
   since: string | Date;
   style: Style;
