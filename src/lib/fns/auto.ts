@@ -2699,16 +2699,29 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               stop: rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15, hourPick),
             };
             const dist = Math.abs(stopped.entry - stopped.stop);
+            const r1 = stopped.side === "long" ? stopped.entry + dist : stopped.entry - dist;
+            const r2 = stopped.side === "long" ? stopped.entry + 2 * dist : stopped.entry - 2 * dist;
+            const origTp1 = (timed0.targets && timed0.targets[0]) || timed0.target;
+            const origTp2 = timed0.targets && timed0.targets[1];
+            const tp1 =
+              origTp1 > 0
+                ? stopped.side === "long"
+                  ? Math.max(origTp1, r1)
+                  : Math.min(origTp1, r1)
+                : r1;
+            const tp2 =
+              origTp2 && origTp2 > 0
+                ? stopped.side === "long"
+                  ? Math.max(origTp2, r2)
+                  : Math.min(origTp2, r2)
+                : r2;
             const timed1 =
               dist > 0
                 ? {
                     ...stopped,
-                    target: stopped.side === "long" ? stopped.entry + dist : stopped.entry - dist,
-                    targets: [
-                      stopped.side === "long" ? stopped.entry + dist : stopped.entry - dist,
-                      stopped.side === "long" ? stopped.entry + 2 * dist : stopped.entry - 2 * dist,
-                    ],
-                    rr: 1,
+                    target: tp1,
+                    targets: [tp1, tp2],
+                    rr: dist > 0 ? Math.abs(tp1 - stopped.entry) / dist : 1,
                   }
                 : stopped;
             if (rules.targetIntoLocation(timed1.side, timed1.entry, timed1.stop, h4)) {
