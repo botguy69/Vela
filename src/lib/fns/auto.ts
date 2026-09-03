@@ -1842,20 +1842,24 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       let reduced = false;
       if (pos.status === "filled" && !beLocked && credsTp && entry > 0 && stop > 0) {
         const fifteenNow = await getWeexKlines(pos.weex_symbol, "15m", 48).catch(() => []);
-        const hourlyNow = await getWeexKlines(pos.weex_symbol, "1h", 30).catch(() => []);
-        const tight = rules.structureStop(side, entry, stop, fifteenNow, hourlyNow);
-        const wider = side === "long" ? stop < tight * 0.997 : stop > tight * 1.003;
-        const stillValid = side === "long" ? tight < (mark || px) && tight < entry : tight > (mark || px) && tight > entry;
-        if (wider && stillValid && tight > 0) {
-          pos.stop = tight;
-          stop = tight;
-          await ensureTakes(pos, notes, credsTp, tight);
+        const hourlyNow = await getWeexKlines(pos.weex_symbol, "1h", 48).catch(() => []);
+        const struct = rules.structureStop(side, entry, 0, fifteenNow, hourlyNow);
+        const tooTight = side === "long" ? stop > struct * 1.002 : stop < struct * 0.998;
+        const tooWide = side === "long" ? stop < struct * 0.997 : stop > struct * 1.003;
+        const stillValid =
+          side === "long" ? struct < (mark || px) && struct < entry : struct > (mark || px) && struct > entry;
+        if ((tooTight || tooWide) && stillValid && struct > 0) {
+          pos.stop = struct;
+          stop = struct;
+          await ensureTakes(pos, notes, credsTp, struct);
           await sql`
             update auto_signals
-            set stop = ${tight}, updated_at = now()
+            set stop = ${struct}, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
-          notes.push(`${pos.weex_symbol} SL tightened to 1h swing ${tight.toFixed(4)}`);
+          notes.push(
+            `${pos.weex_symbol} SL → 1h structure ${struct.toFixed(4)}${tooTight ? " (was glued to last)" : ""}`,
+          );
         }
       }
       if (pos.status === "filled" && !beLocked) {

@@ -283,46 +283,52 @@ export function btcBook(hourly: Candle[]): { side: "long" | "short" | "chop"; no
   return { side: "chop", note: "BTC 1h mixed — book from live majority." };
 }
 
-/** Invalidation: 1h swing (else 15m), pad 0.15 ATR. Clamp 0.55–1.25× 15m ATR. Tightest wins — not the widest. */
+/** Newest swing that is far enough from entry to be real invalidation — skip last-hour noise. */
+function lastStructureSwing(bars: Candle[], side: Side, entry: number, minDist: number): number {
+  const fallback =
+    side === "long"
+      ? Math.min(...bars.slice(-12).map((c) => c.low))
+      : Math.max(...bars.slice(-12).map((c) => c.high));
+  for (let i = bars.length - 3; i >= 2; i -= 1) {
+    const b = bars[i]!;
+    const prev = bars[i - 1]!;
+    const next = bars[i + 1]!;
+    if (side === "long") {
+      if (b.low <= prev.low && b.low <= next.low && entry - b.low >= minDist) return b.low;
+    } else if (b.high >= prev.high && b.high >= next.high && b.high - entry >= minDist) {
+      return b.high;
+    }
+  }
+  return fallback;
+}
+
+/** 1h swing invalidation. Min 1× 1h ATR or 1.2% — never a 15m tick under last. */
 export function structureStop(
   side: Side,
   entry: number,
-  stop: number,
+  _stop: number,
   fifteen: Candle[],
   hourly?: Candle[],
 ): number {
-  const a = atr(fifteen, 14);
-  if (a == null || a <= 0 || entry <= 0) return stop;
-  const pad = 0.15 * a;
-  const win15 = fifteen.slice(-16);
-  const s15 =
-    win15.length >= 4
-      ? side === "long"
-        ? Math.min(...win15.map((c) => c.low)) - pad
-        : Math.max(...win15.map((c) => c.high)) + pad
-      : stop;
-  const win1 = (hourly ?? []).slice(-24);
-  const s1 =
-    win1.length >= 6
-      ? side === "long"
-        ? Math.min(...win1.map((c) => c.low)) - pad
-        : Math.max(...win1.map((c) => c.high)) + pad
-      : null;
-  let swing = s1 ?? s15;
-  if (stop > 0) {
-    swing = side === "long" ? Math.max(swing, stop) : Math.min(swing, stop);
-  }
-  const cap = side === "long" ? entry - 1.25 * a : entry + 1.25 * a;
-  const noise = side === "long" ? entry - 0.55 * a : entry + 0.55 * a;
-  let s = swing;
+  const a15 = atr(fifteen, 14);
+  const a1 = hourly && hourly.length >= 16 ? atr(hourly, 14) : null;
+  const a = a1 && a1 > 0 ? a1 : a15;
+  if (a == null || a <= 0 || entry <= 0) return _stop;
+  const bars = (hourly && hourly.length >= 8 ? hourly : fifteen).slice(-36);
+  if (bars.length < 6) return _stop;
+  const minD = Math.max(1.0 * a, entry * 0.012);
+  const maxD = Math.max(2.2 * a, entry * 0.038);
+  const swing = lastStructureSwing(bars, side, entry, minD);
+  const pad = 0.12 * a;
+  let s = side === "long" ? swing - pad : swing + pad;
   if (side === "long") {
-    s = Math.min(s, noise);
-    s = Math.max(s, cap);
-    if (!(s < entry)) s = noise;
+    s = Math.min(s, entry - minD);
+    s = Math.max(s, entry - maxD);
+    if (!(s < entry)) s = entry - minD;
   } else {
-    s = Math.max(s, noise);
-    s = Math.min(s, cap);
-    if (!(s > entry)) s = noise;
+    s = Math.max(s, entry + minD);
+    s = Math.min(s, entry + maxD);
+    if (!(s > entry)) s = entry + minD;
   }
   return s;
 }
