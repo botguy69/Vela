@@ -2536,7 +2536,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "4h = 21 location only (pullback is allowed). 3% · 4 mix · BE to 6 · 2 TPs.";
+          const aPlusLine = "15m ripping / wrong VWAP = hard skip. No with-trend limit bypass. JASMY pattern dead.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2590,17 +2590,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not location structure`);
               continue;
             }
-            const trig0 = rules.ltfTrigger(pick.side, coin15);
-            const withTrend = /With-trend 1h/i.test(pick.thesis ?? "");
-            const trig =
-              !trig0.ok && !trig0.wait && withTrend
-                ? {
-                    ok: false as const,
-                    wait: true as const,
-                    reason: `limit — ${trig0.reason}`,
-                    pullback: trig0.pullback ?? coin15[coin15.length - 1]?.close ?? null,
-                  }
-                : trig0;
+            const trig = rules.ltfTrigger(pick.side, coin15);
             if (!trig.ok && !trig.wait) {
               veto = `Skip ${tag} ${trig.reason}`;
               whyNot.unshift(`${tag} ${trig.reason}`);

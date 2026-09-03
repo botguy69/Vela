@@ -210,15 +210,15 @@ export function ltfTrigger(
       : false;
   if (vwap != null && !reclaim) {
     if (side === "long" && last < vwap * 0.998) {
-      return { ok: false, wait: true, reason: "limit — below VWAP", pullback: vwap };
+      return { ok: false, wait: false, reason: "15m below VWAP — no long", pullback: null };
     }
     if (side === "short" && last > vwap * 1.002) {
-      return { ok: false, wait: true, reason: "limit — above VWAP", pullback: vwap };
+      return { ok: false, wait: false, reason: "15m above VWAP — no short", pullback: null };
     }
   }
   if (side === "long") {
     if (last < e21 - 0.7 * a) {
-      return { ok: false, wait: true, reason: "limit at 21 — still dumping", pullback: e21 };
+      return { ok: false, wait: false, reason: "15m still dumping", pullback: null };
     }
     if (last > e21 + 0.35 * a && !reclaim) {
       return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
@@ -226,7 +226,7 @@ export function ltfTrigger(
     return { ok: true, wait: false, reason: reclaim ? "VWAP reclaim" : "15m pullback + VWAP", pullback: mean };
   }
   if (last > e21 + 0.7 * a) {
-    return { ok: false, wait: true, reason: "limit at 21 — still ripping", pullback: e21 };
+    return { ok: false, wait: false, reason: "15m still ripping — no short", pullback: null };
   }
   if (last < e21 - 0.35 * a && !reclaim) {
     return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
