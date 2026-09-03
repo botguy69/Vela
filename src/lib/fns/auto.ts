@@ -3,8 +3,8 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import { adaptMethod, clampPeak, GOAL_USD, STAGE2_USD, multipleToGoal, phaseForRun, progressPct, stageTarget } from "@/lib/goal";
 import { setupTag } from "@/lib/desk-rules";
 
-/** WR / streaks start when 4h confirm went live. Older tape is junk. */
-const TAPE_FROM = "2026-08-31T02:30:00.000Z";
+/** WR / streaks: this 4h-21 + 4-mix book. Live tickets still count when they close. */
+const TAPE_FROM = "2026-09-03T05:20:00.000Z";
 
 type SettingsRow = {
   user_id: string;
@@ -383,8 +383,8 @@ async function closedStats(
         )
       )
   `;
-  const closeAt = (r: { filled_at?: string | null; created_at?: string | null }) => {
-    const f = new Date(r.filled_at ?? r.created_at ?? 0).getTime();
+  const closeAt = (r: { updated_at?: string | null; filled_at?: string | null; created_at?: string | null }) => {
+    const f = new Date(r.updated_at ?? r.filled_at ?? r.created_at ?? 0).getTime();
     return Number.isFinite(f) ? f : 0;
   };
   const uniq = uniqueFills(rows).sort((a, b) => closeAt(a) - closeAt(b));
@@ -393,7 +393,7 @@ async function closedStats(
   let tFrom = statsFrom ? new Date(statsFrom).getTime() : 0;
   if (!(tFrom >= resetAt)) {
     tFrom = resetAt;
-    await sql`update auto_settings set stats_from = ${STATS_RESET} where user_id = ${userId}`;
+    await sql`update auto_settings set stats_from = ${STATS_RESET}, loss_streak = 0, win_streak = 0 where user_id = ${userId}`;
   }
   const rOf = (r: (typeof uniq)[number]) => {
     const unit = oneRUsd(r);
@@ -543,7 +543,7 @@ async function ticketLedger(
         and close_reason not like 'BE scratch%'
         and close_reason not like 'Limit%'
       ))
-      and created_at >= ${from}
+      and updated_at >= ${from}
   `;
   const { buildLedger } = await import("@/lib/desk-rules");
   return buildLedger(
