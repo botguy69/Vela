@@ -2542,7 +2542,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           for (const s of elite) {
             const conf = s.confidence ?? scoreToConf(s.score);
             const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(conf)}%`;
-            const h4 = rules.closedCandles(h4map[s.weexSymbol] ?? [], 4 * 60 * 60 * 1000);
+            const h4 = h4map[s.weexSymbol] ?? [];
             const hour = rules.closedCandles(books[s.weexSymbol] ?? [], 60 * 60 * 1000);
             const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", tape.side);
             if (!mtf.ok) {
@@ -2614,8 +2614,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const coin15 = rules.closedCandles(coin15raw, 15 * 60 * 1000);
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
             const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
-            const h4Closed = rules.closedCandles(h4, 4 * 60 * 60 * 1000);
-            const mtfPick = rules.mtfAllows(pick.side, h4Closed, hourPick, pick.thesis ?? "", tape.side);
+            const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "", tape.side);
             if (!mtfPick.ok) {
               veto = `${pick.weexSymbol} ${pick.side} ${mtfPick.why}`;
               whyNot.push(`${tag} ${mtfPick.why}`);
@@ -2694,7 +2693,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                     rr: 1,
                   }
                 : stopped;
-            if (rules.targetIntoLocation(timed1.side, timed1.entry, timed1.stop, h4Closed)) {
+            if (rules.targetIntoLocation(timed1.side, timed1.entry, timed1.stop, h4)) {
               veto = `Skip ${tag} entry into 4h S/R`;
               whyNot.unshift(`${tag} entry into 4h S/R`);
               continue;

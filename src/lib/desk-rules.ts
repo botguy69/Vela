@@ -55,25 +55,32 @@ export function atr(candles: Candle[], period = 14): number | null {
   return sma(trs, period);
 }
 
-/** 4h 21 SMA + S/R. BTC heat aligned → 2% band. Else 0.3%. Bounce/dump still veto. */
+const FOUR_H_MS = 4 * 60 * 60 * 1000;
+
+/** 4h 21 SMA uses live last. S/R + ATR from closed 4h only — no forming wick. */
 export function htfAllows(
   side: Side,
   fourHour: Candle[],
   heat: "long" | "short" | "chop" = "chop",
 ): boolean {
   if (fourHour.length < 24) return true;
-  const closes = fourHour.map((c) => c.close);
-  const mid = sma(closes, 21);
-  const last = closes[closes.length - 1];
+  const closed = closedCandles(fourHour, FOUR_H_MS);
+  const live = fourHour[fourHour.length - 1];
+  const last = live?.close ?? closed[closed.length - 1]?.close;
+  const smaSrc =
+    live && (closed.length === 0 || closed[closed.length - 1]!.time !== live.time)
+      ? [...closed.map((c) => c.close), live.close]
+      : closed.map((c) => c.close);
+  const mid = sma(smaSrc.length >= 21 ? smaSrc : fourHour.map((c) => c.close), 21);
   if (mid == null || last == null) return true;
   const band = heat === side ? 0.02 : 0.003;
   if (side === "long" && last < mid * (1 - band)) return false;
   if (side === "short" && last > mid * (1 + band)) return false;
-  const prior = fourHour.slice(-21, -1);
+  const prior = (closed.length >= 8 ? closed : fourHour).slice(-21);
   if (prior.length < 8) return true;
   const sh = Math.max(...prior.map((c) => c.high));
   const sl = Math.min(...prior.map((c) => c.low));
-  const a = atr(fourHour, 14) ?? 0;
+  const a = atr(closed.length >= 16 ? closed : fourHour, 14) ?? 0;
   if (a <= 0) return true;
   if (side === "long" && last >= sh - 0.2 * a) return false;
   if (side === "short" && last <= sl + 0.2 * a) return false;
@@ -706,11 +713,18 @@ export function mtfAllows(
     }
   }
   if (fourHour.length >= 16) {
-    const c4 = fourHour.map((c) => c.close);
+    const closed4 = closedCandles(fourHour, FOUR_H_MS);
+    const bars = closed4.length >= 16 ? closed4 : fourHour;
+    const c4 = bars.map((c) => c.close);
     const rsi4 = rsiAt(c4, c4.length - 1);
-    const mid = sma(c4, 21);
-    const last4 = c4[c4.length - 1];
-    const bar = fourHour[fourHour.length - 1]!;
+    const liveClose = fourHour[fourHour.length - 1]?.close ?? c4[c4.length - 1];
+    const midSrc =
+      liveClose != null && (bars.length === 0 || bars[bars.length - 1]!.close !== liveClose)
+        ? [...c4, liveClose]
+        : c4;
+    const mid = sma(midSrc, 21);
+    const last4 = liveClose;
+    const bar = bars[bars.length - 1]!;
     const range = bar.high - bar.low;
     if (side === "short") {
       if (rsi4 != null && rsi4 <= 28) return { ok: false, why: "4h washout — no short" };
@@ -758,14 +772,15 @@ export function targetIntoLocation(
   stop: number,
   fourHour: Candle[],
 ): boolean {
-  if (fourHour.length < 16 || !(entry > 0) || !(stop > 0)) return false;
+  const closed = closedCandles(fourHour, FOUR_H_MS);
+  const bars = closed.length >= 16 ? closed : fourHour;
+  if (bars.length < 16 || !(entry > 0) || !(stop > 0)) return false;
   const risk = Math.abs(entry - stop);
   if (!(risk > 0)) return false;
-  const tp = side === "short" ? entry - risk : entry + risk;
-  const prior = fourHour.slice(-21, -1);
+  const prior = bars.slice(-21);
   const sl = Math.min(...prior.map((c) => c.low));
   const sh = Math.max(...prior.map((c) => c.high));
-  const a = atr(fourHour, 14) ?? 0;
+  const a = atr(bars, 14) ?? 0;
   if (side === "short" && entry <= sl + 0.35 * a) return true;
   if (side === "long" && entry >= sh - 0.35 * a) return true;
   return false;
