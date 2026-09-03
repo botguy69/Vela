@@ -455,6 +455,32 @@ export function chopAction(opts: {
   return "flatten";
 }
 
+/** TP1 already in, leftover sitting between BE and TP1 in 15m chop → bank and rotate. Still through TP1 holds. */
+export function leftoverChop(opts: {
+  side: Side;
+  last: number;
+  entry: number;
+  tp1: number;
+  fifteen: Candle[];
+}): boolean {
+  if (!(opts.tp1 > 0) || !(opts.entry > 0) || !(opts.last > 0)) return false;
+  const through = opts.side === "long" ? opts.last >= opts.tp1 * 0.999 : opts.last <= opts.tp1 * 1.001;
+  if (through) return false;
+  const inPocket =
+    opts.side === "long"
+      ? opts.last < opts.tp1 && opts.last >= opts.entry * 0.997
+      : opts.last > opts.tp1 && opts.last <= opts.entry * 1.003;
+  if (!inPocket) return false;
+  if (opts.fifteen.length < 16) return true;
+  const vwap = sessionVwap(opts.fifteen);
+  const crosses = vwap != null ? vwapCrosses(opts.fifteen, 8, vwap) : 0;
+  const closes = opts.fifteen.map((c) => c.close);
+  const e9 = ema(closes, 9);
+  const e21 = ema(closes, 21);
+  const tangled = e9 != null && e21 != null && Math.abs(e9 - e21) / e21 < 0.0025;
+  return crosses >= 2 || tangled;
+}
+
 export function shouldTimeStopFill(opts: {
   since: string | Date;
   style: Style;

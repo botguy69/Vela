@@ -1964,7 +1964,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         !hitStop &&
         !hitTp
       ) {
-        const act = rules.chopAction({
+        const tpsLive = parseNums(pos.targets);
+        const tp1Live = tpsLive[0] ?? n(pos.target);
+        let act = rules.chopAction({
           since,
           style,
           side,
@@ -1973,6 +1975,23 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           stop,
           beMoved: Boolean(pos.be_moved),
         });
+        let leftover = false;
+        if (
+          act === "hold" &&
+          Boolean(pos.be_moved) &&
+          Boolean(pos.tp1_hit) &&
+          tp1Live > 0
+        ) {
+          const m15raw = await getWeexKlines(pos.weex_symbol, "15m", 48).catch(() => []);
+          leftover = rules.leftoverChop({
+            side,
+            last: px,
+            entry,
+            tp1: tp1Live,
+            fifteen: rules.closedCandles(m15raw, 15 * 60 * 1000),
+          });
+          if (leftover) act = "flatten";
+        }
         if (act === "flatten") {
         if (credsNow && (left == null || left > 0)) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));
@@ -2003,8 +2022,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         }
         const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
         const hours = "12h";
-        const why =
-          pnl < 0
+        const why = leftover
+          ? pnl >= 0
+            ? "Sold to move on — chop between TP1 and BE"
+            : "Sold at a loss to move on — chop between TP1 and BE"
+          : pnl < 0
             ? `Sold at a loss to move on — still red after ${hours}`
             : `Sold to move on — nowhere after ${hours}`;
         await sql`
