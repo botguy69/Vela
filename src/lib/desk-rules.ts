@@ -703,9 +703,9 @@ export function applyLedger(setups: RawSetup[], ledger: Ledger): RawSetup[] {
 /** Pin / double / climax / failed-range at the extreme. Not with-trend, not mid engulf. */
 export function fadeAtExtreme(thesis: string, side: Side): boolean {
   if (side === "short") {
-    return /double top|Failed range high|Pin bar at highs|climax rejection at highs/i.test(thesis);
+    return /double top|Failed range high|Pin bar at high|climax rejection at high/i.test(thesis);
   }
-  return /double bottom|Failed range low|Pin bar at lows|climax rejection at lows/i.test(thesis);
+  return /double bottom|Failed range low|Pin bar at low|climax rejection at low/i.test(thesis);
 }
 
 export function eliteScalp(
@@ -827,7 +827,12 @@ export function mtfAllows(
       if (mid != null && last4 != null && last4 < mid * 0.96) {
         return { ok: false, why: "4h extended — no chase short" };
       }
-      if (range > 0 && bar.close > bar.open && (bar.close - bar.low) / range > 0.62) {
+      if (
+        !fadeHigh &&
+        range > 0 &&
+        bar.close > bar.open &&
+        (bar.close - bar.low) / range > 0.62
+      ) {
         return { ok: false, why: "4h bounce bar — no short" };
       }
     } else {
