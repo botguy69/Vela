@@ -441,7 +441,29 @@ function collapseCloses(closes: WeexClose[]): WeexClose[] {
     if (g) g.push(c);
     else groups.push([c]);
   }
-  return groups.map((arr) => [...arr].sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))[0]!);
+  return groups.map((arr) => {
+    const seen = new Set<string>();
+    const uniq: WeexClose[] = [];
+    for (const c of arr) {
+      const k = `${c.pnl.toFixed(2)}|${(c.qty || 0).toFixed(4)}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      uniq.push(c);
+    }
+    const top = [...uniq].sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))[0]!;
+    const latest = [...uniq].sort((a, b) => (b.ts || 0) - (a.ts || 0))[0]!;
+    const sum = uniq.reduce((s, x) => s + x.pnl, 0);
+    const others = uniq.filter((x) => x !== top).reduce((s, x) => s + x.pnl, 0);
+    if (uniq.length === 1) return top;
+    if (Math.abs(top.pnl - others) < Math.max(0.5, 0.08 * Math.abs(top.pnl))) return top;
+    if (Math.abs(top.pnl) >= Math.abs(sum) - 0.35) return top;
+    return {
+      ...latest,
+      pnl: sum,
+      qty: Math.max(top.qty || 0, uniq.reduce((s, x) => s + (x.qty || 0), 0)),
+      closePx: latest.closePx || top.closePx,
+    };
+  });
 }
 
 export async function getWeexPositionQty(

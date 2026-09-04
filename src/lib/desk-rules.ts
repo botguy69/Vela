@@ -250,11 +250,17 @@ export function ltfTrigger(
         ? prev < vwap && last >= vwap
         : prev > vwap && last <= vwap
       : false;
+  const win15 = fifteen.slice(-20);
+  const sh15 = Math.max(...win15.map((c) => c.high));
+  const sl15 = Math.min(...win15.map((c) => c.low));
+  const rng15 = sh15 - sl15;
+  const atHigh = rng15 > 0 && last >= sh15 - 0.28 * rng15;
+  const atLow = rng15 > 0 && last <= sl15 + 0.28 * rng15;
   if (vwap != null && !reclaim) {
-    if (side === "long" && last < vwap * 0.998) {
+    if (side === "long" && last < vwap * 0.998 && !atLow) {
       return { ok: false, wait: false, reason: "15m below VWAP — no long", pullback: null };
     }
-    if (side === "short" && last > vwap * 1.002) {
+    if (side === "short" && last > vwap * 1.002 && !atHigh) {
       return { ok: false, wait: false, reason: "15m above VWAP — no short", pullback: null };
     }
   }

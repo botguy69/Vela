@@ -366,7 +366,7 @@ async function closedStats(
            thesis, setup_tag, client_oid
     from auto_signals
     where user_id = ${userId}
-      and status in ('stopped','targeted')
+      and status in ('stopped','targeted','skipped')
       and filled_at is not null
       and filled_at >= ${TAPE_FROM}::timestamptz
       and client_oid is not null
@@ -381,8 +381,6 @@ async function closedStats(
           and close_reason not like 'Stale claim%'
           and close_reason not like 'Duplicate%'
           and close_reason not like 'off the book%'
-          and close_reason not like '%leftover%'
-          and close_reason not like 'dust%'
         )
       )
   `;
@@ -408,7 +406,7 @@ async function closedStats(
   const isFullWin = (r: (typeof window)[number]) => {
     const rr = rOf(r);
     if (rr != null && rr >= 0.9) return true;
-    if (n(r.pnl) > 0 && /targeted|Hit TP|TP2/i.test(r.close_reason ?? "")) return true;
+    if (n(r.pnl) > 0 && /targeted|Hit TP|TP2|TP1 then BE|Closed in green/i.test(r.close_reason ?? "")) return true;
     return false;
   };
   const wins = window.filter((r) => n(r.pnl) > 0).length;
@@ -2619,7 +2617,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "15m ripping / wrong VWAP = hard skip. No with-trend limit bypass. JASMY pattern dead.";
+          const aPlusLine = "15m mid + wrong VWAP = skip. Fade at the 15m high/low can fire above/below VWAP.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
