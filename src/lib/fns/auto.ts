@@ -703,21 +703,16 @@ async function restampWeexPnl(
       and filled_at > now() - interval '7 days'
   `;
   const used = new Set<string>();
-  rows.sort((a, b) => Math.abs(n(b.pnl)) - Math.abs(n(a.pnl)));
+  rows.sort((a, b) => Math.abs(n(a.pnl)) - Math.abs(n(b.pnl)));
   for (const row of rows) {
     if (/^Limit |^Replaced by|^Cancelled/.test(String(row.close_reason ?? ""))) continue;
     const side = row.side === "short" ? "short" : "long";
     const key = row.weex_symbol.replace(/_/g, "").toUpperCase();
     let hit = matchWeexClose(row, closes, used);
-    if (!hit || Math.abs(hit.pnl) < 0.15) {
+    if (!hit || Math.abs(hit.pnl) < Math.max(0.15, Math.abs(n(row.pnl)) + 0.4)) {
       const extra = await listWeexClosedPnl(creds, row.weex_symbol).catch(() => []);
-      const pool = [...extra, ...closes].filter((c) => {
-        if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
-        if (c.side && c.side !== side) return false;
-        return Math.abs(c.pnl) >= 0.15;
-      });
-      pool.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
-      if (pool[0]) hit = pool[0];
+      const matched = matchWeexClose(row, [...extra, ...closes]);
+      if (matched && Math.abs(matched.pnl) >= Math.abs(hit?.pnl ?? 0)) hit = matched;
     }
     if (!hit || Math.abs(hit.pnl) < 0.05) {
       const ghost = matchWeexClose(row, closes);

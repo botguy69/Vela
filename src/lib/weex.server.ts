@@ -331,47 +331,26 @@ function parseClose(r: Record<string, unknown>): WeexClose | null {
     .replace(/_/g, "")
     .replace(/^cmt/i, "")
     .toUpperCase();
-  const pnl = Number(
-    r.realizedPnl ??
-      r.realisedPnl ??
-      r.closePnl ??
-      r.netProfit ??
-      r.achievedProfits ??
-      r.income ??
-      r.pnl ??
-      r.profit ??
-      r.closeProfit,
+  const net = numField(
+    r.netProfit,
+    r.realizedPnl,
+    r.realisedPnl,
+    r.closePnl,
+    r.achievedProfits,
+    r.closedPnl,
+    r.realisedProfit,
   );
-  if (!symbol.includes("USDT") || !Number.isFinite(pnl)) return null;
-  let ts = Number(r.cTime ?? r.uTime ?? r.closeTime ?? r.updatedTime ?? r.time ?? r.timestamp ?? 0);
+  const raw = numField(r.pnl, r.profit, r.income, r.closeProfit);
+  const pnl =
+    net != null && raw != null && Math.abs(raw) > Math.abs(net) * 4 ? net : (net ?? raw);
+  if (!symbol.includes("USDT") || pnl == null) return null;
+  let ts = numField(r.cTime, r.uTime, r.closeTime, r.updatedTime, r.time, r.timestamp) ?? 0;
   if (ts > 0 && ts < 1e12) ts *= 1000;
-  const closePx = Number(
-    r.closePrice ?? r.closeAvgPrice ?? r.avgClosePrice ?? r.price ?? r.markPrice ?? 0,
-  );
-  const entry = Number(
-    r.openPriceAvg ??
-      r.openAvgPrice ??
-      r.entryPrice ??
-      r.openPrice ??
-      r.averageOpenPrice ??
-      r.openPriceAvg ??
-      r.avgOpenPrice ??
-      0,
-  );
+  const closePx = numField(r.closePrice, r.closeAvgPrice, r.avgClosePrice, r.price, r.markPrice) ?? 0;
+  const entry =
+    numField(r.openPriceAvg, r.openAvgPrice, r.entryPrice, r.openPrice, r.averageOpenPrice, r.avgOpenPrice) ?? 0;
   const qty = Math.abs(
-    Number(
-      r.closeSize ??
-        r.size ??
-        r.qty ??
-        r.holdVol ??
-        r.amount ??
-        r.closeTotalPos ??
-        r.maxOpen ??
-        r.maxHold ??
-        r.holdAvai ??
-        r.volume ??
-        0,
-    ),
+    numField(r.closeSize, r.closeTotalPos, r.maxOpen, r.maxHold, r.size, r.qty, r.holdVol, r.amount, r.volume) ?? 0,
   );
   const sideRaw = String(r.positionSide ?? r.holdSide ?? r.side ?? r.posSide ?? "").toLowerCase();
   const side: "long" | "short" | undefined = sideRaw.includes("short") || sideRaw === "sell" || sideRaw === "2"
@@ -383,8 +362,8 @@ function parseClose(r: Record<string, unknown>): WeexClose | null {
     symbol,
     side,
     pnl,
-    closePx: Number.isFinite(closePx) ? closePx : 0,
-    entry: Number.isFinite(entry) ? entry : 0,
+    closePx,
+    entry,
     qty,
     ts,
   };
@@ -398,36 +377,36 @@ export async function listWeexClosedPnl(creds: WeexCreds, symbol?: string): Prom
     ...extra,
   });
   const paths: { path: string; query?: Record<string, string> }[] = [
+    { path: "/capi/v2/mix/position/history-position", query: q({ productType: "USDT-FUTURES" }) },
+    { path: "/capi/v2/mix/position/historyPosition", query: q({ productType: "USDT-FUTURES" }) },
     { path: "/capi/v2/mix/position/history", query: q({ productType: "USDT-FUTURES" }) },
     { path: "/capi/v3/historyPositions", query: q() },
+    { path: "/capi/v3/historyPosition", query: q() },
     { path: "/capi/v3/position/history", query: q() },
-    { path: "/capi/v3/positionHistory", query: q() },
-    { path: "/capi/v3/account/position/history", query: q() },
     { path: "/capi/v3/userTrades", query: q() },
     { path: "/capi/v3/income", query: { incomeType: "REALIZED_PNL", limit: "100", ...(sym ? { symbol: sym } : {}) } },
   ];
   const replies = await Promise.all(
     paths.map((p) => weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query })),
   );
+  const batch: WeexClose[] = [];
+  const seen = new Set<string>();
   for (const res of replies) {
     if (!res.ok) continue;
-    const batch: WeexClose[] = [];
-    const seen = new Set<string>();
     for (const row of rowsFrom(res.data)) {
       const hit = parseClose(row as Record<string, unknown>);
       if (!hit) continue;
       if (sym && hit.symbol.replace(/_/g, "").toUpperCase() !== sym) continue;
-      const k = `${hit.symbol}|${hit.ts}|${hit.pnl.toFixed(4)}`;
+      const k = `${hit.symbol}|${hit.ts}|${hit.pnl.toFixed(4)}|${hit.qty}`;
       if (seen.has(k)) continue;
       seen.add(k);
       batch.push(hit);
     }
-    if (!batch.length) continue;
-    const collapsed = collapseCloses(batch);
-    collapsed.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-    return collapsed.slice(0, 200);
   }
-  return [];
+  if (!batch.length) return [];
+  const collapsed = collapseCloses(batch);
+  collapsed.sort((a, b) => (b.ts || 0) - (a.ts || 0) || Math.abs(b.pnl) - Math.abs(a.pnl));
+  return collapsed.slice(0, 200);
 }
 
 function collapseCloses(closes: WeexClose[]): WeexClose[] {
@@ -455,10 +434,10 @@ function collapseCloses(closes: WeexClose[]): WeexClose[] {
   }
   const out: WeexClose[] = [];
   for (const arr of groups) {
-    const full = [...arr].sort((a, b) => (b.qty || 0) - (a.qty || 0))[0]!;
     const maxQty = Math.max(...arr.map((c) => c.qty || 0));
-    const entire = arr.find((c) => maxQty > 0 && (c.qty || 0) >= maxQty * 0.92 && Math.abs(c.pnl) >= Math.abs(full.pnl) * 0.9);
-    if (entire) {
+    const fullSize = arr.filter((c) => maxQty > 0 && (c.qty || 0) >= maxQty * 0.92);
+    const entire = [...(fullSize.length ? fullSize : arr)].sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))[0];
+    if (entire && Math.abs(entire.pnl) >= 0.05) {
       out.push(entire);
       continue;
     }
