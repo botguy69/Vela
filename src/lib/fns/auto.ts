@@ -2780,13 +2780,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const timed = trig.wait ? { ...timed1, entryType: "limit" as const } : timed1;
-            const sz = sizeSetup(
-              timed,
-              equity,
-              corrected.marginPct,
-              spec.maxLeverage,
-              rules.ticketSizeMult(conf, timed.rr),
-            );
+            const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
             if (!sz) {
               whyNot.unshift(`${tag} size rejected (min notional / stop too wide)`);
               continue;
