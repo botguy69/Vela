@@ -842,26 +842,16 @@ export function mtfAllows(
   return { ok: true, why: "" };
 }
 
-/** Under 75x, a 0.6–1R scalp is toy PnL. Need 2–3% SL and ~10% room or skip. */
-export const LOW_LEV_MAX = 75;
-
-export function swingWorthIt(
-  maxLev: number,
+/** Stretch TP when 4h has ~10% room and stop is 2–3%. Else 0 → caller keeps 1R. Any coin, still max lev. */
+export function stretchTp(
   side: Side,
   entry: number,
   stop: number,
   fourHour: Candle[],
-): { ok: boolean; tp: number; why: string } {
-  if (maxLev >= LOW_LEV_MAX) return { ok: true, tp: 0, why: "" };
-  if (!(entry > 0) || !(stop > 0)) return { ok: false, tp: 0, why: `${maxLev}x no stop` };
+): { tp: number; why: string } {
+  if (!(entry > 0) || !(stop > 0)) return { tp: 0, why: "" };
   const stopPct = Math.abs(entry - stop) / entry;
-  if (stopPct < 0.018 || stopPct > 0.035) {
-    return {
-      ok: false,
-      tp: 0,
-      why: `${maxLev}x stop ${(stopPct * 100).toFixed(1)}% — need 2–3% and 10% room`,
-    };
-  }
+  if (stopPct < 0.018 || stopPct > 0.035) return { tp: 0, why: "" };
   const want = side === "long" ? entry * 1.1 : entry * 0.9;
   const closed = closedCandles(fourHour, FOUR_H_MS);
   const bars = closed.length >= 8 ? closed : fourHour;
@@ -873,19 +863,17 @@ export function swingWorthIt(
     const a = atr(bars, 14) ?? 0;
     if (side === "long") {
       const cap = sh - 0.2 * a;
-      const room = (cap - entry) / entry;
-      if (room < 0.08) return { ok: false, tp: 0, why: `${maxLev}x no 8%+ to 4h supply` };
+      if ((cap - entry) / entry < 0.08) return { tp: 0, why: "" };
       tp = Math.min(want, cap);
     } else {
       const cap = sl + 0.2 * a;
-      const room = (entry - cap) / entry;
-      if (room < 0.08) return { ok: false, tp: 0, why: `${maxLev}x no 8%+ to 4h demand` };
+      if ((entry - cap) / entry < 0.08) return { tp: 0, why: "" };
       tp = Math.max(want, cap);
     }
   }
   const rr = Math.abs(tp - entry) / Math.abs(entry - stop);
-  if (rr < 3) return { ok: false, tp: 0, why: `${maxLev}x RR ${rr.toFixed(1)} < 3` };
-  return { ok: true, tp, why: `${maxLev}x 10% / 2–3% SL` };
+  if (rr < 3) return { tp: 0, why: "" };
+  return { tp, why: `${rr.toFixed(1)}R stretch` };
 }
 
 /** 1R would print into 4h demand/supply — skip. ONDO TP sat on the 4h low. */
