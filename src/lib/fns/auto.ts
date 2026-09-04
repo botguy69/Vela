@@ -179,16 +179,10 @@ function livePhase(
   });
 }
 
-function feeBePx(side: "long" | "short", entry: number, mark: number, weexBe: number): number {
+function feeBePx(side: "long" | "short", entry: number, _mark: number, weexBe: number): number {
   const raw = weexBe > 0 ? weexBe : side === "long" ? entry * 1.002 : entry * 0.998;
-  if (side === "long") {
-    const want = Math.max(raw, entry * 1.0004);
-    if (mark > 0 && want >= mark * 0.999) return Math.min(want, mark * 0.9985);
-    return want;
-  }
-  const want = Math.min(raw, entry * 0.9996);
-  if (mark > 0 && want <= mark * 1.001) return Math.max(want, mark * 1.0015);
-  return want;
+  if (side === "long") return Math.max(raw, entry * 1.0004);
+  return Math.min(raw, entry * 0.9996);
 }
 
 function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
@@ -1810,6 +1804,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       }
 
       const credsTp = await credsFrom(settings);
+      const hitTp1Now = hitTp1Px;
       if (pos.status === "filled" && credsTp) await ensureTakes(pos, notes, credsTp);
 
       const tps = parseNums(pos.targets);
@@ -1844,7 +1839,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const { getWeexPositionQty } = await import("@/lib/weex.server");
           const left = await getWeexPositionQty(credsForPos, pos.weex_symbol);
           const orig = origQty(pos);
-          if (left != null && orig > 0 && left < orig * 0.62) reduced = true;
+          if (left != null && orig > 0 && left < orig * 0.85) reduced = true;
         }
       }
       if (
@@ -1853,9 +1848,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           entry,
           stop,
           last: mark,
-          targets: tps,
+          targets: tpsLive.length ? tpsLive : tps,
           already: beLocked,
-          reduced,
+          reduced: reduced || hitTp1Now,
+          mfeR: n(pos.mfe_r),
         })
       ) {
         const creds = await credsFrom(settings);
@@ -1863,13 +1859,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const be = feeBePx(side, entry, mark || px, rawBe);
         if (be > 0 && creds) {
           pos.stop = be;
+          pos.be_moved = true;
+          pos.tp1_hit = true;
           await ensureTakes(pos, notes, creds, be);
           await sql`
             update auto_signals
-            set stop = ${be}, be_moved = true, updated_at = now()
+            set stop = ${be}, be_moved = true, tp1_hit = true, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
-          notes.push(`${pos.weex_symbol} 0.8R / TP1 · SL → WEEX BE ${be.toFixed(4)}`);
+          notes.push(`${pos.weex_symbol} TP1 · SL → WEEX BE ${be.toFixed(4)}`);
         }
       } else if (pos.be_moved) {
         if (reduced && !pos.tp1_hit) {
