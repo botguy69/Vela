@@ -642,9 +642,23 @@ export async function cancelWeexProtective(
     "pos_loss",
     "TAKE_PROFIT",
     "STOP_LOSS",
+    "normal_plan",
+    "track_plan",
+    "move_plan",
   ];
   const sides = holdSide ? [holdSide] : ["long", "short"];
   for (const planType of planTypes) {
+    await weexRequest({
+      creds,
+      method: "POST",
+      path: "/capi/v2/mix/order/cancel-all-plan",
+      body: {
+        symbol,
+        productType: "USDT-FUTURES",
+        planType,
+        marginCoin: "USDT",
+      },
+    }).catch(() => null);
     for (const side of sides) {
       await weexRequest({
         creds,
