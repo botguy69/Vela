@@ -432,26 +432,7 @@ function collapseCloses(closes: WeexClose[]): WeexClose[] {
     if (g) g.push(c);
     else groups.push([c]);
   }
-  const out: WeexClose[] = [];
-  for (const arr of groups) {
-    const maxQty = Math.max(...arr.map((c) => c.qty || 0));
-    const fullSize = arr.filter((c) => maxQty > 0 && (c.qty || 0) >= maxQty * 0.92);
-    const entire = [...(fullSize.length ? fullSize : arr)].sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))[0];
-    if (entire && Math.abs(entire.pnl) >= 0.05) {
-      out.push(entire);
-      continue;
-    }
-    const last = arr.reduce((a, c) => ((c.ts || 0) >= (a.ts || 0) ? c : a));
-    out.push({
-      ...last,
-      pnl: arr.reduce((s, c) => s + c.pnl, 0),
-      qty: arr.reduce((s, c) => s + (c.qty || 0), 0) || maxQty,
-      closePx: last.closePx,
-      entry: arr.find((c) => c.entry > 0)?.entry ?? last.entry,
-      ts: Math.max(...arr.map((c) => c.ts || 0)),
-    });
-  }
-  return out;
+  return groups.map((arr) => [...arr].sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))[0]!);
 }
 
 export async function getWeexPositionQty(

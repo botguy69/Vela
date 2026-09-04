@@ -625,27 +625,13 @@ function applyWeexHit(hit: { pnl: number; closePx: number; qty?: number; ts?: nu
 
 function coalesceWeexHit(
   cands: { symbol: string; side?: "long" | "short"; pnl: number; closePx: number; entry?: number; ts: number; qty?: number }[],
-  orig: number,
+  _orig: number,
 ) {
   if (!cands.length) return null;
   const real = cands.filter((c) => Math.abs(c.pnl) >= 0.05);
   const pool = real.length ? real : cands;
   const byPnl = [...pool].sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
-  const maxQty = Math.max(orig, ...pool.map((c) => c.qty ?? 0));
-  const entire = byPnl.find((c) => maxQty > 0 && (c.qty ?? 0) >= maxQty * 0.9);
-  if (entire && Math.abs(entire.pnl) >= 0.05) return entire;
-  const full = byPnl.find((c) => orig > 0 && (c.qty ?? 0) >= orig * 0.92);
-  if (full && Math.abs(full.pnl) >= 0.05) return full;
-  if (byPnl[0] && Math.abs(byPnl[0].pnl) >= 0.05 && pool.length === 1) return byPnl[0];
-  const last = pool.reduce((a, c) => ((c.ts || 0) >= (a.ts || 0) ? c : a));
-  return {
-    ...last,
-    pnl: pool.reduce((s, c) => s + c.pnl, 0),
-    qty: Math.max(orig, pool.reduce((s, c) => s + (c.qty ?? 0), 0)),
-    closePx: last.closePx || byPnl[0]?.closePx || 0,
-    entry: pool.find((c) => (c.entry ?? 0) > 0)?.entry ?? last.entry,
-    ts: last.ts,
-  };
+  return byPnl[0] ?? null;
 }
 
 function matchWeexClose(
