@@ -903,14 +903,15 @@ async function ensureTakes(
   };
   if (slOk && tpOk && !extras) return;
   const beMove = stopOverride != null && stopOverride > 0 && !slOk;
-  if (recent && listed.length <= 3 && !beMove) return;
-  if (extras || listed.length > 3 || (listed.length === 0 && hasSet)) {
+  if (extras || listed.length > 3) {
     await cancelWeexProtective(creds, pos.weex_symbol, sideLc);
     notes.push(`${pos.weex_symbol} wiped ${listed.length} leftover TP/SL`);
-    if (recent) {
+    if (recent && !beMove) {
       await stampSet();
       return;
     }
+  } else if (hasSet && !beMove) {
+    return;
   }
   const oid = (tag: string) => `vela${tag}${pos.id}${Date.now().toString(36)}`.slice(0, 36);
   const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
