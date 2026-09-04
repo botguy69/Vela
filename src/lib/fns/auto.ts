@@ -902,7 +902,8 @@ async function ensureTakes(
     pos.targets = JSON.stringify(tps);
   };
   if (slOk && tpOk && !extras) return;
-  if (recent && listed.length <= 3) return;
+  const beMove = stopOverride != null && stopOverride > 0 && !slOk;
+  if (recent && listed.length <= 3 && !beMove) return;
   if (extras || listed.length > 3 || (listed.length === 0 && hasSet)) {
     await cancelWeexProtective(creds, pos.weex_symbol, sideLc);
     notes.push(`${pos.weex_symbol} wiped ${listed.length} leftover TP/SL`);
