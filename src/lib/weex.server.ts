@@ -700,7 +700,7 @@ async function cancelAlgoIds(creds: WeexCreds, symbol: string, ids: string[]) {
 export async function listWeexAlgoRows(
   creds: WeexCreds,
   symbol: string,
-): Promise<{ id: string; type: string; trigger: number; posSide: string }[]> {
+): Promise<{ id: string; type: string; trigger: number; posSide: string; qty: number }[]> {
   const planTypes = [
     "profit_loss",
     "profit_plan",
@@ -730,7 +730,7 @@ export async function listWeexAlgoRows(
       query: { symbol, planType },
     })),
   ];
-  const out: { id: string; type: string; trigger: number; posSide: string }[] = [];
+  const out: { id: string; type: string; trigger: number; posSide: string; qty: number }[] = [];
   const seen = new Set<string>();
   for (const p of paths) {
     const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
@@ -756,6 +756,7 @@ export async function listWeexAlgoRows(
         type: String(o.planType ?? o.type ?? o.orderType ?? o.workingType ?? o.tpslMode ?? ""),
         trigger: Number(o.triggerPrice ?? o.stopPrice ?? o.executePrice ?? o.price ?? 0),
         posSide: pos.includes("SHORT") ? "SHORT" : pos.includes("LONG") ? "LONG" : "",
+        qty: Number(o.quantity ?? o.size ?? o.orderQty ?? o.qty ?? o.volume ?? o.sz ?? 0),
       });
     }
   }
