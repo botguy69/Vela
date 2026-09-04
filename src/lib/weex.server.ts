@@ -447,17 +447,20 @@ export async function listWeexClosedPnl(creds: WeexCreds, symbol?: string): Prom
 
 function collapseCloses(closes: WeexClose[]): WeexClose[] {
   const sorted = [...closes].sort((a, b) => (a.ts || 0) - (b.ts || 0));
-  const bucket = (c: WeexClose) =>
-    `${c.symbol}|${c.side ?? "?"}|${c.entry > 0 ? c.entry.toPrecision(5) : "x"}`;
+  const same = (a: WeexClose, b: WeexClose) => {
+    if (a.symbol !== b.symbol) return false;
+    if ((a.side ?? "?") !== (b.side ?? "?")) return false;
+    if (a.entry > 0 && b.entry > 0 && Math.abs(a.entry - b.entry) / a.entry > 0.006) return false;
+    return true;
+  };
   const groups: WeexClose[][] = [];
   for (const c of sorted) {
-    const k = bucket(c);
     let g: WeexClose[] | undefined;
     for (let i = groups.length - 1; i >= 0; i -= 1) {
       const arr = groups[i]!;
-      if (bucket(arr[0]!) !== k) continue;
+      if (!same(arr[0]!, c)) continue;
       const latest = Math.max(...arr.map((x) => x.ts || 0));
-      if (Math.abs((c.ts || 0) - latest) <= 2 * 3600_000) {
+      if (Math.abs((c.ts || 0) - latest) <= 14 * 3600_000) {
         g = arr;
         break;
       }
@@ -467,15 +470,18 @@ function collapseCloses(closes: WeexClose[]): WeexClose[] {
   }
   const out: WeexClose[] = [];
   for (const arr of groups) {
-    if (arr.length === 1) {
-      out.push(arr[0]!);
+    const full = [...arr].sort((a, b) => (b.qty || 0) - (a.qty || 0))[0]!;
+    const maxQty = Math.max(...arr.map((c) => c.qty || 0));
+    const entire = arr.find((c) => maxQty > 0 && (c.qty || 0) >= maxQty * 0.92 && Math.abs(c.pnl) >= Math.abs(full.pnl) * 0.9);
+    if (entire) {
+      out.push(entire);
       continue;
     }
     const last = arr.reduce((a, c) => ((c.ts || 0) >= (a.ts || 0) ? c : a));
     out.push({
       ...last,
       pnl: arr.reduce((s, c) => s + c.pnl, 0),
-      qty: Math.max(...arr.map((c) => c.qty)),
+      qty: arr.reduce((s, c) => s + (c.qty || 0), 0) || maxQty,
       closePx: last.closePx,
       entry: arr.find((c) => c.entry > 0)?.entry ?? last.entry,
       ts: Math.max(...arr.map((c) => c.ts || 0)),

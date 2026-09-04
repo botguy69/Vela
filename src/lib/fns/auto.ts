@@ -616,6 +616,26 @@ function applyWeexHit(hit: { pnl: number; closePx: number; qty?: number; ts?: nu
   return { pnl: hit.pnl, px, why, st };
 }
 
+function coalesceWeexHit(
+  cands: { symbol: string; side?: "long" | "short"; pnl: number; closePx: number; entry?: number; ts: number; qty?: number }[],
+  orig: number,
+) {
+  if (!cands.length) return null;
+  const full = [...cands]
+    .filter((c) => orig > 0 && (c.qty ?? 0) >= orig * 0.92)
+    .sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))[0];
+  if (full) return full;
+  const last = cands.reduce((a, c) => ((c.ts || 0) >= (a.ts || 0) ? c : a));
+  return {
+    ...last,
+    pnl: cands.reduce((s, c) => s + c.pnl, 0),
+    qty: Math.max(orig, cands.reduce((s, c) => s + (c.qty ?? 0), 0)),
+    closePx: last.closePx,
+    entry: cands.find((c) => (c.entry ?? 0) > 0)?.entry ?? last.entry,
+    ts: last.ts,
+  };
+}
+
 function matchWeexClose(
   row: {
     weex_symbol: string;
@@ -637,28 +657,22 @@ function matchWeexClose(
   const t1 = new Date(row.updated_at ?? row.filled_at ?? row.created_at).getTime();
   const tClose = t1 > t0 ? t1 : t0;
   const entry = n(row.fill_px) || n(row.entry);
+  const orig = origQty(row);
   const cands = closes.filter((c) => {
     if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
     if (c.side && c.side !== side) return false;
     const id = `${c.symbol}|${c.side ?? "?"}|${c.entry ?? 0}|${c.ts}|${c.pnl}`;
     if (used?.has(id)) return false;
-    if (c.ts && t0 > 0 && (c.ts < t0 - 30 * 60_000 || c.ts > tClose + 12 * 3600_000)) return false;
+    if (c.ts && t0 > 0 && (c.ts < t0 - 30 * 60_000 || c.ts > tClose + 14 * 3600_000)) return false;
     const ed = entry > 0 && c.entry && c.entry > 0 ? Math.abs(c.entry - entry) / entry : 0;
-    if (c.entry && c.entry > 0 && ed > 0.008) return false;
+    if (c.entry && c.entry > 0 && ed > 0.012) return false;
     return true;
   });
   if (!cands.length) return null;
-  cands.sort((a, b) => {
-    const da = Math.abs((a.ts || 0) - tClose);
-    const db = Math.abs((b.ts || 0) - tClose);
-    if (Math.abs(da - db) > 60_000) return da - db;
-    const ea = entry > 0 && (a.entry ?? 0) > 0 ? Math.abs((a.entry ?? 0) - entry) / entry : 1;
-    const eb = entry > 0 && (b.entry ?? 0) > 0 ? Math.abs((b.entry ?? 0) - entry) / entry : 1;
-    return ea - eb;
-  });
-  const top = cands[0]!;
-  used?.add(`${top.symbol}|${top.side ?? "?"}|${top.entry ?? 0}|${top.ts}|${top.pnl}`);
-  return top;
+  const hit = coalesceWeexHit(cands, orig);
+  if (!hit) return null;
+  for (const c of cands) used?.add(`${c.symbol}|${c.side ?? "?"}|${c.entry ?? 0}|${c.ts}|${c.pnl}`);
+  return hit;
 }
 
 async function restampWeexPnl(
