@@ -592,8 +592,8 @@ function whyFromWeex(
   const throughSl =
     origStop > 0 && px > 0 && (sd === "short" ? px >= origStop * 0.997 : px <= origStop * 1.003);
   const unit = oneRUsd(row);
-  if (throughTp2 || near(tp2 ?? 0) || (unit > 0.05 && hit.pnl >= 1.55 * unit)) return "Hit TP2";
-  if (Boolean(row.tp1_hit) && beLike && hit.pnl >= 0.15 && !(unit > 0.05 && hit.pnl >= 1.55 * unit)) {
+  if (throughTp2 || near(tp2 ?? 0) || (tp2 != null && unit > 0.05 && hit.pnl >= 1.15 * unit)) return "Hit TP2";
+  if (Boolean(row.tp1_hit) && beLike && hit.pnl >= 0.15 && !(unit > 0.05 && hit.pnl >= 1.15 * unit)) {
     return "TP1 then BE";
   }
   if (throughTp1 || near(tp1 ?? 0)) return atBe && hit.pnl >= 0 ? "TP1 then BE" : "Hit TP1";
@@ -740,6 +740,60 @@ async function restampWeexPnl(
       where id = ${row.id} and user_id = ${userId}
     `;
     notes.push(`${row.weex_symbol} WEEX ${book.pnl >= 0 ? "+" : ""}${book.pnl.toFixed(2)} · ${book.why}`);
+  }
+
+  const booked = await sql<SignalRow>`
+    select * from auto_signals
+    where user_id = ${userId}
+      and status in ('stopped','targeted','skipped')
+      and filled_at > now() - interval '7 days'
+      and filled_at is not null
+      and abs(coalesce(pnl, 0)) > 0.05
+  `;
+  const buckets = new Map<string, SignalRow[]>();
+  for (const r of booked) {
+    if (/^Limit |^Replaced by|^Cancelled|^Duplicate|^Ghost|^Stale/.test(String(r.close_reason ?? ""))) continue;
+    const t = new Date(r.filled_at ?? r.created_at).getTime();
+    const slot = Number.isFinite(t) ? Math.floor(t / (8 * 3600_000)) : 0;
+    const k = `${r.weex_symbol.replace(/_/g, "").toUpperCase()}|${r.side}|${slot}`;
+    const list = buckets.get(k) ?? [];
+    list.push(r);
+    buckets.set(k, list);
+  }
+  for (const group of buckets.values()) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => Math.abs(n(b.pnl)) - Math.abs(n(a.pnl)));
+    const keep = group[0]!;
+    const extras = group.slice(1);
+    const sumPnl = group.reduce((s, r) => s + n(r.pnl), 0);
+    const hit = matchWeexClose(keep, closes);
+    const pnl = hit && Math.abs(hit.pnl) >= Math.abs(sumPnl) - 0.2 ? hit.pnl : sumPnl;
+    const px = hit?.closePx || n(keep.closed_px);
+    const fake = { ...keep, pnl } as SignalRow;
+    const book = applyWeexHit(
+      { pnl, closePx: px, qty: Math.max(...group.map(origQty)), ts: hit?.ts },
+      fake,
+    );
+    await sql`
+      update auto_signals
+      set pnl = ${book.pnl},
+          closed_px = ${book.px || null},
+          close_reason = ${book.why},
+          status = ${book.st},
+          updated_at = now()
+      where id = ${keep.id} and user_id = ${userId}
+    `;
+    for (const extra of extras) {
+      await sql`
+        update auto_signals
+        set status = 'skipped',
+            close_reason = ${`Duplicate — merged into #${keep.id}`},
+            pnl = 0,
+            updated_at = now()
+        where id = ${extra.id} and user_id = ${userId}
+      `;
+    }
+    notes.push(`${keep.weex_symbol} merged ${group.length} closes → ${book.why} ${book.pnl >= 0 ? "+" : ""}${book.pnl.toFixed(2)}`);
   }
   return closes;
 }
