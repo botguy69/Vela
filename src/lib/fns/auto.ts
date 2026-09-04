@@ -905,7 +905,13 @@ async function ensureTakes(
   const beMove = stopOverride != null && stopOverride > 0 && !slOk;
   if (extras || listed.length > 3) {
     await cancelWeexProtective(creds, pos.weex_symbol, sideLc);
+    const after = await listWeexAlgoRows(creds, pos.weex_symbol);
     notes.push(`${pos.weex_symbol} wiped ${listed.length} leftover TP/SL`);
+    if (after.length > 3) {
+      notes.push(`${pos.weex_symbol} wipe incomplete (${after.length} still live) — not restating`);
+      await stampSet();
+      return;
+    }
   } else if (hasSet && !beMove) {
     return;
   }
