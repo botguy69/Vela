@@ -10,7 +10,7 @@ const globalRef = globalThis as typeof globalThis & {
 
 export function kickArmedTicks(): Promise<unknown> {
   if (globalRef.__velaTicking__) return globalRef.__velaTicking__;
-  globalRef.__velaTicking__ = (async () => {
+  const work = (async () => {
     try {
       const { getSql } = await import("@/lib/db");
       const { executeAutoTick } = await import("@/lib/fns/auto");
@@ -27,10 +27,14 @@ export function kickArmedTicks(): Promise<unknown> {
       }
     } catch (err) {
       console.warn("[auto-loop]", err);
-    } finally {
-      globalRef.__velaTicking__ = undefined;
     }
   })();
+  globalRef.__velaTicking__ = Promise.race([
+    work,
+    new Promise((resolve) => setTimeout(resolve, 45_000)),
+  ]).finally(() => {
+    globalRef.__velaTicking__ = undefined;
+  });
   return globalRef.__velaTicking__;
 }
 

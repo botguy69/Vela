@@ -906,10 +906,6 @@ async function ensureTakes(
   if (extras || listed.length > 3) {
     await cancelWeexProtective(creds, pos.weex_symbol, sideLc);
     notes.push(`${pos.weex_symbol} wiped ${listed.length} leftover TP/SL`);
-    if (recent && !beMove) {
-      await stampSet();
-      return;
-    }
   } else if (hasSet && !beMove) {
     return;
   }
