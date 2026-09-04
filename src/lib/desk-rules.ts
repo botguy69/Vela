@@ -496,8 +496,17 @@ export function limitMaxAgeMs(style: Style): number {
 /** Fills before this keep the old clock. Scalp fills still red after 12h flatten. Green / BE hold. */
 export const CHOP_V2_SINCE = Date.parse("2026-08-24T02:00:00.000Z");
 
-export function fillMaxAgeMs(style: Style): number {
-  return style === "scalp" ? 12 * 3600_000 : 12 * 3600_000;
+/** 8h on a 1R/85 scalp. 48h on 3R or 92% conf. Linear in between. */
+export function fillMaxAgeMs(rr = 1, conf = 85): number {
+  const r = Number.isFinite(rr) ? rr : 1;
+  const c = Number.isFinite(conf) ? conf : 85;
+  const rrT = Math.min(1, Math.max(0, (r - 1) / 2));
+  const cT = Math.min(1, Math.max(0, (c - 85) / 7));
+  return (8 + Math.max(rrT, cT) * 40) * 3600_000;
+}
+
+export function flattenHoursLabel(rr = 1, conf = 85): string {
+  return `${Math.round(fillMaxAgeMs(rr, conf) / 3600_000)}h`;
 }
 
 export function shouldCancelStaleLimit(createdAt: string | Date, style: Style): boolean {
@@ -506,7 +515,7 @@ export function shouldCancelStaleLimit(createdAt: string | Date, style: Style): 
   return Date.now() - t > limitMaxAgeMs(style);
 }
 
-/** Dead loser after 12h → flatten. Green / BE hold. */
+/** Clock from RR+conf. Nothing = under 0.4R. BE holds. */
 export function chopAction(opts: {
   since: string | Date;
   style: Style;
@@ -515,17 +524,19 @@ export function chopAction(opts: {
   last: number;
   stop: number;
   beMoved: boolean;
+  rr?: number;
+  conf?: number;
 }): "hold" | "flatten" {
   if (opts.beMoved) return "hold";
   const t = new Date(opts.since).getTime();
   if (!Number.isFinite(t)) return "hold";
   if (t < CHOP_V2_SINCE) return "hold";
   const age = Date.now() - t;
-  if (age < fillMaxAgeMs(opts.style)) return "hold";
+  if (age < fillMaxAgeMs(opts.rr ?? 1, opts.conf ?? 85)) return "hold";
   const risk = Math.abs(opts.entry - opts.stop);
   const favor = opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last;
   const r = risk > 0 ? favor / risk : 0;
-  if (r >= 0) return "hold";
+  if (r >= 0.4) return "hold";
   return "flatten";
 }
 

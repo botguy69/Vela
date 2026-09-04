@@ -2006,6 +2006,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ) {
         const tpsLive = parseNums(pos.targets);
         const tp1Live = tpsLive[0] ?? n(pos.target);
+        const ticketRr = n(pos.rr);
+        const ticketConf = n(pos.confidence);
         let act = rules.chopAction({
           since,
           style,
@@ -2014,6 +2016,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           last: px,
           stop,
           beMoved: Boolean(pos.be_moved),
+          rr: ticketRr,
+          conf: ticketConf,
         });
         let leftover = false;
         if (
@@ -2061,7 +2065,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           continue;
         }
         const pnl = side === "long" ? (px - entry) * n(pos.qty) : (entry - px) * n(pos.qty);
-        const hours = "12h";
+        const hours = rules.flattenHoursLabel(ticketRr, ticketConf);
         const why = leftover
           ? pnl >= 0
             ? "Sold to move on — chop between TP1 and BE"
