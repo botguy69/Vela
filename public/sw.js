@@ -1,5 +1,5 @@
 /* VELA network-first worker. Never freeze HTML. */
-const BUILD = "20260820b";
+const BUILD = "20260904h";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -15,11 +15,14 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
-  event.respondWith(
-    fetch(req, { cache: "no-store" }).catch(() => caches.match(req)),
-  );
+  const dest = req.destination;
+  if (dest === "document" || dest === "empty") {
+    event.respondWith(fetch(req, { cache: "no-store" }));
+    return;
+  }
+  event.respondWith(fetch(req, { cache: "no-store" }).catch(() => caches.match(req)));
 });
 
 self.addEventListener("message", (event) => {
-  if (event.data === "vela-skip") self.skipWaiting();
+  if (event.data === "vela-skip" || event.data === BUILD) self.skipWaiting();
 });

@@ -62,10 +62,13 @@ export function AutoDesk() {
   });
 
   useEffect(() => {
-    if (!s?.armed) return;
-    const id = window.setInterval(() => tick.mutate(), 18_000);
+    if (!s?.armed || hosted) return;
+    const id = window.setInterval(() => {
+      if (tick.isPending) return;
+      tick.mutate();
+    }, 18_000);
     return () => window.clearInterval(id);
-  }, [s?.armed]);
+  }, [s?.armed, hosted, tick.isPending]);
 
   return (
     <div className="min-h-dvh bg-bg">

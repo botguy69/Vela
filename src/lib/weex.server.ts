@@ -608,7 +608,7 @@ export async function moveWeexStop(
       clientAlgoId: order.clientOid.slice(0, 36),
       planType: "STOP_LOSS",
       triggerPrice: order.stop,
-      quantity: order.quantity && Number(order.quantity) > 0 ? order.quantity : "0",
+      quantity: "0",
       positionSide: order.positionSide,
       triggerPriceType: "MARK_PRICE",
       reduceOnly: true,
@@ -628,26 +628,44 @@ export async function cancelWeexOrder(
   });
 }
 
+function pairIds(symbol: string): string[] {
+  const raw = symbol.replace(/^cmt_/i, "").replace(/_/g, "");
+  const u = raw.toUpperCase();
+  const base = u.replace(/USDT$/i, "").toLowerCase();
+  return [...new Set([u, `cmt_${base}usdt`, symbol])];
+}
+
 export async function cancelWeexProtective(
   creds: WeexCreds,
   symbol: string,
   _holdSide?: "long" | "short",
 ) {
-  await weexRequest({ creds, method: "DELETE", path: "/capi/v3/algoOpenOrders", query: { symbol } });
-  await weexRequest({ creds, method: "DELETE", path: "/capi/v3/allOpenOrders", query: { symbol } });
+  const jobs: Promise<unknown>[] = [];
+  for (const s of pairIds(symbol)) {
+    jobs.push(weexRequest({ creds, method: "DELETE", path: "/capi/v3/algoOpenOrders", query: { symbol: s } }));
+    jobs.push(weexRequest({ creds, method: "DELETE", path: "/capi/v3/allOpenOrders", query: { symbol: s } }));
+    jobs.push(weexRequest({ creds, method: "DELETE", path: "/capi/v3/openOrders", query: { symbol: s } }));
+  }
+  await Promise.all(jobs.map((p) => p.catch(() => null)));
   const left = await listWeexAlgoRows(creds, symbol);
   if (left.length) await cancelAlgoIds(creds, symbol, left.map((r) => r.id));
 }
 
 async function cancelAlgoIds(creds: WeexCreds, symbol: string, ids: string[]) {
-  const uniq = [...new Set(ids.filter((id) => id && id !== "undefined"))].slice(0, 12);
-  for (let i = 0; i < uniq.length; i += 4) {
-    const chunk = uniq.slice(i, i + 4);
+  const uniq = [...new Set(ids.filter((id) => id && id !== "undefined"))].slice(0, 80);
+  for (let i = 0; i < uniq.length; i += 8) {
+    const chunk = uniq.slice(i, i + 8);
     await Promise.all(
       chunk.map((id) =>
         Promise.all([
           weexRequest({ creds, method: "DELETE", path: "/capi/v3/algoOrder", query: { orderId: id } }),
           weexRequest({ creds, method: "DELETE", path: "/capi/v3/order", query: { symbol, orderId: id } }),
+          weexRequest({
+            creds,
+            method: "POST",
+            path: "/capi/v2/order/cancel_order",
+            body: { orderId: id, clientOid: id },
+          }),
         ]).catch(() => null),
       ),
     );
@@ -658,11 +676,13 @@ export async function listWeexAlgoRows(
   creds: WeexCreds,
   symbol: string,
 ): Promise<{ id: string; type: string; trigger: number; posSide: string; qty: number }[]> {
-  const paths: { path: string; query: Record<string, string> }[] = [
-    { path: "/capi/v3/openAlgoOrders", query: { symbol } },
-    { path: "/capi/v3/openOrders", query: { symbol } },
-    { path: "/capi/v2/order/currentPlan", query: { symbol } },
-  ];
+  const paths: { path: string; query: Record<string, string> }[] = [];
+  for (const s of pairIds(symbol)) {
+    paths.push({ path: "/capi/v3/openAlgoOrders", query: { symbol: s } });
+    paths.push({ path: "/capi/v3/openOrders", query: { symbol: s } });
+    paths.push({ path: "/capi/v2/order/currentPlan", query: { symbol: s, limit: "100", page: "0" } });
+    paths.push({ path: "/capi/v2/order/currentPlan", query: { symbol: s, limit: "100", page: "1" } });
+  }
   const out: { id: string; type: string; trigger: number; posSide: string; qty: number }[] = [];
   const seen = new Set<string>();
   const replies = await Promise.all(
@@ -680,14 +700,17 @@ export async function listWeexAlgoRows(
         .replace(/_USDT|_BOTH/g, "");
       if (!pos.includes("LONG") && !pos.includes("SHORT")) {
         const reduce = o.reduceOnly === true || String(o.reduceOnly ?? "") === "true";
-        const sd = String(o.side ?? o.tradeSide ?? "").toUpperCase();
-        if (reduce && (sd === "SELL" || sd.includes("CLOSE_LONG"))) pos = "LONG";
-        else if (reduce && (sd === "BUY" || sd.includes("CLOSE_SHORT"))) pos = "SHORT";
+        const sd = String(o.side ?? o.tradeSide ?? o.type ?? "").toUpperCase();
+        if (reduce && (sd === "SELL" || sd.includes("CLOSE_LONG") || sd === "3" || sd === "5")) pos = "LONG";
+        else if (reduce && (sd === "BUY" || sd.includes("CLOSE_SHORT") || sd === "4" || sd === "6")) pos = "SHORT";
+        else if (sd === "3" || sd === "5") pos = "LONG";
+        else if (sd === "4" || sd === "6") pos = "SHORT";
       }
+      const plan = String(o.planType ?? o.type ?? o.orderType ?? "");
       out.push({
         id,
-        type: String(o.planType ?? o.type ?? o.orderType ?? o.workingType ?? o.tpslMode ?? ""),
-        trigger: Number(o.triggerPrice ?? o.stopPrice ?? o.executePrice ?? o.price ?? 0),
+        type: plan,
+        trigger: Number(o.triggerPrice ?? o.stopPrice ?? o.executePrice ?? o.price ?? o.presetTakeProfitPrice ?? o.presetStopLossPrice ?? 0),
         posSide: pos.includes("SHORT") ? "SHORT" : pos.includes("LONG") ? "LONG" : "",
         qty: Number(o.quantity ?? o.size ?? o.orderQty ?? o.qty ?? o.volume ?? o.sz ?? 0),
       });

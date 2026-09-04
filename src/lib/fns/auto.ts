@@ -905,11 +905,10 @@ async function ensureTakes(
   const beMove = stopOverride != null && stopOverride > 0 && !slOk;
   if (extras || listed.length > 3) {
     await cancelWeexProtective(creds, pos.weex_symbol, sideLc);
-    const after = await listWeexAlgoRows(creds, pos.weex_symbol);
-    notes.push(`${pos.weex_symbol} wiped ${listed.length} leftover TP/SL`);
+    const after = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => [] as typeof listed);
+    notes.push(`${pos.weex_symbol} wiped ${listed.length} → ${after.length} leftover TP/SL`);
     if (after.length > 3) {
-      notes.push(`${pos.weex_symbol} wipe incomplete (${after.length} still live) — not restating`);
-      await stampSet();
+      notes.push(`${pos.weex_symbol} still ${after.length} on WEEX — wipe continues next tick, not restating`);
       return;
     }
   } else if (hasSet && !beMove) {
@@ -1207,11 +1206,9 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     const live = pulled.live;
     let livePos: Awaited<ReturnType<typeof import("@/lib/weex.server").listWeexPositions>> | null = null;
     const creds = settings ? await credsFrom(settings) : null;
-    let weexCloses: Awaited<ReturnType<typeof restampWeexPnl>> | [] = [];
     if (creds) {
       const { listWeexPositions } = await import("@/lib/weex.server");
       livePos = await listWeexPositions(creds).catch(() => null);
-      weexCloses = await restampWeexPnl(sql, context.userId, creds, []);
     }
     if (settings && live) {
       const peak = Math.max(n(settings.peak_usd) || live.equity, live.equity);
