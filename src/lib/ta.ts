@@ -528,12 +528,14 @@ export function shouldLockBreakeven(opts: {
 }): boolean {
   if (opts.already || opts.entry <= 0 || !(opts.stop > 0)) return false;
   if (opts.reduced) return true;
-  if ((opts.mfeR ?? 0) >= 0.8) return true;
   if (!(opts.last > 0)) return false;
   const tp1 = opts.targets[0];
   if (tp1 > 0 && (opts.side === "long" ? opts.last >= tp1 * 0.999 : opts.last <= tp1 * 1.001)) return true;
   const risk = Math.abs(opts.entry - opts.stop);
   if (!(risk > 0)) return false;
-  const run = opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last;
-  return run >= 0.8 * risk;
+  const run = (opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last) / risk;
+  const mfe = opts.mfeR ?? 0;
+  if (run >= 1) return true;
+  if (mfe >= 1.2 && run >= 0.7) return true;
+  return false;
 }

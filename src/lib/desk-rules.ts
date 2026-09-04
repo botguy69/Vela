@@ -456,10 +456,13 @@ export function closedCandles(candles: Candle[], intervalMs: number): Candle[] {
   return candles.filter((c) => openMs(c.time) <= cutoff);
 }
 
-export function sizeMult(weex: string): number {
-  if (weex === "BTCUSDT" || weex === "ETHUSDT") return 1;
-  if (weex === "BNBUSDT" || weex === "XRPUSDT" || weex === "SOLUSDT") return 0.7;
-  return 0.45;
+/** 0.65–1.0 of phase margin. 1R/85% smaller; 3R or 92% full 3%. Always max lev. */
+export function ticketSizeMult(conf: number, rr: number): number {
+  const c = Number.isFinite(conf) ? conf : 85;
+  const r = Number.isFinite(rr) ? rr : 1;
+  const cT = Math.min(1, Math.max(0, (c - 85) / 7));
+  const rT = Math.min(1, Math.max(0, (r - 1) / 2));
+  return 0.65 + 0.35 * Math.max(cT, rT);
 }
 
 export function spreadTooWide(weex: string, bid: number, ask: number): boolean {
