@@ -136,7 +136,10 @@ function oneRUsd(row: {
   be_moved?: boolean | null;
   rr?: string | number | null;
   target?: string | number | null;
+  risk_usd?: string | number | null;
 }): number {
+  const risk = n(row.risk_usd);
+  if (risk >= 0.2) return risk;
   const e = n(row.fill_px) || n(row.entry);
   const q = origQty(row);
   if (!(e > 0) || !(q > 0)) return 0;
@@ -593,11 +596,8 @@ function whyFromWeex(
     origStop > 0 && px > 0 && (sd === "short" ? px >= origStop * 0.997 : px <= origStop * 1.003);
   const unit = oneRUsd(row);
   if (throughTp2 || near(tp2 ?? 0) || (tp2 != null && unit > 0.05 && hit.pnl >= 1.15 * unit)) return "Hit TP2";
-  if (Boolean(row.tp1_hit) && beLike && hit.pnl >= 0.15 && !(unit > 0.05 && hit.pnl >= 1.15 * unit)) {
-    return "TP1 then BE";
-  }
-  if (throughTp1 || near(tp1 ?? 0)) return atBe && hit.pnl >= 0 ? "TP1 then BE" : "Hit TP1";
-  if (hit.pnl >= 0 && (beLike || Boolean(row.tp1_hit))) return "TP1 then BE";
+  if ((throughTp1 || near(tp1 ?? 0)) && !atBe) return "Hit TP1";
+  if (atBe && hit.pnl >= 0.15 && (beLike || Boolean(row.tp1_hit))) return "TP1 then BE";
   if (throughSl || (origStop > 0 && near(origStop, 0.008) && hit.pnl < 0)) return "Hit stop";
   const t0 = new Date(row.filled_at ?? row.created_at ?? 0).getTime();
   const heldH = t0 > 0 && hit.ts ? (hit.ts - t0) / 3600_000 : 0;
