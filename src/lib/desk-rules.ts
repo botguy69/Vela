@@ -842,6 +842,52 @@ export function mtfAllows(
   return { ok: true, why: "" };
 }
 
+/** Under 75x, a 0.6–1R scalp is toy PnL. Need 2–3% SL and ~10% room or skip. */
+export const LOW_LEV_MAX = 75;
+
+export function swingWorthIt(
+  maxLev: number,
+  side: Side,
+  entry: number,
+  stop: number,
+  fourHour: Candle[],
+): { ok: boolean; tp: number; why: string } {
+  if (maxLev >= LOW_LEV_MAX) return { ok: true, tp: 0, why: "" };
+  if (!(entry > 0) || !(stop > 0)) return { ok: false, tp: 0, why: `${maxLev}x no stop` };
+  const stopPct = Math.abs(entry - stop) / entry;
+  if (stopPct < 0.018 || stopPct > 0.035) {
+    return {
+      ok: false,
+      tp: 0,
+      why: `${maxLev}x stop ${(stopPct * 100).toFixed(1)}% — need 2–3% and 10% room`,
+    };
+  }
+  const want = side === "long" ? entry * 1.1 : entry * 0.9;
+  const closed = closedCandles(fourHour, FOUR_H_MS);
+  const bars = closed.length >= 8 ? closed : fourHour;
+  let tp = want;
+  if (bars.length >= 8) {
+    const win = bars.slice(-21);
+    const sh = Math.max(...win.map((c) => c.high));
+    const sl = Math.min(...win.map((c) => c.low));
+    const a = atr(bars, 14) ?? 0;
+    if (side === "long") {
+      const cap = sh - 0.2 * a;
+      const room = (cap - entry) / entry;
+      if (room < 0.08) return { ok: false, tp: 0, why: `${maxLev}x no 8%+ to 4h supply` };
+      tp = Math.min(want, cap);
+    } else {
+      const cap = sl + 0.2 * a;
+      const room = (entry - cap) / entry;
+      if (room < 0.08) return { ok: false, tp: 0, why: `${maxLev}x no 8%+ to 4h demand` };
+      tp = Math.max(want, cap);
+    }
+  }
+  const rr = Math.abs(tp - entry) / Math.abs(entry - stop);
+  if (rr < 3) return { ok: false, tp: 0, why: `${maxLev}x RR ${rr.toFixed(1)} < 3` };
+  return { ok: true, tp, why: `${maxLev}x 10% / 2–3% SL` };
+}
+
 /** 1R would print into 4h demand/supply — skip. ONDO TP sat on the 4h low. */
 export function targetIntoLocation(
   side: Side,
