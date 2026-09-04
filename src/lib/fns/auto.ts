@@ -604,7 +604,14 @@ function whyFromWeex(
 }
 
 function applyWeexHit(hit: { pnl: number; closePx: number; qty?: number; ts?: number }, row: SignalRow) {
-  const px = hit.closePx > 0 ? hit.closePx : n(row.closed_px);
+  const entry = n(row.fill_px) || n(row.entry);
+  const q = Math.max(origQty(row), hit.qty ?? 0);
+  let px = hit.closePx > 0 ? hit.closePx : n(row.closed_px);
+  if (entry > 0 && q > 0 && Math.abs(hit.pnl) >= 0.2) {
+    const implied = row.side === "short" ? entry - hit.pnl / q : entry + hit.pnl / q;
+    const glued = !(px > 0) || Math.abs(px - entry) / entry < 0.0025;
+    if (glued && Math.abs(implied - entry) / entry > 0.003) px = implied;
+  }
   const why = whyFromWeex(hit, row, px);
   const st = why.startsWith("Time stop")
     ? "skipped"
@@ -621,17 +628,22 @@ function coalesceWeexHit(
   orig: number,
 ) {
   if (!cands.length) return null;
-  const full = [...cands]
-    .filter((c) => orig > 0 && (c.qty ?? 0) >= orig * 0.92)
-    .sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))[0];
-  if (full) return full;
-  const last = cands.reduce((a, c) => ((c.ts || 0) >= (a.ts || 0) ? c : a));
+  const real = cands.filter((c) => Math.abs(c.pnl) >= 0.05);
+  const pool = real.length ? real : cands;
+  const byPnl = [...pool].sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
+  const maxQty = Math.max(orig, ...pool.map((c) => c.qty ?? 0));
+  const entire = byPnl.find((c) => maxQty > 0 && (c.qty ?? 0) >= maxQty * 0.9);
+  if (entire && Math.abs(entire.pnl) >= 0.05) return entire;
+  const full = byPnl.find((c) => orig > 0 && (c.qty ?? 0) >= orig * 0.92);
+  if (full && Math.abs(full.pnl) >= 0.05) return full;
+  if (byPnl[0] && Math.abs(byPnl[0].pnl) >= 0.05 && pool.length === 1) return byPnl[0];
+  const last = pool.reduce((a, c) => ((c.ts || 0) >= (a.ts || 0) ? c : a));
   return {
     ...last,
-    pnl: cands.reduce((s, c) => s + c.pnl, 0),
-    qty: Math.max(orig, cands.reduce((s, c) => s + (c.qty ?? 0), 0)),
-    closePx: last.closePx,
-    entry: cands.find((c) => (c.entry ?? 0) > 0)?.entry ?? last.entry,
+    pnl: pool.reduce((s, c) => s + c.pnl, 0),
+    qty: Math.max(orig, pool.reduce((s, c) => s + (c.qty ?? 0), 0)),
+    closePx: last.closePx || byPnl[0]?.closePx || 0,
+    entry: pool.find((c) => (c.entry ?? 0) > 0)?.entry ?? last.entry,
     ts: last.ts,
   };
 }
@@ -665,7 +677,7 @@ function matchWeexClose(
     if (used?.has(id)) return false;
     if (c.ts && t0 > 0 && (c.ts < t0 - 30 * 60_000 || c.ts > tClose + 14 * 3600_000)) return false;
     const ed = entry > 0 && c.entry && c.entry > 0 ? Math.abs(c.entry - entry) / entry : 0;
-    if (c.entry && c.entry > 0 && ed > 0.012) return false;
+    if (c.entry && c.entry > 0 && ed > 0.02) return false;
     return true;
   });
   if (!cands.length) return null;
@@ -691,30 +703,35 @@ async function restampWeexPnl(
       and filled_at > now() - interval '7 days'
   `;
   const used = new Set<string>();
+  rows.sort((a, b) => Math.abs(n(b.pnl)) - Math.abs(n(a.pnl)));
   for (const row of rows) {
-    if (/^Limit |^Duplicate|^Replaced by|^Cancelled/.test(String(row.close_reason ?? ""))) continue;
-    const hit = matchWeexClose(row, closes, used);
-    if (!hit) {
-      const entry = n(row.fill_px) || n(row.entry);
-      const ghost = closes.find((c) => {
-        if (c.symbol.replace(/_/g, "").toUpperCase() !== row.weex_symbol.replace(/_/g, "").toUpperCase()) return false;
-        if (c.side && c.side !== (row.side === "short" ? "short" : "long")) return false;
-        const ed = entry > 0 && (c.entry ?? 0) > 0 ? Math.abs((c.entry ?? 0) - entry) / entry : 1;
-        return ed <= 0.008;
-      });
-      if (ghost && Math.abs(n(row.pnl) - ghost.pnl) > 1) {
-        await sql`
-          update auto_signals
-          set pnl = 0,
-              close_reason = ${"Duplicate WEEX fill"},
-              status = 'skipped',
-              updated_at = now()
-          where id = ${row.id} and user_id = ${userId}
-        `;
-        notes.push(`${row.weex_symbol} duplicate ticket — dropped from WR`);
+    if (/^Limit |^Replaced by|^Cancelled/.test(String(row.close_reason ?? ""))) continue;
+    let hit = matchWeexClose(row, closes, used);
+    if (!hit || Math.abs(hit.pnl) < 0.05) {
+      const ghost = matchWeexClose(row, closes);
+      if (ghost && Math.abs(ghost.pnl) >= 0.05) {
+        const sib = rows.filter(
+          (r) =>
+            r.id !== row.id &&
+            r.weex_symbol.replace(/_/g, "").toUpperCase() === row.weex_symbol.replace(/_/g, "").toUpperCase() &&
+            (r.side === "short" ? "short" : "long") === (row.side === "short" ? "short" : "long") &&
+            Math.abs(n(r.pnl) - ghost.pnl) < 0.5 &&
+            r.status !== "skipped",
+        );
+        if (sib.length && Math.abs(n(row.pnl)) < 0.2) {
+          if (!/^Duplicate/.test(String(row.close_reason ?? ""))) {
+            await sql`
+              update auto_signals
+              set pnl = 0, close_reason = ${"Duplicate WEEX fill"}, status = 'skipped', updated_at = now()
+              where id = ${row.id} and user_id = ${userId}
+            `;
+          }
+          continue;
+        }
+        hit = ghost;
       }
-      continue;
     }
+    if (!hit || Math.abs(hit.pnl) < 0.05) continue;
     const book = applyWeexHit(hit, row);
     if (
       Math.abs(book.pnl - n(row.pnl)) < 0.05 &&
@@ -1966,10 +1983,29 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         }
       }
       if (pos.status === "filled" && left === 0) {
-        const hit = matchWeexClose(pos, weexCloses);
-        const book = hit
+        let hit = matchWeexClose(pos, weexCloses);
+        if ((!hit || Math.abs(hit.pnl) < 0.05) && credsNow) {
+          const { listWeexClosedPnl } = await import("@/lib/weex.server");
+          const extra = await listWeexClosedPnl(credsNow, pos.weex_symbol).catch(() => []);
+          hit = matchWeexClose(pos, extra) ?? hit;
+        }
+        let book = hit && Math.abs(hit.pnl) >= 0.05
           ? applyWeexHit(hit, pos)
-          : { pnl: 0, px, why: "Closed on WEEX", st: "skipped" as const };
+          : null;
+        if (!book) {
+          const q = origQty(pos);
+          const est = q > 0 && entry > 0 ? (side === "short" ? (entry - px) * q : (px - entry) * q) : 0;
+          if (Math.abs(est) < 0.15) {
+            notes.push(`${pos.weex_symbol} closed on WEEX — waiting PnL`);
+            continue;
+          }
+          book = {
+            pnl: est,
+            px,
+            why: est >= 0 ? "Hit TP1" : "Hit stop",
+            st: (est >= 0 ? "targeted" : "stopped") as "targeted" | "stopped",
+          };
+        }
         await sql`
           update auto_signals
           set status = ${book.st}, closed_px = ${book.px || px}, pnl = ${book.pnl}, close_reason = ${book.why}, updated_at = now()
