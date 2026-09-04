@@ -242,7 +242,16 @@ function parsePosition(row: unknown): {
     r.uPnL,
   );
   const mark = numField(r.markPrice, r.marketPrice, r.lastPrice, r.mark) ?? 0;
-  const bePx = numField(r.breakEvenPrice, r.breakevenPrice, r.breakEven, r.avgBreakEvenPrice) ?? 0;
+  const bePx =
+    numField(
+      r.breakEvenPrice,
+      r.breakevenPrice,
+      r.breakEven,
+      r.avgBreakEvenPrice,
+      r.breakEvenPx,
+      r.bePrice,
+      r.breakevenPx,
+    ) ?? 0;
   if (Number.isFinite(entry) && entry > 0 && q * entry < 0.05) return null;
   let pnl = rawPnl;
   if (pnl == null && mark > 0 && entry > 0) {

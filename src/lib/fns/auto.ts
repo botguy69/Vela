@@ -180,9 +180,11 @@ function livePhase(
 }
 
 function feeBePx(side: "long" | "short", entry: number, _mark: number, weexBe: number): number {
-  const raw = weexBe > 0 ? weexBe : side === "long" ? entry * 1.002 : entry * 0.998;
-  if (side === "long") return Math.max(raw, entry * 1.0004);
-  return Math.min(raw, entry * 0.9996);
+  if (weexBe > 0) {
+    if (side === "long" && weexBe >= entry) return weexBe;
+    if (side === "short" && weexBe <= entry) return weexBe;
+  }
+  return side === "long" ? entry * 1.002 : entry * 0.998;
 }
 
 function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
