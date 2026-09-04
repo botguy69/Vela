@@ -1,5 +1,5 @@
 /* VELA network-first worker. Never freeze HTML. */
-const BUILD = "20260904h";
+const BUILD = "20260904i";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

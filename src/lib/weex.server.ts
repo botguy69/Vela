@@ -67,7 +67,7 @@ export async function weexRequest<T>(opts: {
   }
   try {
     const ac = new AbortController();
-    const to = setTimeout(() => ac.abort(), 8000);
+    const to = setTimeout(() => ac.abort(), 4000);
     const res = await fetch(url, {
       method: opts.method,
       headers,
@@ -296,27 +296,34 @@ function positionQtyFrom(raw: unknown, symbol: string): number | null {
   return hit?.qty ?? null;
 }
 
+const posMemo = new Map<
+  string,
+  {
+    at: number;
+    data: { symbol: string; side: "long" | "short"; qty: number; entry: number; pnl: number | null; mark: number; bePx: number }[] | null;
+  }
+>();
+
 export async function listWeexPositions(
   creds: WeexCreds,
 ): Promise<{ symbol: string; side: "long" | "short"; qty: number; entry: number; pnl: number | null; mark: number; bePx: number }[] | null> {
+  const memo = posMemo.get(creds.apiKey);
+  if (memo && Date.now() - memo.at < 8000) return memo.data;
   const paths = [
-    { path: "/capi/v3/account/position/allPosition", query: undefined as Record<string, string> | undefined },
-    { path: "/capi/v3/account/position/singlePosition", query: undefined },
-    { path: "/capi/v3/account/positions", query: undefined },
-    { path: "/capi/v3/account/positions", query: { productType: "USDT-FUTURES" } },
-    { path: "/capi/v3/account/positions", query: { marginCoin: "USDT" } },
-    { path: "/capi/v3/positionRisk", query: undefined },
-    { path: "/capi/v3/position/open", query: undefined },
-    { path: "/capi/v2/position", query: undefined },
-    { path: "/capi/v2/account/positions", query: undefined },
+    "/capi/v3/account/position/allPosition",
+    "/capi/v3/positionRisk",
+    "/capi/v3/account/positions",
+    "/capi/v2/account/positions",
   ];
+  const replies = await Promise.all(
+    paths.map((path) => weexRequest<unknown>({ creds, method: "GET", path })),
+  );
   let sawOk = false;
   const uniq = new Map<
     string,
     { symbol: string; side: "long" | "short"; qty: number; entry: number; pnl: number | null; mark: number; bePx: number }
   >();
-  for (const p of paths) {
-    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
+  for (const res of replies) {
     if (!res.ok) continue;
     sawOk = true;
     const parsed = rowsFrom(res.data).map(parsePosition).filter((x): x is NonNullable<typeof x> => x != null);
@@ -333,8 +340,9 @@ export async function listWeexPositions(
       }
     }
   }
-  if (uniq.size) return [...uniq.values()];
-  return sawOk ? [] : null;
+  const data = uniq.size ? [...uniq.values()] : sawOk ? [] : null;
+  posMemo.set(creds.apiKey, { at: Date.now(), data });
+  return data;
 }
 
 export type WeexClose = {
@@ -427,8 +435,10 @@ export async function listWeexClosedPnl(creds: WeexCreds, symbol?: string): Prom
     { path: "/capi/v3/userTrades", query: q() },
     { path: "/capi/v3/income", query: { incomeType: "REALIZED_PNL", limit: "100", ...(sym ? { symbol: sym } : {}) } },
   ];
-  for (const p of paths) {
-    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
+  const replies = await Promise.all(
+    paths.map((p) => weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query })),
+  );
+  for (const res of replies) {
     if (!res.ok) continue;
     const batch: WeexClose[] = [];
     const seen = new Set<string>();
@@ -647,7 +657,11 @@ export async function cancelWeexProtective(
     jobs.push(weexRequest({ creds, method: "DELETE", path: "/capi/v3/openOrders", query: { symbol: s } }));
   }
   await Promise.all(jobs.map((p) => p.catch(() => null)));
-  const left = await listWeexAlgoRows(creds, symbol);
+  let left = await listWeexAlgoRows(creds, symbol);
+  if (left.length > 3) {
+    await weexRequest({ creds, method: "DELETE", path: "/capi/v3/algoOpenOrders" }).catch(() => null);
+    left = await listWeexAlgoRows(creds, symbol);
+  }
   if (left.length) await cancelAlgoIds(creds, symbol, left.map((r) => r.id));
 }
 
@@ -678,10 +692,10 @@ export async function listWeexAlgoRows(
 ): Promise<{ id: string; type: string; trigger: number; posSide: string; qty: number }[]> {
   const paths: { path: string; query: Record<string, string> }[] = [];
   for (const s of pairIds(symbol)) {
+    paths.push({ path: "/capi/v3/algoOpenOrders", query: { symbol: s } });
     paths.push({ path: "/capi/v3/openAlgoOrders", query: { symbol: s } });
     paths.push({ path: "/capi/v3/openOrders", query: { symbol: s } });
     paths.push({ path: "/capi/v2/order/currentPlan", query: { symbol: s, limit: "100", page: "0" } });
-    paths.push({ path: "/capi/v2/order/currentPlan", query: { symbol: s, limit: "100", page: "1" } });
   }
   const out: { id: string; type: string; trigger: number; posSide: string; qty: number }[] = [];
   const seen = new Set<string>();
