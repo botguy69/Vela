@@ -591,14 +591,18 @@ function whyFromWeex(
     tp1 != null && px > 0 && (sd === "short" ? px <= tp1 * 1.004 : px >= tp1 * 0.996);
   const throughSl =
     origStop > 0 && px > 0 && (sd === "short" ? px >= origStop * 0.997 : px <= origStop * 1.003);
-  if (throughTp2 || near(tp2 ?? 0)) return "Hit TP2";
+  const unit = oneRUsd(row);
+  if (throughTp2 || near(tp2 ?? 0) || (unit > 0.05 && hit.pnl >= 1.55 * unit)) return "Hit TP2";
+  if (Boolean(row.tp1_hit) && beLike && hit.pnl >= 0.15 && !(unit > 0.05 && hit.pnl >= 1.55 * unit)) {
+    return "TP1 then BE";
+  }
   if (throughTp1 || near(tp1 ?? 0)) return atBe && hit.pnl >= 0 ? "TP1 then BE" : "Hit TP1";
-  if (hit.pnl >= 0 && beLike && atBe) return "TP1 then BE";
+  if (hit.pnl >= 0 && (beLike || Boolean(row.tp1_hit))) return "TP1 then BE";
   if (throughSl || (origStop > 0 && near(origStop, 0.008) && hit.pnl < 0)) return "Hit stop";
   const t0 = new Date(row.filled_at ?? row.created_at ?? 0).getTime();
   const heldH = t0 > 0 && hit.ts ? (hit.ts - t0) / 3600_000 : 0;
   if (heldH >= 5 && Math.abs(hit.pnl) < 0.5) return "Time stop — flattened";
-  if (hit.pnl >= 0.15) return "Closed in green";
+  if (hit.pnl >= 0.15) return unit > 0.05 && hit.pnl >= 0.85 * unit ? "Hit TP1" : "Closed in green";
   if (hit.pnl <= -0.05) return "Flattened";
   return "Closed on WEEX";
 }
@@ -962,6 +966,27 @@ async function resurrectLive(
       continue;
     }
     if (row.status === "stopped" || row.status === "targeted" || row.status === "skipped") {
+      if (Math.abs(n(row.pnl)) >= 0.15) {
+        notes.push(`${key} already booked ${n(row.pnl).toFixed(2)} — not reopening`);
+        if (creds && p.qty > 0) {
+          const orig = origQty(row);
+          if (orig > 0 && p.qty <= orig * 0.12) {
+            const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
+            const { specFor, formatWeexQty } = await import("@/lib/weex-market.server");
+            const { coinByWeex } = await import("@/lib/universe");
+            await cancelWeexProtective(creds, key).catch(() => null);
+            const spec = await specFor(coinByWeex(key));
+            await flattenWeex(creds, {
+              symbol: key,
+              side: side === "short" ? "BUY" : "SELL",
+              positionSide: side === "short" ? "SHORT" : "LONG",
+              quantity: formatWeexQty(p.qty, spec.quantityPrecision),
+              clientOid: `veladust${row.id}${Date.now().toString(36)}`.slice(0, 36),
+            }).catch(() => null);
+          }
+        }
+        continue;
+      }
       const when = new Date(row.filled_at ?? row.created_at).getTime();
       if (Number.isFinite(when) && Date.now() - when > 30 * 60_000) continue;
     }
@@ -2730,6 +2755,20 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             `;
             if (pairLoss) {
               whyNot.push(`${tag} same pair lost in 6h — skip`);
+              continue;
+            }
+            const [pairClosed] = await sql<{ id: number }>`
+              select id from auto_signals
+              where user_id = ${userId}
+                and weex_symbol = ${pick.weexSymbol}
+                and status in ('stopped','targeted','skipped')
+                and filled_at is not null
+                and abs(coalesce(pnl, 0)) > 0.05
+                and updated_at > now() - interval '3 hours'
+              limit 1
+            `;
+            if (pairClosed) {
+              whyNot.push(`${tag} same pair just closed — 3h pause`);
               continue;
             }
             if (parked && parked.weex_symbol === pick.weexSymbol && parked.side === pick.side) {

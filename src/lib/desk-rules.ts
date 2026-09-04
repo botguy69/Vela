@@ -264,22 +264,30 @@ export function ltfTrigger(
       return { ok: false, wait: false, reason: "15m above VWAP — no short", pullback: null };
     }
   }
+  const rejectHigh = lastBar.close < lastBar.open;
+  const rejectLow = lastBar.close > lastBar.open;
   if (side === "long") {
-    if (last < e21 - 0.7 * a) {
+    if (last < e21 - 0.7 * a && !atLow) {
       return { ok: false, wait: false, reason: "15m still dumping", pullback: null };
     }
-    if (last > e21 + 0.35 * a && !reclaim) {
+    if (atLow && !rejectLow) {
+      return { ok: false, wait: true, reason: "wait bounce at 15m low", pullback: sl15 };
+    }
+    if (last > e21 + 0.35 * a && !reclaim && !atLow) {
       return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
     }
-    return { ok: true, wait: false, reason: reclaim ? "VWAP reclaim" : "15m pullback + VWAP", pullback: mean };
+    return { ok: true, wait: false, reason: reclaim ? "VWAP reclaim" : atLow ? "15m low bounce" : "15m pullback + VWAP", pullback: mean };
   }
-  if (last > e21 + 0.7 * a) {
+  if (last > e21 + 0.7 * a && !atHigh) {
     return { ok: false, wait: false, reason: "15m still ripping — no short", pullback: null };
   }
-  if (last < e21 - 0.35 * a && !reclaim) {
+  if (atHigh && !rejectHigh) {
+    return { ok: false, wait: true, reason: "wait reject at 15m high", pullback: sh15 };
+  }
+  if (last < e21 - 0.35 * a && !reclaim && !atHigh) {
     return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
   }
-  return { ok: true, wait: false, reason: reclaim ? "VWAP reject" : "15m bounce + VWAP", pullback: mean };
+  return { ok: true, wait: false, reason: reclaim ? "VWAP reject" : atHigh ? "15m high reject" : "15m bounce + VWAP", pullback: mean };
 }
 
 /** BTC is heat, not a compass. Hard chop → 1 seat. Mixed → 2 same-side. Offer/bid → 4. */
