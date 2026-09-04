@@ -193,6 +193,15 @@ export async function getWeexEquity(creds: WeexCreds): Promise<
   return { ok: false, error: "WEEX answered but no USDT futures row. Deposit USDT to futures, not spot.", status: 200 };
 }
 
+function numField(...vals: unknown[]): number | null {
+  for (const v of vals) {
+    if (v == null || v === "") continue;
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
 function parsePosition(row: unknown): {
   symbol: string;
   side: "long" | "short";
@@ -203,88 +212,51 @@ function parsePosition(row: unknown): {
   bePx: number;
 } | null {
   if (!row || typeof row !== "object") return null;
-  const r = row as {
-    symbol?: string;
-    contract?: string;
-    positionAmt?: string | number;
-    holdVol?: string | number;
-    total?: string | number;
-    size?: string | number;
-    available?: string | number;
-    positionSize?: string | number;
-    positionSide?: string;
-    holdSide?: string;
-    posSide?: string;
-    side?: string;
-    entryPrice?: string | number;
-    openPriceAvg?: string | number;
-    averagePrice?: string | number;
-    unrealizedPnl?: string | number;
-    unrealizePnl?: string | number;
-    upl?: string | number;
-    profit?: string | number;
-    markPrice?: string | number;
-    marketPrice?: string | number;
-  };
+  const r = row as Record<string, unknown>;
   const symbol = String(r.symbol ?? r.contract ?? "")
     .replace(/_/g, "")
     .replace(/^cmt/i, "")
     .toUpperCase();
   const q = Math.abs(
-    Number(
-      r.positionAmt ??
-        r.holdVol ??
-        r.positionSize ??
-        r.size ??
-        r.total ??
-        (r as { volume?: string | number }).volume ??
-        (r as { qty?: string | number }).qty ??
-        0,
-    ),
+    numField(r.positionAmt, r.holdVol, r.positionSize, r.size, r.volume, r.qty, r.total) ?? 0,
   );
-  if (!symbol || !Number.isFinite(q) || q <= 0) return null;
+  if (!symbol || !(q > 0)) return null;
   const sideRaw = String(r.positionSide ?? r.holdSide ?? r.side ?? r.posSide ?? "").toLowerCase();
-  const amt = Number(r.positionAmt);
+  const amt = numField(r.positionAmt) ?? 0;
   const side: "long" | "short" =
     sideRaw.includes("short") || sideRaw === "sell" || sideRaw === "2" || amt < 0
       ? "short"
       : "long";
-  const entry = Number(
-    r.entryPrice ??
-      r.openPriceAvg ??
-      r.averagePrice ??
-      ((r as { openValue?: string | number }).openValue != null && q > 0
-        ? Number((r as { openValue?: string | number }).openValue) / q
-        : 0),
+  const entry =
+    numField(r.entryPrice, r.openPriceAvg, r.averagePrice, r.avgPrice) ??
+    (numField(r.openValue) != null && q > 0 ? (numField(r.openValue) as number) / q : 0);
+  const rawPnl = numField(
+    r.unrealizedPnl,
+    r.unRealizedProfit,
+    r.unrealizedProfit,
+    r.unrealizePnl,
+    r.unrealizedPL,
+    r.unrealisedPnl,
+    r.upl,
+    r.floatProfit,
+    r.uPnL,
   );
-  const rawPnl = Number(
-    r.unrealizedPnl ??
-      r.unrealizePnl ??
-      (r as { unrealizedPL?: string | number }).unrealizedPL ??
-      r.upl ??
-      r.profit ??
-      (r as { pnl?: string | number }).pnl ??
-      (r as { floatProfit?: string | number }).floatProfit ??
-      (r as { achievedProfits?: string | number }).achievedProfits ??
-      (r as { uPnL?: string | number }).uPnL,
-  );
-  const mark = Number(r.markPrice ?? r.marketPrice ?? 0);
-  const bePx = Number(
-    (r as { breakEvenPrice?: string | number }).breakEvenPrice ??
-      (r as { breakevenPrice?: string | number }).breakevenPrice ??
-      (r as { breakEven?: string | number }).breakEven ??
-      (r as { avgBreakEvenPrice?: string | number }).avgBreakEvenPrice ??
-      0,
-  );
+  const mark = numField(r.markPrice, r.marketPrice, r.lastPrice, r.mark) ?? 0;
+  const bePx = numField(r.breakEvenPrice, r.breakevenPrice, r.breakEven, r.avgBreakEvenPrice) ?? 0;
   if (Number.isFinite(entry) && entry > 0 && q * entry < 0.05) return null;
+  let pnl = rawPnl;
+  if (pnl == null && mark > 0 && entry > 0) {
+    const signed = side === "short" ? entry - mark : mark - entry;
+    pnl = signed * q;
+  }
   return {
     symbol,
     side,
     qty: q,
     entry: Number.isFinite(entry) ? entry : 0,
-    pnl: Number.isFinite(rawPnl) ? rawPnl : null,
-    mark: Number.isFinite(mark) ? mark : 0,
-    bePx: Number.isFinite(bePx) && bePx > 0 ? bePx : 0,
+    pnl: pnl != null && Number.isFinite(pnl) ? pnl : null,
+    mark,
+    bePx: bePx > 0 ? bePx : 0,
   };
 }
 
@@ -330,14 +302,13 @@ export async function listWeexPositions(
     for (const pos of parsed) {
       const k = `${pos.symbol}|${pos.side}`;
       const prev = uniq.get(k);
-      if (!prev || pos.qty > prev.qty || (pos.pnl != null && prev.pnl == null)) {
-        uniq.set(
-          k,
-          prev && pos.qty < prev.qty
-            ? { ...prev, pnl: pos.pnl ?? prev.pnl, mark: pos.mark || prev.mark, bePx: pos.bePx || prev.bePx }
-            : pos,
-        );
+      if (!prev) {
+        uniq.set(k, pos);
+        continue;
       }
+      const score = (p: typeof pos) => (p.pnl != null ? 4 : 0) + (p.mark > 0 ? 2 : 0) + (p.entry > 0 ? 1 : 0);
+      if (score(pos) > score(prev)) uniq.set(k, { ...pos, bePx: pos.bePx || prev.bePx });
+      else if (score(pos) === score(prev) && pos.pnl != null) uniq.set(k, { ...prev, pnl: pos.pnl, mark: pos.mark || prev.mark, bePx: pos.bePx || prev.bePx });
     }
   }
   const data = uniq.size ? [...uniq.values()] : sawOk ? [] : null;
