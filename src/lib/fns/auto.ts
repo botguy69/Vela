@@ -581,8 +581,10 @@ function whyFromWeex(
           ? entry + Math.abs(entry - tp1)
           : entry - Math.abs(tp1 - entry)
         : 0;
-  const near = (level: number, tol = 0.007) =>
+  const near = (level: number, tol = 0.004) =>
     px > 0 && level > 0 && Math.abs(px - level) / level <= tol;
+  const atBe =
+    entry > 0 && px > 0 && Math.abs(px - entry) / entry <= 0.0025;
   const throughTp2 =
     tp2 != null && px > 0 && (sd === "short" ? px <= tp2 * 1.006 : px >= tp2 * 0.994);
   const throughTp1 =
@@ -590,10 +592,8 @@ function whyFromWeex(
   const throughSl =
     origStop > 0 && px > 0 && (sd === "short" ? px >= origStop * 0.997 : px <= origStop * 1.003);
   if (throughTp2 || near(tp2 ?? 0)) return "Hit TP2";
-  if (throughTp1) return hit.pnl >= 0 && beLike && (near(entry, 0.01) || near(stopNow, 0.008)) ? "TP1 then BE" : "Hit TP1";
-  if (hit.pnl >= 0 && beLike && Boolean(row.tp1_hit) && (near(entry, 0.01) || near(stopNow, 0.008))) {
-    return "TP1 then BE";
-  }
+  if (throughTp1 || near(tp1 ?? 0)) return atBe && hit.pnl >= 0 ? "TP1 then BE" : "Hit TP1";
+  if (hit.pnl >= 0 && beLike && atBe) return "TP1 then BE";
   if (throughSl || (origStop > 0 && near(origStop, 0.008) && hit.pnl < 0)) return "Hit stop";
   const t0 = new Date(row.filled_at ?? row.created_at ?? 0).getTime();
   const heldH = t0 > 0 && hit.ts ? (hit.ts - t0) / 3600_000 : 0;
