@@ -877,60 +877,39 @@ export async function placeWeexTake(
     clientOid: string;
   },
 ) {
-  const qty = Number(order.quantity);
-  if (!(qty > 0)) return { ok: false, error: "tp qty 0", status: 0 };
-  const closeSide = order.positionSide === "SHORT" ? "BUY" : "SELL";
+  const hold = order.positionSide === "SHORT" ? "short" : "long";
+  const v2 = await weexRequest({
+    creds,
+    method: "POST",
+    path: "/capi/v2/mix/order/place-tpsl",
+    body: {
+      symbol: order.symbol,
+      productType: "USDT-FUTURES",
+      marginCoin: "USDT",
+      planType: "profit_plan",
+      triggerPrice: order.tp,
+      triggerType: "mark_price",
+      executePrice: "0",
+      holdSide: hold,
+      size: order.quantity,
+      clientOid: order.clientOid.slice(0, 36),
+    },
+  });
+  if (v2.ok) return v2;
   return weexRequest({
     creds,
     method: "POST",
-    path: "/capi/v3/order",
+    path: "/capi/v3/placeTpSlOrder",
     body: {
       symbol: order.symbol,
-      side: closeSide,
-      positionSide: order.positionSide,
-      type: "LIMIT",
-      price: order.tp,
+      clientAlgoId: order.clientOid.slice(0, 36),
+      planType: "TAKE_PROFIT",
+      triggerPrice: order.tp,
       quantity: order.quantity,
-      reduceOnly: "true",
-      timeInForce: "GTC",
-      newClientOrderId: order.clientOid.slice(0, 36),
+      positionSide: order.positionSide,
+      triggerPriceType: "MARK_PRICE",
     },
   });
-}
-
-export async function listWeexReduceLimits(
-  creds: WeexCreds,
-  symbol: string,
-): Promise<{ id: string; oid: string; price: number; qty: number; side: string }[]> {
-  const paths = [
-    { path: "/capi/v3/openOrders", query: { symbol } as Record<string, string> },
-    { path: "/capi/v3/openOrders", query: { symbol, productType: "USDT-FUTURES" } },
-  ];
-  const out: { id: string; oid: string; price: number; qty: number; side: string }[] = [];
-  const seen = new Set<string>();
-  for (const p of paths) {
-    const res = await weexRequest<unknown>({ creds, method: "GET", path: p.path, query: p.query });
-    if (!res.ok) continue;
-    for (const row of rowsFrom(res.data)) {
-      const o = row as Record<string, unknown>;
-      const reduce = o.reduceOnly === true || String(o.reduceOnly ?? "") === "true" || String(o.reduceOnly ?? "") === "1";
-      if (!reduce) continue;
-      const id = String(o.orderId ?? o.id ?? "");
-      const oid = String(o.clientOid ?? o.clientOrderId ?? o.origClientOrderId ?? id);
-      const key = id || oid;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      out.push({
-        id: id || oid,
-        oid,
-        price: Number(o.price ?? o.limitPrice ?? o.triggerPrice ?? 0),
-        qty: Number(o.quantity ?? o.size ?? o.origQty ?? o.qty ?? 0),
-        side: String(o.positionSide ?? o.holdSide ?? o.posSide ?? "").toUpperCase(),
-      });
-    }
-    if (out.length) break;
-  }
-  return out;
 }
 
 export async function cancelWeexOpenLimits(

@@ -706,28 +706,31 @@ async function restampWeexPnl(
   rows.sort((a, b) => Math.abs(n(b.pnl)) - Math.abs(n(a.pnl)));
   for (const row of rows) {
     if (/^Limit |^Replaced by|^Cancelled/.test(String(row.close_reason ?? ""))) continue;
+    const side = row.side === "short" ? "short" : "long";
+    const key = row.weex_symbol.replace(/_/g, "").toUpperCase();
     let hit = matchWeexClose(row, closes, used);
+    if (!hit || Math.abs(hit.pnl) < 0.15) {
+      const extra = await listWeexClosedPnl(creds, row.weex_symbol).catch(() => []);
+      const pool = [...extra, ...closes].filter((c) => {
+        if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
+        if (c.side && c.side !== side) return false;
+        return Math.abs(c.pnl) >= 0.15;
+      });
+      pool.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
+      if (pool[0]) hit = pool[0];
+    }
     if (!hit || Math.abs(hit.pnl) < 0.05) {
       const ghost = matchWeexClose(row, closes);
       if (ghost && Math.abs(ghost.pnl) >= 0.05) {
         const sib = rows.filter(
           (r) =>
             r.id !== row.id &&
-            r.weex_symbol.replace(/_/g, "").toUpperCase() === row.weex_symbol.replace(/_/g, "").toUpperCase() &&
-            (r.side === "short" ? "short" : "long") === (row.side === "short" ? "short" : "long") &&
+            r.weex_symbol.replace(/_/g, "").toUpperCase() === key &&
+            (r.side === "short" ? "short" : "long") === side &&
             Math.abs(n(r.pnl) - ghost.pnl) < 0.5 &&
             r.status !== "skipped",
         );
-        if (sib.length && Math.abs(n(row.pnl)) < 0.2) {
-          if (!/^Duplicate/.test(String(row.close_reason ?? ""))) {
-            await sql`
-              update auto_signals
-              set pnl = 0, close_reason = ${"Duplicate WEEX fill"}, status = 'skipped', updated_at = now()
-              where id = ${row.id} and user_id = ${userId}
-            `;
-          }
-          continue;
-        }
+        if (sib.length && Math.abs(n(row.pnl)) < 0.2) continue;
         hit = ghost;
       }
     }
@@ -833,7 +836,7 @@ async function ensureTakes(
 ) {
   if (pos.status !== "filled") return;
   const { specFor, formatWeexQty, formatWeexPx } = await import("@/lib/weex-market.server");
-  const { placeWeexTake, moveWeexStop, cancelWeexProtective, listWeexPositions, listWeexAlgoRows, listWeexReduceLimits } = await import("@/lib/weex.server");
+  const { placeWeexTake, moveWeexStop, listWeexPositions, listWeexAlgoRows, trimWeexTakes } = await import("@/lib/weex.server");
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
   const { coinByWeex } = await import("@/lib/universe");
   const spec = await specFor(coinByWeex(pos.weex_symbol));
@@ -871,34 +874,25 @@ async function ensureTakes(
     }
   }
   const listed = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => []);
-  const tpLimits = await listWeexReduceLimits(creds, pos.weex_symbol).catch(() => []);
   const liveSide = side;
-  const near = (a: number, b: number) => a > 0 && b > 0 && Math.abs(a - b) / b < 0.008;
+  const near = (a: number, b: number) => a > 0 && b > 0 && Math.abs(a - b) / b < 0.01;
   const slRows = listed.filter((r) => {
     if (r.posSide && r.posSide !== liveSide) return false;
     if (/TAKE|PROFIT|^TP$/i.test(r.type) && !/STOP|LOSS/i.test(r.type)) return false;
     if (/STOP|LOSS|^SL$/i.test(r.type)) return true;
     return mark > 0 && r.trigger > 0 && (sideLc === "long" ? r.trigger < mark * 0.999 : r.trigger > mark * 1.001);
   });
-  const slOk = slRows.length === 1 && (stopPx <= 0 || near(slRows[0]!.trigger, stopPx));
-  const tpRows = tpLimits.filter(
-    (r) => !r.side || r.side.includes(liveSide) || r.side === "",
-  );
-  const tpOk =
-    tps.length > 0 &&
-    tps.every((tp) => tpRows.some((r) => near(r.price, tp))) &&
-    tpRows.filter((r) => tps.some((tp) => near(r.price, tp))).length === tps.length;
-  const tpQty = tpRows.reduce((s, r) => s + (r.qty > 0 ? r.qty : 0), 0);
-  const qtyOk = tps.length === 0 || liveQty <= 0 || (tpQty > 0 && tpQty <= liveQty * 1.05 && tpQty >= liveQty * 0.7);
-  const extras = listed.filter((r) => /TAKE|PROFIT|^TP$/i.test(r.type)).length > 0 || tpRows.length > tps.length;
+  const tpRows = listed.filter((r) => {
+    if (r.posSide && r.posSide !== liveSide) return false;
+    if (/STOP|LOSS|^SL$/i.test(r.type) && !/TAKE|PROFIT/i.test(r.type)) return false;
+    if (/TAKE|PROFIT|^TP$/i.test(r.type)) return true;
+    return mark > 0 && r.trigger > 0 && (sideLc === "long" ? r.trigger > mark * 1.001 : r.trigger < mark * 0.999);
+  });
+  const slOk = slRows.length >= 1 && (stopPx <= 0 || slRows.some((r) => near(r.trigger, stopPx)));
+  const tpOk = tps.length === 0 || tps.every((tp) => tpRows.some((r) => near(r.trigger, tp)));
+  const extras = slRows.length > 1 || tpRows.length > Math.max(2, tps.length);
   const justSet = /tps:set/.test(pos.weex_resp ?? "");
-  const dirty =
-    extras ||
-    !slOk ||
-    (tps.length > 0 && !tpOk && !justSet) ||
-    (tps.length > 0 && !qtyOk && !justSet) ||
-    (listed.length === 0 && tpRows.length === 0 && !justSet);
-  if (!dirty) {
+  if (slOk && tpOk && !extras) {
     if (tps.length) {
       await sql`update auto_signals set targets = ${JSON.stringify(tps)}, stop = ${stopPx}, updated_at = now() where id = ${pos.id}`;
       pos.targets = JSON.stringify(tps);
@@ -906,12 +900,13 @@ async function ensureTakes(
     }
     return;
   }
-  await cancelWeexProtective(creds, pos.weex_symbol);
-  const { cancelWeexOpenLimits } = await import("@/lib/weex.server");
-  await cancelWeexOpenLimits(creds, pos.weex_symbol, pos.client_oid);
-  const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
+  if (justSet && slRows.length >= 1 && tpRows.length >= 1) return;
+  if (extras) {
+    await trimWeexTakes(creds, pos.weex_symbol, { side: sideLc, sl: stopPx, tps, mark });
+  }
   const oid = (tag: string) => `vela${tag}${pos.id}${Date.now().toString(36)}`.slice(0, 36);
-  if (stopPx > 0) {
+  const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
+  if (!slOk && stopPx > 0) {
     const slSent = await moveWeexStop(creds, {
       symbol: pos.weex_symbol,
       positionSide: side,
@@ -921,23 +916,26 @@ async function ensureTakes(
     });
     if (!slSent.ok) notes.push(`${pos.weex_symbol} SL failed: ${slSent.error.slice(0, 80)}`);
   }
-  let ok = 0;
-  const slices = takeQtys(liveQty, tps.length, spec.quantityPrecision, formatWeexQty);
-  for (let i = 0; i < tps.length; i += 1) {
-    const slice = slices[i]!;
-    if (Number(slice) <= 0) continue;
-    const sent = await placeWeexTake(creds, {
-      symbol: pos.weex_symbol,
-      positionSide: side,
-      tp: formatWeexPx(tps[i]!, spec.pricePrecision),
-      quantity: slice,
-      clientOid: oid(`tp${i}`),
-    });
-    if (sent.ok) ok += 1;
-    else notes.push(`${pos.weex_symbol} TP${i + 1} failed: ${sent.error.slice(0, 80)}`);
+  let ok = tpRows.filter((r) => tps.some((tp) => near(r.trigger, tp))).length;
+  if (!tpOk) {
+    const slices = takeQtys(liveQty, tps.length, spec.quantityPrecision, formatWeexQty);
+    for (let i = 0; i < tps.length; i += 1) {
+      if (tpRows.some((r) => near(r.trigger, tps[i]!))) continue;
+      const slice = slices[i]!;
+      if (Number(slice) <= 0) continue;
+      const sent = await placeWeexTake(creds, {
+        symbol: pos.weex_symbol,
+        positionSide: side,
+        tp: formatWeexPx(tps[i]!, spec.pricePrecision),
+        quantity: slice,
+        clientOid: oid(`tp${i}`),
+      });
+      if (sent.ok) ok += 1;
+      else notes.push(`${pos.weex_symbol} TP${i + 1} failed: ${sent.error.slice(0, 80)}`);
+    }
   }
   notes.push(
-    `${pos.weex_symbol} reset 1 SL @ ${stopPx.toFixed(4)} + ${ok} reduce-only TP (80% 1R / 20% 2R of ${liveQty.toFixed(2)})`,
+    `${pos.weex_symbol} protect 1 SL @ ${stopPx.toFixed(4)} + ${ok} TP (algo, 80/20 of ${liveQty.toFixed(2)})`,
   );
   const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set|be|miss|clean)@?\d*/g, "").trim()} tps:set`.slice(0, 500);
   await sql`update auto_signals set weex_resp = ${stamp}, stop = ${stopPx}, targets = ${JSON.stringify(tps)}, updated_at = now() where id = ${pos.id}`;
