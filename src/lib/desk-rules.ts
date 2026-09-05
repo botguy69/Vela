@@ -412,30 +412,67 @@ export function structureStop(
   return s;
 }
 
-/** 1h book. Same side free. One opposite only if swing-hold or 88% extreme after 2+ with-book. */
+/** Side is the coin's 4h+1h+15m. BTC 1h is info. No one-opposite lock. */
 export function mixAllows(
-  pickSide: Side,
-  thesis: string,
-  conf: number,
-  heat: "long" | "short" | "chop",
-  live: { side: string }[],
+  _pickSide: Side,
+  _thesis: string,
+  _conf: number,
+  _heat: "long" | "short" | "chop",
+  _live: { side: string }[],
 ): { ok: boolean; why: string } {
-  const liveL = live.filter((p) => p.side !== "short").length;
-  const liveS = live.filter((p) => p.side === "short").length;
-  const book: Side | "chop" =
-    heat !== "chop" ? heat : liveL + liveS === 0 ? "chop" : liveL >= liveS ? "long" : "short";
-  if (book === "chop" || pickSide === book) return { ok: true, why: "with book" };
-  if (/Swing hold/i.test(thesis)) return { ok: true, why: "swing hold vs book" };
-  const withN = book === "short" ? liveS : liveL;
-  const againstN = book === "short" ? liveL : liveS;
-  if (againstN >= 1) return { ok: false, why: `already 1 ${pickSide} vs ${book} book` };
-  if (withN < 2) return { ok: false, why: `need 2+ ${book} before a special ${pickSide}` };
-  const extreme = /double (top|bottom)|Pin bar|failed range|climax rejection|vol fade|buyers on 2nd|supply on 2nd/i.test(
-    thesis,
-  );
-  if (!extreme || conf < 88) return { ok: false, why: `special ${pickSide} needs 88% extreme vs ${book}` };
-  return { ok: true, why: "special 1-lot vs book" };
+  return { ok: true, why: "coin tape" };
 }
+
+/** New entries only on a 15m that just closed (8m window). Manage ticks still run. */
+export function fifteenEntryReady(closed15: Candle[]): { ok: boolean; why: string } {
+  if (closed15.length < 8) return { ok: false, why: "15m thin" };
+  const last = closed15[closed15.length - 1]!;
+  const age = Date.now() - last.time;
+  if (!Number.isFinite(age) || age < 0) return { ok: true, why: "15m ready" };
+  if (age > 8 * 60_000) return { ok: false, why: "wait 15m close" };
+  return { ok: true, why: "15m just closed" };
+}
+
+/** Higher = better location. Mid-range ~low. Extreme of the 4h box ~high. Never a hard skip. */
+export function locationScore(side: Side, fourHour: Candle[]): number {
+  if (fourHour.length < 16) return 40;
+  const closed = closedCandles(fourHour, FOUR_H_MS);
+  const bars = closed.length >= 16 ? closed : fourHour;
+  const last = fourHour[fourHour.length - 1]?.close ?? bars[bars.length - 1]?.close;
+  if (last == null) return 40;
+  const win = bars.slice(-21);
+  const sh = Math.max(...win.map((c) => c.high));
+  const sl = Math.min(...win.map((c) => c.low));
+  const span = sh - sl;
+  if (!(span > 0)) return 40;
+  const loc = (last - sl) / span;
+  return Math.round(100 * (side === "short" ? loc : 1 - loc));
+}
+
+/** Sunday + Asia mid demote with-trend only. Structure tags untouched. */
+export function sessionSoft(thesis: string, now = new Date()): number {
+  if (!/with-trend|Continuation on 21h|Continuation short/i.test(thesis)) return 0;
+  const utc = now.getUTCHours();
+  const dow = now.getUTCDay();
+  let pen = 0;
+  if (dow === 0) pen += 14;
+  if (utc >= 3 && utc <= 8) pen += 10;
+  return pen;
+}
+
+export function huntRank(opts: {
+  thesis: string;
+  side: Side;
+  fourHour: Candle[];
+  conf: number;
+}): number {
+  const q = setupQuality(opts.thesis) * 14;
+  const loc = locationScore(opts.side, opts.fourHour);
+  const sess = sessionSoft(opts.thesis);
+  const c = Number.isFinite(opts.conf) ? opts.conf - 85 : 0;
+  return q + loc + c - sess;
+}
+
 export function divergesFromBtc(side: Side, coin15: Candle[], btc15: Candle[]): boolean {
   if (coin15.length < 24 || btc15.length < 24) return false;
   const coinWith = ltfAllows(side, coin15);
@@ -705,8 +742,8 @@ export function regimeHot(btcHourly: Candle[]): boolean {
 /** Skip chasing the side already paying up for funding. */
 export function fundingBlocks(side: Side, rate: number): boolean {
   if (!Number.isFinite(rate)) return false;
-  if (side === "long" && rate > 0.0008) return true;
-  if (side === "short" && rate < -0.0008) return true;
+  if (side === "long" && rate > 0.0015) return true;
+  if (side === "short" && rate < -0.0015) return true;
   return false;
 }
 

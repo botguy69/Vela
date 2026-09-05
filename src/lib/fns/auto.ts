@@ -196,9 +196,9 @@ function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
     return `4/4 at-risk (${liveL}L/${liveS}S, ${beN} BE). Next ticket only after TP1→BE.`;
   }
   if (at >= 1) {
-    return `Hunting next A++ (${at}/4 at-risk, ${liveL}L/${liveS}S, ${beN} BE). 1h book. One special opposite. One per tick.`;
+    return `Hunting next A++ (${at}/4 at-risk, ${liveL}L/${liveS}S, ${beN} BE). Either side. Best location. One per tick.`;
   }
-  return `Hunting 1 A++ per tick. 1h book, 4 at-risk. One special opposite. BE extras to 6.`;
+  return `Hunting 1 A++ per tick. Either side. Best location. 4 at-risk. BE extras to 6.`;
 }
 
 function composePass(
@@ -2710,9 +2710,19 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             pool.push(s);
           }
           pool.sort((a, b) => {
-            const q = rules.setupQuality(b.thesis ?? "") - rules.setupQuality(a.thesis ?? "");
-            if (q) return q;
-            return (b.confidence ?? b.score) - (a.confidence ?? a.score);
+            const ra = rules.huntRank({
+              thesis: a.thesis ?? "",
+              side: a.side,
+              fourHour: h4map[a.weexSymbol] ?? [],
+              conf: a.confidence ?? scoreToConf(a.score),
+            });
+            const rb = rules.huntRank({
+              thesis: b.thesis ?? "",
+              side: b.side,
+              fourHour: h4map[b.weexSymbol] ?? [],
+              conf: b.confidence ?? scoreToConf(b.score),
+            });
+            return rb - ra;
           });
           if (pool.length > 12) pool.splice(12);
           const primes = pool.filter((s) => rules.setupQuality(s.thesis ?? "") >= 2);
@@ -2725,7 +2735,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. No A++ this pass. 1h book. Slots stay empty.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "A++ on the coin 4h+1h+15m. 1h book. Swing-hold is the only opposite.";
+          const aPlusLine = "Closed 15m only. Rank by 4h location. Either side. Soft Sunday/Asia on with-trend.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2766,6 +2776,25 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
             const coin15raw = await getWeexKlines(pick.weexSymbol, "15m", 210).catch(() => []);
             const coin15 = rules.closedCandles(coin15raw, 15 * 60 * 1000);
+            const closed15 = rules.fifteenEntryReady(coin15);
+            if (!closed15.ok) {
+              whyNot.push(`${tag} ${closed15.why}`);
+              continue;
+            }
+            const raw5 = await getWeexKlines(pick.weexSymbol, "5m", 48).catch(() => []);
+            const m5 = rules.closedCandles(raw5, 5 * 60 * 1000);
+            if (m5.length >= 4) {
+              const b = m5[m5.length - 1]!;
+              const rng = b.high - b.low || 1;
+              const against =
+                pick.side === "long"
+                  ? b.close < b.open && b.close <= b.low + 0.4 * rng
+                  : b.close > b.open && b.close >= b.high - 0.4 * rng;
+              if (against) {
+                whyNot.push(`${tag} 5m against — next name`);
+                continue;
+              }
+            }
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
             const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
             const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "", tape.side, fade);
@@ -3099,7 +3128,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const learned =
       (stats.tpWins ?? 0) >= 20 && (stats.expectancyR ?? 0) > 0
         ? "A++ · 15m fill / 15m stop · 2 TPs (1R + 2R). BE after TP1. 4 at-risk, 6 with BE."
-        : "A++ · 15m fill / 15m stop · 2 TPs. 3%. 1h book + swing-hold exception.";
+        : "A++ · closed 15m · location rank · 2 TPs. 3%. Either side.";
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))
