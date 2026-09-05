@@ -923,19 +923,18 @@ async function ensureTakes(
   };
   if (entryPx > 0 && r1 > 0) {
     const t1 = sideLc === "short" ? entryPx - r1 : entryPx + r1;
-    let t2 = sideLc === "short" ? entryPx - 2 * r1 : entryPx + 2 * r1;
+    const twoR = sideLc === "short" ? entryPx - 2 * r1 : entryPx + 2 * r1;
+    const plannedFar = planned.find((p) => Math.abs(p - t1) / Math.max(t1, 1) > 0.004);
+    let t2 = plannedFar && plannedFar > 0 ? plannedFar : twoR;
+    if (sideLc === "short" ? t2 >= t1 : t2 <= t1) t2 = twoR;
     if (afterTp1 && mark > 0 && taggedTake(sideLc, mark, t2)) {
       t2 = sideLc === "short" ? mark * 0.992 : mark * 1.008;
     }
     if (afterTp1) {
-      pushTp(planned[1] ?? t2, true);
+      pushTp(t2, true);
     } else {
-      pushTp(planned[0] ?? t1);
-      pushTp(planned[1] ?? t2);
-      if (tps.length < 2) {
-        pushTp(t1, true);
-        pushTp(t2, true);
-      }
+      pushTp(t1, true);
+      pushTp(t2, true);
     }
   }
   const listed = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => []);
@@ -955,15 +954,19 @@ async function ensureTakes(
   });
   const slOk = slRows.length === 1 && (stopPx <= 0 || slRows.some((r) => near(r.trigger, stopPx)));
   const wantTp = afterTp1 ? 1 : 2;
-  const tpOk = afterTp1 ? tpRows.length >= 1 : tpRows.length >= 2;
-  const extras = listed.length > 3 || slRows.length > 1 || tpRows.length > 2;
+  const distinctTp = tpRows.filter(
+    (r, i) => !tpRows.slice(0, i).some((o) => near(o.trigger, r.trigger)),
+  ).length;
+  const collapsed = !afterTp1 && tpRows.length >= 1 && distinctTp < 2;
+  const tpOk = afterTp1 ? tpRows.length >= 1 : tpRows.length >= 2 && !collapsed;
+  const extras = listed.length > 3 || slRows.length > 1 || tpRows.length > 2 || collapsed;
   const hasSet = /tps:set/.test(pos.weex_resp ?? "");
   const setAt = Number(/tps:set@(\d+)/.exec(pos.weex_resp ?? "")?.[1] ?? 0);
   const recent = setAt > 0 && Date.now() - setAt < 5 * 60_000;
   const stampSet = async () => {
     const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set|be|miss|clean)@?\d*/g, "").trim()} tps:set@${Date.now()}`.slice(0, 500);
     const kept =
-      planned.length >= 2 ? planned : tps.length >= 2 ? tps : planned.length ? [...planned, ...tps] : tps;
+      tps.length >= 2 ? tps : planned.length >= 2 ? planned : planned.length ? [...planned, ...tps] : tps;
     await sql`update auto_signals set weex_resp = ${stamp}, stop = ${stopPx}, targets = ${JSON.stringify(kept)}, updated_at = now() where id = ${pos.id}`;
     pos.weex_resp = stamp;
     pos.stop = stopPx;
@@ -2868,13 +2871,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const origTp1 = (timed0.targets && timed0.targets[0]) || timed0.target;
             const origTp2 = timed0.targets && timed0.targets[1];
             const tp1 =
-              stretch.tp > 0
-                ? stretch.tp
-                : origTp1 > 0
-                  ? stopped.side === "long"
-                    ? Math.max(origTp1, r1)
-                    : Math.min(origTp1, r1)
-                  : r1;
+              origTp1 > 0
+                ? stopped.side === "long"
+                  ? Math.max(origTp1, r1)
+                  : Math.min(origTp1, r1)
+                : r1;
             const tp2 =
               stretch.tp > 0
                 ? stretch.tp
@@ -2889,7 +2890,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                     ...stopped,
                     target: tp1,
                     targets: [tp1, tp2],
-                    rr: dist > 0 ? Math.abs(tp1 - stopped.entry) / dist : 1,
+                    rr: dist > 0 ? Math.abs(tp2 - stopped.entry) / dist : 1,
                   }
                 : stopped;
             if (rules.targetIntoLocation(timed1.side, timed1.entry, timed1.stop, h4)) {

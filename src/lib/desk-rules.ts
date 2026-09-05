@@ -847,7 +847,7 @@ export function mtfAllows(
   return { ok: true, why: "" };
 }
 
-/** Stretch TP when 4h has ~10% room and stop is 2–3%. Else 0 → caller keeps 1R. Any coin, still max lev. */
+/** Runner when 4h has room. TP2 only — TP1 stays 1R. */
 export function stretchTp(
   side: Side,
   entry: number,
@@ -855,28 +855,34 @@ export function stretchTp(
   fourHour: Candle[],
 ): { tp: number; why: string } {
   if (!(entry > 0) || !(stop > 0)) return { tp: 0, why: "" };
-  const stopPct = Math.abs(entry - stop) / entry;
-  if (stopPct < 0.018 || stopPct > 0.035) return { tp: 0, why: "" };
-  const want = side === "long" ? entry * 1.1 : entry * 0.9;
+  const risk = Math.abs(entry - stop);
+  const stopPct = risk / entry;
+  if (stopPct < 0.003 || stopPct > 0.06) return { tp: 0, why: "" };
+  const want10 = side === "long" ? entry * 1.1 : entry * 0.9;
+  const min3 = side === "long" ? entry + 3 * risk : entry - 3 * risk;
   const closed = closedCandles(fourHour, FOUR_H_MS);
   const bars = closed.length >= 8 ? closed : fourHour;
-  let tp = want;
-  if (bars.length >= 8) {
-    const win = bars.slice(-21);
-    const sh = Math.max(...win.map((c) => c.high));
-    const sl = Math.min(...win.map((c) => c.low));
-    const a = atr(bars, 14) ?? 0;
-    if (side === "long") {
-      const cap = sh - 0.2 * a;
-      if ((cap - entry) / entry < 0.08) return { tp: 0, why: "" };
-      tp = Math.min(want, cap);
-    } else {
-      const cap = sl + 0.2 * a;
-      if ((entry - cap) / entry < 0.08) return { tp: 0, why: "" };
-      tp = Math.max(want, cap);
-    }
+  if (bars.length < 8) {
+    const rr = Math.abs(want10 - entry) / risk;
+    return rr >= 3 ? { tp: want10, why: `${rr.toFixed(1)}R stretch` } : { tp: 0, why: "" };
   }
-  const rr = Math.abs(tp - entry) / Math.abs(entry - stop);
+  const win = bars.slice(-21);
+  const sh = Math.max(...win.map((c) => c.high));
+  const sl = Math.min(...win.map((c) => c.low));
+  const a = atr(bars, 14) ?? 0;
+  let tp = 0;
+  if (side === "long") {
+    const cap = sh - 0.15 * a;
+    if (cap - entry < Math.max(3 * risk, entry * 0.05)) return { tp: 0, why: "" };
+    tp = Math.min(want10, cap);
+    if (tp < min3 && cap >= min3) tp = min3;
+  } else {
+    const cap = sl + 0.15 * a;
+    if (entry - cap < Math.max(3 * risk, entry * 0.05)) return { tp: 0, why: "" };
+    tp = Math.max(want10, cap);
+    if (tp > min3 && cap <= min3) tp = min3;
+  }
+  const rr = Math.abs(tp - entry) / risk;
   if (rr < 3) return { tp: 0, why: "" };
   return { tp, why: `${rr.toFixed(1)}R stretch` };
 }
