@@ -534,13 +534,13 @@ export function limitMaxAgeMs(style: Style): number {
 /** Fills before this keep the old clock. Scalp fills still red after 12h flatten. Green / BE hold. */
 export const CHOP_V2_SINCE = Date.parse("2026-08-24T02:00:00.000Z");
 
-/** 8h on a 1R/85 scalp. 48h on 3R or 92% conf. Linear in between. */
+/** 30h floor on every fill. 48h on 3R or 92% conf. Live tickets use this clock. */
 export function fillMaxAgeMs(rr = 1, conf = 85): number {
   const r = Number.isFinite(rr) ? rr : 1;
   const c = Number.isFinite(conf) ? conf : 85;
   const rrT = Math.min(1, Math.max(0, (r - 1) / 2));
   const cT = Math.min(1, Math.max(0, (c - 85) / 7));
-  return (8 + Math.max(rrT, cT) * 40) * 3600_000;
+  return (30 + Math.max(rrT, cT) * 18) * 3600_000;
 }
 
 export function flattenHoursLabel(rr = 1, conf = 85): string {
