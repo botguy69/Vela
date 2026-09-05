@@ -899,24 +899,31 @@ async function ensureTakes(
   const risk = riskFromStop >= entryPx * 0.003 ? riskFromStop : riskFromTp;
   const tick = 10 ** -Math.max(0, spec.pricePrecision);
   const tps: number[] = [];
-  const pushTp = (raw: number) => {
+  const pushTp = (raw: number, force = false) => {
     let px = Number(formatWeexPx(raw, spec.pricePrecision));
     if (!(px > 0)) return;
     if (tps.includes(px)) {
       px = Number(formatWeexPx(sideLc === "short" ? px - 2 * tick : px + 2 * tick, spec.pricePrecision));
     }
-    if (px > 0 && !tps.includes(px) && !(mark > 0 && taggedTake(sideLc, mark, px))) tps.push(px);
+    if (!(px > 0) || tps.includes(px)) return;
+    if (!force && mark > 0 && taggedTake(sideLc, mark, px)) return;
+    tps.push(px);
   };
-  if (risk > 0 && entryPx > 0 && risk / entryPx >= 0.002) {
-    const t1 = sideLc === "short" ? entryPx - risk : entryPx + risk;
-    const t2 = sideLc === "short" ? entryPx - 2 * risk : entryPx + 2 * risk;
-    if (afterTp1) pushTp(t2);
-    else {
-      pushTp(t1);
-      pushTp(t2);
+  const r1 = risk >= entryPx * 0.002 ? risk : planned[0] && entryPx > 0 ? Math.abs(planned[0] - entryPx) : entryPx * 0.008;
+  if (entryPx > 0 && r1 > 0) {
+    const t1 = sideLc === "short" ? entryPx - r1 : entryPx + r1;
+    const t2 = sideLc === "short" ? entryPx - 2 * r1 : entryPx + 2 * r1;
+    if (afterTp1) {
+      pushTp(planned[1] ?? t2);
+      if (!tps.length) pushTp(t2, true);
+    } else {
+      pushTp(planned[0] ?? t1);
+      pushTp(planned[1] ?? t2);
+      if (tps.length < 2) {
+        pushTp(t1, true);
+        pushTp(t2, true);
+      }
     }
-  } else {
-    for (const raw of planned.slice(0, afterTp1 ? 1 : 2)) pushTp(raw);
   }
   const listed = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => []);
   const liveSide = side;
@@ -934,11 +941,11 @@ async function ensureTakes(
     return mark > 0 && r.trigger > 0 && (sideLc === "long" ? r.trigger > mark * 1.001 : r.trigger < mark * 0.999);
   });
   const slOk = slRows.length === 1 && (stopPx <= 0 || slRows.some((r) => near(r.trigger, stopPx)));
+  const wantTp = afterTp1 ? 1 : 2;
   const tpOk =
-    tps.length === 0 ||
-    (tpRows.length === (afterTp1 ? 1 : 2) &&
-      tpRows.length <= 2 &&
-      tps.every((tp) => tpRows.some((r) => near(r.trigger, tp))));
+    tps.length >= wantTp &&
+    tpRows.length === wantTp &&
+    tps.every((tp) => tpRows.some((r) => near(r.trigger, tp)));
   const extras = listed.length > 3 || slRows.length > 1 || tpRows.length > 2 || (!afterTp1 && tpRows.length === 1);
   const hasSet = /tps:set/.test(pos.weex_resp ?? "");
   const setAt = Number(/tps:set@(\d+)/.exec(pos.weex_resp ?? "")?.[1] ?? 0);
