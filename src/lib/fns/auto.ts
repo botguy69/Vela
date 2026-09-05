@@ -133,18 +133,19 @@ function oneRUsd(row: {
   target?: string | number | null;
   risk_usd?: string | number | null;
 }): number {
-  const risk = n(row.risk_usd);
-  if (risk >= 0.2) return risk;
   const e = n(row.fill_px) || n(row.entry);
   const q = origQty(row);
-  if (!(e > 0) || !(q > 0)) return 0;
   const stop = n(row.stop);
-  const beLike = Boolean(row.be_moved) || (stop > 0 && Math.abs(stop - e) / e < 0.004);
-  let dist = !beLike && stop > 0 ? Math.abs(e - stop) : 0;
+  const beLike = Boolean(row.be_moved) || (e > 0 && stop > 0 && Math.abs(stop - e) / e < 0.004);
+  let dist = !beLike && e > 0 && stop > 0 ? Math.abs(e - stop) : 0;
   const tp1 = parseNums(row.targets)[0];
-  if (!(dist > 0) && tp1 != null) dist = Math.abs(tp1 - e);
-  if (!(dist > 0) && n(row.rr) > 0.2 && n(row.target) > 0) dist = Math.abs(n(row.target) - e) / n(row.rr);
-  return dist * q;
+  if (!(dist > 0) && tp1 != null && e > 0) dist = Math.abs(tp1 - e);
+  if (!(dist > 0) && n(row.rr) > 0.2 && n(row.target) > 0 && e > 0) dist = Math.abs(n(row.target) - e) / n(row.rr);
+  const fromStop = e > 0 && q > 0 && dist > 0 ? dist * q : 0;
+  if (fromStop >= 0.2) return fromStop;
+  const risk = n(row.risk_usd);
+  if (risk >= 0.2) return risk;
+  return fromStop;
 }
 
 const OPEN = new Set(["proposed", "working", "filled"]);
@@ -399,7 +400,7 @@ async function closedStats(
     if (!(unit > 0.05)) return null;
     return n(r.pnl) / unit;
   };
-  const window = uniq.filter((r) => fillAt(r) >= tFrom - 2000);
+  const window = uniq.filter((r) => fillAt(r) >= tFrom - 2000).slice(-20);
   const closed = window.length;
   const isFullWin = (r: (typeof window)[number]) => {
     const rr = rOf(r);
@@ -954,11 +955,8 @@ async function ensureTakes(
   });
   const slOk = slRows.length === 1 && (stopPx <= 0 || slRows.some((r) => near(r.trigger, stopPx)));
   const wantTp = afterTp1 ? 1 : 2;
-  const tpOk =
-    tps.length >= wantTp &&
-    tpRows.length === wantTp &&
-    tps.every((tp) => tpRows.some((r) => near(r.trigger, tp)));
-  const extras = listed.length > 3 || slRows.length > 1 || tpRows.length > 2 || (!afterTp1 && tpRows.length === 1);
+  const tpOk = afterTp1 ? tpRows.length >= 1 : tpRows.length >= 2;
+  const extras = listed.length > 3 || slRows.length > 1 || tpRows.length > 2;
   const hasSet = /tps:set/.test(pos.weex_resp ?? "");
   const setAt = Number(/tps:set@(\d+)/.exec(pos.weex_resp ?? "")?.[1] ?? 0);
   const recent = setAt > 0 && Date.now() - setAt < 5 * 60_000;
