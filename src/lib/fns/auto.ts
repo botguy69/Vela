@@ -105,19 +105,14 @@ function takeQtys(
   fmt: (q: number, p: number) => string,
 ): string[] {
   const count = Math.max(1, nTakes);
-  const slices: string[] = [];
-  let used = 0;
-  for (let i = 0; i < count; i += 1) {
-    if (i === count - 1) {
-      slices.push(fmt(Math.max(0, total - used), precision));
-    } else {
-      const part = count === 2 && i === 0 ? total * 0.8 : total / count;
-      const s = fmt(part, precision);
-      used += Number(s);
-      slices.push(s);
-    }
-  }
-  return slices;
+  const min = Number(fmt(10 ** -Math.max(0, precision), precision));
+  if (count < 2 || !(total > min * 2)) return [fmt(total, precision)];
+  let first = Number(fmt(total * 0.8, precision));
+  if (!(first > 0) || first >= total - min * 0.5) first = Number(fmt(total - min, precision));
+  if (!(first > 0) || first >= total) first = Number(fmt(total / 2, precision));
+  const rest = Number(fmt(Math.max(0, total - first), precision));
+  if (!(rest > 0)) return [fmt(total, precision)];
+  return [fmt(first, precision), fmt(rest, precision)];
 }
 
 function throughStop(side: string, last: number, stop: number): boolean {
@@ -897,20 +892,31 @@ async function ensureTakes(
   const afterTp1 =
     Boolean(pos.tp1_hit) || Boolean(pos.be_moved) || (origQty(pos) > 0 && liveQty < origQty(pos) * 0.85);
   const entryPx = n(pos.fill_px) || n(pos.entry) || mark;
-  const risk = stopPx > 0 && entryPx > 0 ? Math.abs(entryPx - stopPx) : 0;
+  const planned = parseNums(pos.targets);
+  const beStop = entryPx > 0 && stopPx > 0 && Math.abs(stopPx - entryPx) / entryPx < 0.004;
+  const riskFromStop = !beStop && stopPx > 0 && entryPx > 0 ? Math.abs(entryPx - stopPx) : 0;
+  const riskFromTp = planned[0] && entryPx > 0 ? Math.abs(planned[0] - entryPx) : 0;
+  const risk = riskFromStop >= entryPx * 0.003 ? riskFromStop : riskFromTp;
+  const tick = 10 ** -Math.max(0, spec.pricePrecision);
   const tps: number[] = [];
-  if (risk > 0 && entryPx > 0 && risk / entryPx >= 0.003) {
+  const pushTp = (raw: number) => {
+    let px = Number(formatWeexPx(raw, spec.pricePrecision));
+    if (!(px > 0)) return;
+    if (tps.includes(px)) {
+      px = Number(formatWeexPx(sideLc === "short" ? px - 2 * tick : px + 2 * tick, spec.pricePrecision));
+    }
+    if (px > 0 && !tps.includes(px) && !(mark > 0 && taggedTake(sideLc, mark, px))) tps.push(px);
+  };
+  if (risk > 0 && entryPx > 0 && risk / entryPx >= 0.002) {
     const t1 = sideLc === "short" ? entryPx - risk : entryPx + risk;
     const t2 = sideLc === "short" ? entryPx - 2 * risk : entryPx + 2 * risk;
-    for (const raw of afterTp1 ? [t2] : [t1, t2]) {
-      const px = Number(formatWeexPx(raw, spec.pricePrecision));
-      if (px > 0 && !tps.includes(px) && !(mark > 0 && taggedTake(sideLc, mark, px))) tps.push(px);
+    if (afterTp1) pushTp(t2);
+    else {
+      pushTp(t1);
+      pushTp(t2);
     }
   } else {
-    for (const raw of parseNums(pos.targets).slice(0, afterTp1 ? 1 : 2)) {
-      const px = Number(formatWeexPx(raw, spec.pricePrecision));
-      if (px > 0 && !tps.includes(px) && !(mark > 0 && taggedTake(sideLc, mark, px))) tps.push(px);
-    }
+    for (const raw of planned.slice(0, afterTp1 ? 1 : 2)) pushTp(raw);
   }
   const listed = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => []);
   const liveSide = side;
@@ -928,8 +934,12 @@ async function ensureTakes(
     return mark > 0 && r.trigger > 0 && (sideLc === "long" ? r.trigger > mark * 1.001 : r.trigger < mark * 0.999);
   });
   const slOk = slRows.length === 1 && (stopPx <= 0 || slRows.some((r) => near(r.trigger, stopPx)));
-  const tpOk = tps.length === 0 || (tpRows.length <= 2 && tps.every((tp) => tpRows.some((r) => near(r.trigger, tp))));
-  const extras = listed.length > 3 || slRows.length > 1 || tpRows.length > 2;
+  const tpOk =
+    tps.length === 0 ||
+    (tpRows.length === (afterTp1 ? 1 : 2) &&
+      tpRows.length <= 2 &&
+      tps.every((tp) => tpRows.some((r) => near(r.trigger, tp))));
+  const extras = listed.length > 3 || slRows.length > 1 || tpRows.length > 2 || (!afterTp1 && tpRows.length === 1);
   const hasSet = /tps:set/.test(pos.weex_resp ?? "");
   const setAt = Number(/tps:set@(\d+)/.exec(pos.weex_resp ?? "")?.[1] ?? 0);
   const recent = setAt > 0 && Date.now() - setAt < 5 * 60_000;
@@ -967,10 +977,10 @@ async function ensureTakes(
   }
   let ok = extras ? 0 : tpRows.length;
   if (extras || !tpOk) {
-    const slices = takeQtys(liveQty, tps.length, spec.quantityPrecision, formatWeexQty);
+    const slices = takeQtys(liveQty, afterTp1 ? 1 : 2, spec.quantityPrecision, formatWeexQty);
     for (let i = 0; i < tps.length; i += 1) {
-      const slice = slices[i]!;
-      if (Number(slice) <= 0) continue;
+      const slice = slices[i] ?? (afterTp1 ? slices[0] : undefined);
+      if (!slice || Number(slice) <= 0) continue;
       const sent = await placeWeexTake(creds, {
         symbol: pos.weex_symbol,
         positionSide: side,
