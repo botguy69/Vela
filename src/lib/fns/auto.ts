@@ -196,9 +196,9 @@ function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
     return `4/4 at-risk (${liveL}L/${liveS}S, ${beN} BE). Next ticket only after TP1→BE.`;
   }
   if (at >= 1) {
-    return `Hunting next A++ (${at}/4 at-risk, ${liveL}L/${liveS}S, ${beN} BE). Mix from the chart. One per tick.`;
+    return `Hunting next A++ (${at}/4 at-risk, ${liveL}L/${liveS}S, ${beN} BE). 1h book. One special opposite. One per tick.`;
   }
-  return `Hunting 1 A++ per tick. 4 at-risk any mix. BE extras to 6.`;
+  return `Hunting 1 A++ per tick. 1h book, 4 at-risk. One special opposite. BE extras to 6.`;
 }
 
 function composePass(
@@ -2636,8 +2636,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const fade: "high" | "low" | null = ext.longChase ? "high" : ext.shortChase ? "low" : null;
           if (liveN.length >= LIVE_CAP) room = 0;
           const compass = {
-            bias: "chop" as const,
-            note: `${ext.note} ${tape.note} (info). ${heat.note}`,
+            bias: tape.side,
+            note: `${tape.note} ${ext.note}`.trim(),
           };
           const ordered = [...raw].sort((a, b) => {
             const aA = rules.eliteScalp(a.thesis ?? "", a.confidence ?? scoreToConf(a.score), bar.minConf, compass.bias) ? 1 : 0;
@@ -2790,7 +2790,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not a ${fade} reject — no with-trend fade`);
               continue;
             }
-            if (rules.setupQuality(pick.thesis ?? "") < 2) {
+            if (rules.setupQuality(pick.thesis ?? "") < 2 && !/Swing hold/i.test(pick.thesis ?? "")) {
               whyNot.push(`${tag} not location structure`);
               continue;
             }
@@ -2804,7 +2804,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                   thesis: hold.why,
                   stop: hold.stop,
                   target: hold.tp,
-                  targets: [hold.tp, hold.tp],
+                  targets: [hold.tp],
                 };
                 trig = { ok: true, wait: false, reason: hold.why, pullback: null };
                 whyNot.push(`${tag} flipped long — last low / last high`);
@@ -2819,7 +2819,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                   thesis: hold.why,
                   stop: hold.stop,
                   target: hold.tp,
-                  targets: [hold.tp, hold.tp],
+                  targets: [hold.tp],
                 };
                 trig = { ok: true, wait: false, reason: hold.why, pullback: null };
                 whyNot.push(`${tag} flipped short — last high / last low`);
@@ -2828,6 +2828,18 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (!trig.ok && !trig.wait) {
               veto = `Skip ${tag} ${trig.reason}`;
               whyNot.unshift(`${tag} ${trig.reason}`);
+              continue;
+            }
+            const mix = rules.mixAllows(
+              pick.side,
+              pick.thesis ?? "",
+              pick.confidence ?? scoreToConf(pick.score),
+              tape.side,
+              liveN.map((p) => ({ side: p.side === "short" ? "short" : "long" })),
+            );
+            if (!mix.ok) {
+              veto = `${tag} ${mix.why}`;
+              whyNot.push(`${tag} ${mix.why}`);
               continue;
             }
             const book = await getBookTicker(pick.weexSymbol);
@@ -2890,9 +2902,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const timed0 = rules.withLtfEntry(pick, trig.pullback);
+            const swing = /Swing hold/i.test(timed0.thesis ?? pick.thesis ?? "");
             const stopped = {
               ...timed0,
-              stop: rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15, hourPick),
+              stop:
+                swing && timed0.stop > 0
+                  ? timed0.stop
+                  : rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15, hourPick),
             };
             const dist = Math.abs(stopped.entry - stopped.stop);
             const stretch = rules.stretchTp(stopped.side, stopped.entry, stopped.stop, h4);
@@ -3084,7 +3100,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const learned =
       (stats.tpWins ?? 0) >= 20 && (stats.expectancyR ?? 0) > 0
         ? "A++ · 15m fill / 15m stop · 2 TPs (1R + 2R). BE after TP1. 4 at-risk, 6 with BE."
-        : "A++ · 15m fill / 15m stop · 2 TPs. 3%. Mix L/S from the chart.";
+        : "A++ · 15m fill / 15m stop · 2 TPs. 3%. 1h book + swing-hold exception.";
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))

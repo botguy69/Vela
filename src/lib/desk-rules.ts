@@ -412,7 +412,7 @@ export function structureStop(
   return s;
 }
 
-/** Book side from BTC heat, else live majority. Max one opposite, and only extreme A++ after 2+ with-tape. */
+/** 1h book. Same side free. One opposite only if swing-hold or 88% extreme after 2+ with-book. */
 export function mixAllows(
   pickSide: Side,
   thesis: string,
@@ -420,11 +420,12 @@ export function mixAllows(
   heat: "long" | "short" | "chop",
   live: { side: string }[],
 ): { ok: boolean; why: string } {
-  const liveL = live.filter((p) => (p.side === "short" ? "short" : "long") === "long").length;
+  const liveL = live.filter((p) => p.side !== "short").length;
   const liveS = live.filter((p) => p.side === "short").length;
   const book: Side | "chop" =
     heat !== "chop" ? heat : liveL + liveS === 0 ? "chop" : liveL >= liveS ? "long" : "short";
   if (book === "chop" || pickSide === book) return { ok: true, why: "with book" };
+  if (/Swing hold/i.test(thesis)) return { ok: true, why: "swing hold vs book" };
   const withN = book === "short" ? liveS : liveL;
   const againstN = book === "short" ? liveL : liveS;
   if (againstN >= 1) return { ok: false, why: `already 1 ${pickSide} vs ${book} book` };
