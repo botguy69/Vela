@@ -889,14 +889,25 @@ async function ensureTakes(
   const { taggedTake } = await import("@/lib/ta");
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
-  const afterTp1 =
-    Boolean(pos.tp1_hit) || Boolean(pos.be_moved) || (origQty(pos) > 0 && liveQty < origQty(pos) * 0.85);
   const entryPx = n(pos.fill_px) || n(pos.entry) || mark;
   const planned = parseNums(pos.targets);
   const beStop = entryPx > 0 && stopPx > 0 && Math.abs(stopPx - entryPx) / entryPx < 0.004;
   const riskFromStop = !beStop && stopPx > 0 && entryPx > 0 ? Math.abs(entryPx - stopPx) : 0;
   const riskFromTp = planned[0] && entryPx > 0 ? Math.abs(planned[0] - entryPx) : 0;
   const risk = riskFromStop >= entryPx * 0.003 ? riskFromStop : riskFromTp;
+  const r1 =
+    risk >= entryPx * 0.002 ? risk : planned[0] && entryPx > 0 ? Math.abs(planned[0] - entryPx) : entryPx * 0.008;
+  const t1Guess = entryPx > 0 && r1 > 0 ? (sideLc === "short" ? entryPx - r1 : entryPx + r1) : planned[0] ?? 0;
+  const throughTp1 = mark > 0 && t1Guess > 0 && taggedTake(sideLc, mark, t1Guess);
+  const afterTp1 =
+    Boolean(pos.tp1_hit) ||
+    Boolean(pos.be_moved) ||
+    throughTp1 ||
+    (origQty(pos) > 0 && liveQty < origQty(pos) * 0.85);
+  if (throughTp1 && !pos.tp1_hit) {
+    pos.tp1_hit = true;
+    await sql`update auto_signals set tp1_hit = true, updated_at = now() where id = ${pos.id}`;
+  }
   const tick = 10 ** -Math.max(0, spec.pricePrecision);
   const tps: number[] = [];
   const pushTp = (raw: number, force = false) => {
@@ -909,13 +920,14 @@ async function ensureTakes(
     if (!force && mark > 0 && taggedTake(sideLc, mark, px)) return;
     tps.push(px);
   };
-  const r1 = risk >= entryPx * 0.002 ? risk : planned[0] && entryPx > 0 ? Math.abs(planned[0] - entryPx) : entryPx * 0.008;
   if (entryPx > 0 && r1 > 0) {
     const t1 = sideLc === "short" ? entryPx - r1 : entryPx + r1;
-    const t2 = sideLc === "short" ? entryPx - 2 * r1 : entryPx + 2 * r1;
+    let t2 = sideLc === "short" ? entryPx - 2 * r1 : entryPx + 2 * r1;
+    if (afterTp1 && mark > 0 && taggedTake(sideLc, mark, t2)) {
+      t2 = sideLc === "short" ? mark * 0.992 : mark * 1.008;
+    }
     if (afterTp1) {
-      pushTp(planned[1] ?? t2);
-      if (!tps.length) pushTp(t2, true);
+      pushTp(planned[1] ?? t2, true);
     } else {
       pushTp(planned[0] ?? t1);
       pushTp(planned[1] ?? t2);
