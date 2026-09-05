@@ -91,8 +91,8 @@ export function htfAllows(
   const span = sh - sl;
   if (span > 0) {
     const loc = (last - sl) / span;
-    if (side === "short" && fade !== "high" && loc < 0.62) return false;
-    if (side === "long" && fade !== "low" && loc > 0.38) return false;
+    if (side === "short" && fade !== "high" && loc < 0.50) return false;
+    if (side === "long" && fade !== "low" && loc > 0.50) return false;
   }
   return true;
 }
@@ -423,13 +423,14 @@ export function mixAllows(
   return { ok: true, why: "coin tape" };
 }
 
-/** New entries only on a 15m that just closed (8m window). Manage ticks still run. */
-export function fifteenEntryReady(closed15: Candle[]): { ok: boolean; why: string } {
+/** New entries after a 15m close. Bar.time is the open — age from close, not open. */
+export function fifteenEntryReady(closed15: Candle[], intervalMs = 15 * 60_000): { ok: boolean; why: string } {
   if (closed15.length < 8) return { ok: false, why: "15m thin" };
   const last = closed15[closed15.length - 1]!;
-  const age = Date.now() - last.time;
-  if (!Number.isFinite(age) || age < 0) return { ok: true, why: "15m ready" };
-  if (age > 8 * 60_000) return { ok: false, why: "wait 15m close" };
+  const raw = Date.now() - last.time;
+  if (!Number.isFinite(raw) || raw < 0) return { ok: true, why: "15m ready" };
+  const sinceClose = raw >= intervalMs ? raw - intervalMs : raw;
+  if (sinceClose > 12 * 60_000) return { ok: false, why: "wait 15m close" };
   return { ok: true, why: "15m just closed" };
 }
 
