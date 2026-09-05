@@ -504,6 +504,7 @@ function mapSignal(row: SignalRow) {
     liveOnWeex: false,
     closeReason: inferClose(row),
     createdAt: row.created_at,
+    filledAt: row.filled_at,
     updatedAt: row.updated_at,
   };
 }
@@ -2628,8 +2629,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           let openLimits = stillOpenRaw.filter(
             (s) => s.status === "working" || s.status === "proposed",
           ).length;
-          const btc15 = await getWeexKlines("BTCUSDT", "15m", 210).catch(() => []);
-          const heat = rules.btcHeat(btc15);
           const tape = rules.btcBook(rules.closedCandles(books.BTCUSDT ?? [], 60 * 60 * 1000));
           const btc4h = await getWeexFourHour("BTCUSDT").catch(() => []);
           const ext = rules.btcExtended(btc4h);
@@ -2724,9 +2723,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}`
             : elite.length === 0
-              ? `Scanned ${scannedN}/${TOP25_WEEX.length}. 0 location A++ on 1h. Mid-bounce stand-down — longs need 4h back over the 21, shorts need the bounce to fail. 181 names, one tape.`
+              ? `Scanned ${scannedN}/${TOP25_WEEX.length}. No A++ this pass. 1h book. Slots stay empty.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "15m ripping / wrong VWAP = hard skip. No with-trend limit bypass.";
+          const aPlusLine = "A++ on the coin 4h+1h+15m. 1h book. Swing-hold is the only opposite.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;

@@ -548,6 +548,37 @@ export function flattenHoursLabel(rr = 1, conf = 85): string {
   return `${Math.round(fillMaxAgeMs(rr, conf) / 3600_000)}h`;
 }
 
+function clockLeft(ms: number): string {
+  if (ms <= 0) return "";
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  if (h >= 10) return `${h}h`;
+  if (h >= 1) return `${h}h ${m}m`;
+  return `${Math.max(1, m)}m`;
+}
+
+/** Live ticket clock. BE never time-flattens. Limits use the stale-limit window. */
+export function flattenClockLabel(opts: {
+  since?: string | Date | null;
+  rr?: number;
+  conf?: number;
+  beMoved?: boolean;
+  status?: string;
+  style?: Style;
+}): string {
+  if (opts.beMoved) return "BE · holds";
+  const raw = opts.since;
+  const t0 = raw ? new Date(raw).getTime() : NaN;
+  if (!Number.isFinite(t0)) return "—";
+  if (opts.status === "working" || opts.status === "proposed") {
+    const left = limitMaxAgeMs(opts.style ?? "scalp") - (Date.now() - t0);
+    return left <= 0 ? "limit due" : `${clockLeft(left)} to cancel`;
+  }
+  const left = fillMaxAgeMs(opts.rr ?? 1, opts.conf ?? 85) - (Date.now() - t0);
+  if (left <= 0) return "due · <0.4R flattens";
+  return `${clockLeft(left)} left`;
+}
+
 export function shouldCancelStaleLimit(createdAt: string | Date, style: Style): boolean {
   const t = new Date(createdAt).getTime();
   if (!Number.isFinite(t)) return false;

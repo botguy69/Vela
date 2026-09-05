@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BotBreakdown, LegalDisclaimer } from "@/components/legal";
 import { KeepAliveCard, PermanentDeskCard } from "@/components/keep-alive";
+import { flattenClockLabel } from "@/lib/desk-rules";
 import { formatPx, formatUsd, signedClass } from "@/lib/format";
 import {
   clearWeexKeys,
@@ -269,6 +270,9 @@ function TicketsTable({
     liveOnWeex?: boolean;
     closeReason?: string | null;
     closedPx?: number | null;
+    filledAt?: string | null;
+    createdAt?: string | null;
+    style?: string;
   }>;
   refresh: () => void;
 }) {
@@ -343,6 +347,9 @@ function TicketSheet({
     liveOnWeex?: boolean;
     closeReason?: string | null;
     closedPx?: number | null;
+    filledAt?: string | null;
+    createdAt?: string | null;
+    style?: string;
   }>;
   refresh: () => void;
   faded?: boolean;
@@ -359,6 +366,7 @@ function TicketSheet({
                 <th className="px-4 py-3 font-medium">Takes</th>
                 <th className="px-4 py-3 font-medium">Lev</th>
                 <th className="px-4 py-3 font-medium">PnL</th>
+                <th className="px-4 py-3 font-medium">Clock</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium" />
               </tr>
@@ -366,7 +374,7 @@ function TicketSheet({
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-muted">
+                  <td colSpan={9} className="px-4 py-10 text-center text-muted">
                     No tickets. Store keys, then arm.
                   </td>
                 </tr>
@@ -424,6 +432,18 @@ function TicketSheet({
                   <td className="px-4 py-2.5 font-mono tabular-nums">{t.leverage}x</td>
                   <td className={cn("px-4 py-2.5 font-mono tabular-nums", signedClass(t.pnl ?? 0))}>
                     {t.pnl == null ? "—" : formatUsd(t.pnl)}
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-xs tabular-nums text-subtle">
+                    {live || pending
+                      ? flattenClockLabel({
+                          since: t.filledAt ?? t.createdAt,
+                          rr: t.rr,
+                          conf: t.confidence ?? 85,
+                          beMoved: t.beMoved,
+                          status: t.status,
+                          style: (t.style === "swing" ? "swing" : "scalp") as "swing" | "scalp",
+                        })
+                      : "—"}
                   </td>
                   <td className="px-4 py-2.5">
                     <Badge variant={live ? "live" : "default"}>
