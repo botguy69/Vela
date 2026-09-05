@@ -945,10 +945,12 @@ async function ensureTakes(
   const recent = setAt > 0 && Date.now() - setAt < 5 * 60_000;
   const stampSet = async () => {
     const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set|be|miss|clean)@?\d*/g, "").trim()} tps:set@${Date.now()}`.slice(0, 500);
-    await sql`update auto_signals set weex_resp = ${stamp}, stop = ${stopPx}, targets = ${JSON.stringify(tps)}, updated_at = now() where id = ${pos.id}`;
+    const kept =
+      planned.length >= 2 ? planned : tps.length >= 2 ? tps : planned.length ? [...planned, ...tps] : tps;
+    await sql`update auto_signals set weex_resp = ${stamp}, stop = ${stopPx}, targets = ${JSON.stringify(kept)}, updated_at = now() where id = ${pos.id}`;
     pos.weex_resp = stamp;
     pos.stop = stopPx;
-    pos.targets = JSON.stringify(tps);
+    pos.targets = JSON.stringify(kept);
   };
   if (slOk && tpOk && !extras) return;
   const beMove = stopOverride != null && stopOverride > 0 && !slOk;
@@ -960,8 +962,6 @@ async function ensureTakes(
       notes.push(`${pos.weex_symbol} still ${after.length} on WEEX — wipe continues next tick, not restating`);
       return;
     }
-  } else if (hasSet && !beMove) {
-    return;
   }
   const oid = (tag: string) => `vela${tag}${pos.id}${Date.now().toString(36)}`.slice(0, 36);
   const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
