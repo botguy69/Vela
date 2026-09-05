@@ -88,6 +88,12 @@ export function htfAllows(
   if (a <= 0) return true;
   if (side === "long" && last >= sh - 0.2 * a) return false;
   if (side === "short" && last <= sl + 0.2 * a) return false;
+  const span = sh - sl;
+  if (span > 0) {
+    const loc = (last - sl) / span;
+    if (side === "short" && fade !== "high" && loc < 0.62) return false;
+    if (side === "long" && fade !== "low" && loc > 0.38) return false;
+  }
   return true;
 }
 
@@ -267,13 +273,51 @@ export function ltfTrigger(
     }
     return { ok: true, wait: false, reason: reclaim ? "VWAP reclaim" : "15m pullback + VWAP", pullback: mean };
   }
-  if (last > e21 + 0.7 * a) {
-    return { ok: false, wait: false, reason: "15m still ripping — no short", pullback: null };
+  const last3s = fifteen.slice(-3);
+  const greensS = last3s.filter((c) => c.close > c.open).length;
+  if (greensS >= 2 && last > (vwap ?? e21)) {
+    return { ok: false, wait: false, reason: "15m ripping — no short", pullback: null };
+  }
+  if (last > e21 + 0.25 * a) {
+    return { ok: false, wait: false, reason: "15m ripping — no short", pullback: null };
   }
   if (last < e21 - 0.35 * a && !reclaim) {
     return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
   }
   return { ok: true, wait: false, reason: reclaim ? "VWAP reject" : "15m bounce + VWAP", pullback: mean };
+}
+
+/** Hold above last swing low → long. Hold below last swing high → short. SL last extreme, TP opposite extreme. */
+export function swingHold(
+  side: Side,
+  fifteen: Candle[],
+): { ok: boolean; stop: number; tp: number; why: string } {
+  if (fifteen.length < 16) return { ok: false, stop: 0, tp: 0, why: "" };
+  const win = fifteen.slice(-12);
+  const sl = Math.min(...win.map((c) => c.low));
+  const sh = Math.max(...win.map((c) => c.high));
+  const last = win[win.length - 1]!;
+  const span = sh - sl;
+  if (!(span > 0) || !(last.close > 0)) return { ok: false, stop: 0, tp: 0, why: "" };
+  const a = atr(fifteen, 14) ?? span * 0.1;
+  const loc = (last.close - sl) / span;
+  const greens = win.slice(-3).filter((c) => c.close > c.open).length;
+  const reds = win.slice(-3).filter((c) => c.close < c.open).length;
+  if (side === "long") {
+    if (loc > 0.55) return { ok: false, stop: 0, tp: 0, why: "" };
+    if (greens < 2 && last.close <= last.open) return { ok: false, stop: 0, tp: 0, why: "" };
+    if (last.low <= sl + 0.05 * span && last.close < sl + 0.2 * span) return { ok: false, stop: 0, tp: 0, why: "" };
+    const stop = sl - 0.15 * a;
+    const tp = sh - 0.1 * a;
+    if (tp <= last.close || last.close - stop < last.close * 0.002) return { ok: false, stop: 0, tp: 0, why: "" };
+    return { ok: true, stop, tp, why: "Swing hold long — SL last low, TP last high" };
+  }
+  if (loc < 0.45) return { ok: false, stop: 0, tp: 0, why: "" };
+  if (reds < 2 && last.close >= last.open) return { ok: false, stop: 0, tp: 0, why: "" };
+  const stop = sh + 0.15 * a;
+  const tp = sl + 0.1 * a;
+  if (tp >= last.close || stop - last.close < last.close * 0.002) return { ok: false, stop: 0, tp: 0, why: "" };
+  return { ok: true, stop, tp, why: "Swing hold short — SL last high, TP last low" };
 }
 
 /** BTC is heat, not a compass. Hard chop → 1 seat. Mixed → 2 same-side. Offer/bid → 4. */

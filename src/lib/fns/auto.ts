@@ -2734,7 +2734,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             score: number;
           }[] = [];
 
-          for (const pick of pool) {
+          for (let pick of pool) {
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
             const confNow = pick.confidence ?? scoreToConf(pick.score);
             const aPlus = rules.eliteScalp(pick.thesis ?? "", confNow, bar.minConf, compass.bias);
@@ -2794,7 +2794,37 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not location structure`);
               continue;
             }
-            const trig = rules.ltfTrigger(pick.side, coin15);
+            let trig = rules.ltfTrigger(pick.side, coin15);
+            if (!trig.ok && !trig.wait && /ripping/i.test(trig.reason) && pick.side === "short") {
+              const hold = rules.swingHold("long", coin15);
+              if (hold.ok) {
+                pick = {
+                  ...pick,
+                  side: "long",
+                  thesis: hold.why,
+                  stop: hold.stop,
+                  target: hold.tp,
+                  targets: [hold.tp, hold.tp],
+                };
+                trig = { ok: true, wait: false, reason: hold.why, pullback: null };
+                whyNot.push(`${tag} flipped long — last low / last high`);
+              }
+            }
+            if (!trig.ok && !trig.wait && /dumping/i.test(trig.reason) && pick.side === "long") {
+              const hold = rules.swingHold("short", coin15);
+              if (hold.ok) {
+                pick = {
+                  ...pick,
+                  side: "short",
+                  thesis: hold.why,
+                  stop: hold.stop,
+                  target: hold.tp,
+                  targets: [hold.tp, hold.tp],
+                };
+                trig = { ok: true, wait: false, reason: hold.why, pullback: null };
+                whyNot.push(`${tag} flipped short — last high / last low`);
+              }
+            }
             if (!trig.ok && !trig.wait) {
               veto = `Skip ${tag} ${trig.reason}`;
               whyNot.unshift(`${tag} ${trig.reason}`);
