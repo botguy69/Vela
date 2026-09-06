@@ -63,6 +63,7 @@ export function htfAllows(
   fourHour: Candle[],
   heat: "long" | "short" | "chop" = "chop",
   fade?: "high" | "low" | null,
+  thesis = "",
 ): boolean {
   if (fourHour.length < 24) return true;
   const closed = closedCandles(fourHour, FOUR_H_MS);
@@ -89,7 +90,11 @@ export function htfAllows(
   if (side === "long" && last >= sh - 0.2 * a) return false;
   if (side === "short" && last <= sl + 0.2 * a) return false;
   const span = sh - sl;
-  if (span > 0) {
+  const structure =
+    /double (top|bottom)|Pin bar|engulf|failed range|climax rejection|buyers on 2nd|supply on 2nd/i.test(
+      thesis,
+    );
+  if (span > 0 && !structure) {
     const loc = (last - sl) / span;
     if (side === "short" && fade !== "high" && loc < 0.50) return false;
     if (side === "long" && fade !== "low" && loc > 0.50) return false;
@@ -884,7 +889,7 @@ export function mtfAllows(
   heat: "long" | "short" | "chop" = "chop",
   fade?: "high" | "low" | null,
 ): { ok: boolean; why: string } {
-  if (!htfAllows(side, fourHour, heat, fade)) return { ok: false, why: "4h reject" };
+  if (!htfAllows(side, fourHour, heat, fade, thesis)) return { ok: false, why: "4h reject" };
   const knife = /washout|Oversold|Overbought/i.test(thesis);
   const fadeHigh = fade === "high" && side === "short";
   const fadeLow = fade === "low" && side === "long";
