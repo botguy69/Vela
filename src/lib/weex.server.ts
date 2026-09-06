@@ -778,17 +778,14 @@ export async function cancelWeexStops(
     if (nearKeep) continue;
     const typed = /STOP|LOSS|^SL$|SL-|pos_loss|STOP_MARKET|STOP_LOSS/i.test(r.type);
     const tpTyped = /TAKE|PROFIT|^TP$|TP-|pos_profit|TAKE_PROFIT/i.test(r.type);
+    if (tpTyped && !typed) continue;
     const stopSide =
       side === "long" && mark > 0 && r.trigger > 0 && r.trigger < mark * 0.9994
         ? true
         : side === "short" && mark > 0 && r.trigger > 0 && r.trigger > mark * 1.0006
           ? true
           : false;
-    const wrongSide =
-      (side === "long" && mark > 0 && r.trigger > mark * 1.0005) ||
-      (side === "short" && mark > 0 && r.trigger > 0 && r.trigger < mark * 0.9995);
-    if (tpTyped && !typed && !wrongSide) continue;
-    if (typed || stopSide || wrongSide) ids.push(r.id);
+    if (typed || stopSide) ids.push(r.id);
   }
   await cancelAlgoIds(creds, symbol, ids);
 }

@@ -955,13 +955,14 @@ async function ensureTakes(
   });
   const slOk = slRows.length === 1 && (stopPx <= 0 || slRows.some((r) => near(r.trigger, stopPx)));
   const wantTp = afterTp1 ? 1 : 2;
-  const runnerPx = afterTp1 ? tps[0] ?? 0 : 0;
+  const runnerPx = afterTp1 ? tps[0] ?? planned[1] ?? 0 : 0;
   const runnerLive =
-    runnerPx > 0 &&
+    afterTp1 &&
     tpRows.some(
       (r) =>
-        near(r.trigger, runnerPx) &&
-        (mark <= 0 || (sideLc === "long" ? r.trigger > mark : r.trigger < mark)),
+        mark > 0 &&
+        (sideLc === "long" ? r.trigger > mark : r.trigger < mark) &&
+        (runnerPx <= 0 || near(r.trigger, runnerPx) || (planned[1] != null && near(r.trigger, planned[1]))),
     );
   const distinctTp = tpRows.filter(
     (r, i) => !tpRows.slice(0, i).some((o) => near(o.trigger, r.trigger)),
@@ -992,7 +993,7 @@ async function ensureTakes(
   };
   if (slOk && tpOk && !extras) return;
   const beMove = stopOverride != null && stopOverride > 0 && !slOk;
-  if (extras || listed.length > 3) {
+  if (!afterTp1 && (extras || listed.length > 3)) {
     await cancelWeexProtective(creds, pos.weex_symbol, sideLc);
     const after = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => [] as typeof listed);
     notes.push(`${pos.weex_symbol} wiped ${listed.length} → ${after.length} leftover TP/SL`);
