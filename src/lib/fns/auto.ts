@@ -955,19 +955,36 @@ async function ensureTakes(
   });
   const slOk = slRows.length === 1 && (stopPx <= 0 || slRows.some((r) => near(r.trigger, stopPx)));
   const wantTp = afterTp1 ? 1 : 2;
+  const runnerPx = afterTp1 ? tps[0] ?? 0 : 0;
+  const runnerLive =
+    runnerPx > 0 &&
+    tpRows.some(
+      (r) =>
+        near(r.trigger, runnerPx) &&
+        (mark <= 0 || (sideLc === "long" ? r.trigger > mark : r.trigger < mark)),
+    );
   const distinctTp = tpRows.filter(
     (r, i) => !tpRows.slice(0, i).some((o) => near(o.trigger, r.trigger)),
   ).length;
   const collapsed = !afterTp1 && tpRows.length >= 1 && distinctTp < 2;
-  const tpOk = afterTp1 ? tpRows.length >= 1 : tpRows.length >= 2 && !collapsed;
-  const extras = listed.length > 3 || slRows.length > 1 || tpRows.length > 2 || collapsed;
+  const tpOk = afterTp1 ? runnerLive : tpRows.length >= 2 && !collapsed;
+  const extras =
+    listed.length > 3 || slRows.length > 1 || tpRows.length > (afterTp1 ? 1 : 2) || collapsed;
   const hasSet = /tps:set/.test(pos.weex_resp ?? "");
   const setAt = Number(/tps:set@(\d+)/.exec(pos.weex_resp ?? "")?.[1] ?? 0);
   const recent = setAt > 0 && Date.now() - setAt < 5 * 60_000;
   const stampSet = async () => {
     const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set|be|miss|clean)@?\d*/g, "").trim()} tps:set@${Date.now()}`.slice(0, 500);
     const kept =
-      tps.length >= 2 ? tps : planned.length >= 2 ? planned : planned.length ? [...planned, ...tps] : tps;
+      afterTp1 && planned.length >= 2
+        ? [planned[0]!, tps[0] ?? planned[1]!]
+        : tps.length >= 2
+          ? tps
+          : planned.length >= 2
+            ? planned
+            : planned.length
+              ? [...planned, ...tps]
+              : tps;
     await sql`update auto_signals set weex_resp = ${stamp}, stop = ${stopPx}, targets = ${JSON.stringify(kept)}, updated_at = now() where id = ${pos.id}`;
     pos.weex_resp = stamp;
     pos.stop = stopPx;
