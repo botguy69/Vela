@@ -74,7 +74,7 @@ export function htfAllows(
       : closed.map((c) => c.close);
   const mid = sma(smaSrc.length >= 21 ? smaSrc : fourHour.map((c) => c.close), 21);
   if (mid == null || last == null) return true;
-  const band = heat === side ? 0.02 : 0.003;
+  const band = 0.02;
   const skip21 = (fade === "high" && side === "short") || (fade === "low" && side === "long");
   if (!skip21) {
     if (side === "long" && last < mid * (1 - band)) return false;
@@ -124,7 +124,7 @@ export function btcExtended(fourHour: Candle[]): {
       ? "BTC 4h high — no new longs. Shorts only pin/double/climax at the high."
       : shortChase
         ? "BTC 4h low — no new shorts. Longs only pin/double/climax at the low."
-        : "BTC 4h mid — both sides if the coin is A++.",
+        : "BTC 4h mid. Coin must still be the right half of its own 4h box.",
   };
 }
 
