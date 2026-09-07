@@ -79,7 +79,7 @@ export function phaseFor(equity: number, continueToGoal = false): Phase {
       minRr: 1.9,
       minConf: 78,
       method: "trend",
-      note: "Stage 1 · 3% (1.8% after 3 losses, 2 wins restore). 4 at-risk any mix. BE extras to 6.",
+      note: "Stage 1 · 3% (2% after 3 losses, 1% after 5; a win restores 3%). 4 at-risk any mix. BE extras to 6.",
     };
   }
   return {
@@ -155,15 +155,15 @@ export function adaptMethod(opts: {
   if (opts.lossStreak >= 5) {
     next = {
       ...next,
-      marginPct: 1.2,
+      marginPct: 1,
       minConf: Math.min(82, next.minConf + 3),
-      note: `${next.note} Five losses. 1.2% size. A win restores 3%.`,
+      note: `${next.note} Five losses. 1% size. A win restores 3%.`,
     };
   } else {
     next = {
       ...next,
-      marginPct: 1.8,
-      note: `${next.note} Risk cut to 1.8% after three losses. A win restores 3%.`,
+      marginPct: 2,
+      note: `${next.note} Risk cut to 2% after three losses. A win restores 3%.`,
     };
   }
   return next;

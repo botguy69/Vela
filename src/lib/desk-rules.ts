@@ -972,7 +972,7 @@ export function mtfAllows(
   return { ok: true, why: "" };
 }
 
-/** Runner when 4h has room. TP2 only — TP1 stays 1R. */
+/** Runner when 4h has room. TP2 only — TP1 stays 1R. Min stretch RR softened to 2. */
 export function stretchTp(
   side: Side,
   entry: number,
@@ -984,12 +984,12 @@ export function stretchTp(
   const stopPct = risk / entry;
   if (stopPct < 0.003 || stopPct > 0.06) return { tp: 0, why: "" };
   const want10 = side === "long" ? entry * 1.1 : entry * 0.9;
-  const min3 = side === "long" ? entry + 3 * risk : entry - 3 * risk;
+  const min2 = side === "long" ? entry + 2 * risk : entry - 2 * risk;
   const closed = closedCandles(fourHour, FOUR_H_MS);
   const bars = closed.length >= 8 ? closed : fourHour;
   if (bars.length < 8) {
     const rr = Math.abs(want10 - entry) / risk;
-    return rr >= 3 ? { tp: want10, why: `${rr.toFixed(1)}R stretch` } : { tp: 0, why: "" };
+    return rr >= 2 ? { tp: want10, why: `${rr.toFixed(1)}R stretch` } : { tp: 0, why: "" };
   }
   const win = bars.slice(-21);
   const sh = Math.max(...win.map((c) => c.high));
@@ -998,18 +998,57 @@ export function stretchTp(
   let tp = 0;
   if (side === "long") {
     const cap = sh - 0.15 * a;
-    if (cap - entry < Math.max(3 * risk, entry * 0.05)) return { tp: 0, why: "" };
+    if (cap - entry < Math.max(2 * risk, entry * 0.05)) return { tp: 0, why: "" };
     tp = Math.min(want10, cap);
-    if (tp < min3 && cap >= min3) tp = min3;
+    if (tp < min2 && cap >= min2) tp = min2;
   } else {
     const cap = sl + 0.15 * a;
-    if (entry - cap < Math.max(3 * risk, entry * 0.05)) return { tp: 0, why: "" };
+    if (entry - cap < Math.max(2 * risk, entry * 0.05)) return { tp: 0, why: "" };
     tp = Math.max(want10, cap);
-    if (tp > min3 && cap <= min3) tp = min3;
+    if (tp > min2 && cap <= min2) tp = min2;
   }
   const rr = Math.abs(tp - entry) / risk;
-  if (rr < 3) return { tp: 0, why: "" };
+  if (rr < 2) return { tp: 0, why: "" };
   return { tp, why: `${rr.toFixed(1)}R stretch` };
+}
+
+/** Desk place path: TP1 at >=1R, TP2 stretch (min 2R) or 2R fallback. */
+export function planDeskTargets(
+  side: Side,
+  entry: number,
+  stop: number,
+  fourHour: Candle[],
+  orig?: { target?: number; targets?: number[] },
+): { target: number; targets: number[]; rr: number; stretchWhy: string } {
+  const dist = Math.abs(entry - stop);
+  if (!(dist > 0) || !(entry > 0)) {
+    return { target: orig?.target ?? 0, targets: orig?.targets ?? [], rr: 1, stretchWhy: "" };
+  }
+  const stretch = stretchTp(side, entry, stop, fourHour);
+  const r1 = side === "long" ? entry + dist : entry - dist;
+  const r2 = side === "long" ? entry + 2 * dist : entry - 2 * dist;
+  const origTp1 = (orig?.targets && orig.targets[0]) || orig?.target || 0;
+  const origTp2 = orig?.targets && orig.targets[1];
+  const tp1 =
+    origTp1 > 0
+      ? side === "long"
+        ? Math.max(origTp1, r1)
+        : Math.min(origTp1, r1)
+      : r1;
+  const tp2 =
+    stretch.tp > 0
+      ? stretch.tp
+      : origTp2 && origTp2 > 0
+        ? side === "long"
+          ? Math.max(origTp2, r2)
+          : Math.min(origTp2, r2)
+        : r2;
+  return {
+    target: tp1,
+    targets: [tp1, tp2],
+    rr: Math.abs(tp2 - entry) / dist,
+    stretchWhy: stretch.why,
+  };
 }
 
 /** 1R would print into 4h demand/supply — skip. ONDO TP sat on the 4h low. */

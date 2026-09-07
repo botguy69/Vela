@@ -15,7 +15,26 @@ export function clampRiskPct(raw: number): number {
   return Math.min(3, Math.max(1, raw));
 }
 
-/** 3% of the book is margin (1.8% after 3 losses). Notional = margin × coin max leverage on cross.
+/** Snap to discretionary 1 / 2 / 3% of book. Cap 3%. */
+export function discreteMarginCap(raw: number): 1 | 2 | 3 {
+  if (!Number.isFinite(raw) || raw <= 0) return 1;
+  if (raw < 1.5) return 1;
+  if (raw < 2.5) return 2;
+  return 3;
+}
+
+/** Map setup confidence against phase base into discrete 1|2|3% margin. */
+export function marginForConviction(confidence: number, baseMarginPct = 3): 1 | 2 | 3 {
+  const base = discreteMarginCap(baseMarginPct);
+  const c = Number.isFinite(confidence) ? confidence : 0;
+  let want: 1 | 2 | 3 = 1;
+  if (c >= 92) want = 3;
+  else if (c >= 88) want = 2;
+  else want = 1;
+  return (want <= base ? want : base) as 1 | 2 | 3;
+}
+
+/** 3% of the book is margin (2% after 3 losses, 1% after 5). Notional = margin × coin max leverage on cross.
  * Leverage MUST remain coin max — size down margin / trade count on risk, never the lev. */
 
 export function sizeSetup(

@@ -1558,7 +1558,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       getWeexKlines,
     } = await import("@/lib/weex-market.server");
     const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, taggedTake } = await import("@/lib/ta");
-    const { sizeSetup } = await import("@/lib/risk");
+    const { sizeSetup, marginForConviction } = await import("@/lib/risk");
     const { coinByWeex, SKIP_WEEX, TOP25_WEEX } = await import("@/lib/universe");
     const rules = await import("@/lib/desk-rules");
     const sql = await getSql();
@@ -2759,32 +2759,20 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               stop: rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15, hourPick),
             };
             const dist = Math.abs(stopped.entry - stopped.stop);
-            const stretch = rules.stretchTp(stopped.side, stopped.entry, stopped.stop, h4);
-            const r1 = stopped.side === "long" ? stopped.entry + dist : stopped.entry - dist;
-            const r2 = stopped.side === "long" ? stopped.entry + 2 * dist : stopped.entry - 2 * dist;
-            const origTp1 = (timed0.targets && timed0.targets[0]) || timed0.target;
-            const origTp2 = timed0.targets && timed0.targets[1];
-            const tp1 =
-              origTp1 > 0
-                ? stopped.side === "long"
-                  ? Math.max(origTp1, r1)
-                  : Math.min(origTp1, r1)
-                : r1;
-            const tp2 =
-              stretch.tp > 0
-                ? stretch.tp
-                : origTp2 && origTp2 > 0
-                  ? stopped.side === "long"
-                    ? Math.max(origTp2, r2)
-                    : Math.min(origTp2, r2)
-                  : r2;
+            const planned = rules.planDeskTargets(
+              stopped.side,
+              stopped.entry,
+              stopped.stop,
+              h4,
+              { target: timed0.target, targets: timed0.targets },
+            );
             const timed1 =
               dist > 0
                 ? {
                     ...stopped,
-                    target: tp1,
-                    targets: [tp1, tp2],
-                    rr: dist > 0 ? Math.abs(tp2 - stopped.entry) / dist : 1,
+                    target: planned.target,
+                    targets: planned.targets,
+                    rr: planned.rr,
                   }
                 : stopped;
             if (rules.targetIntoLocation(timed1.side, timed1.entry, timed1.stop, h4)) {
@@ -2793,7 +2781,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const timed = trig.wait ? { ...timed1, entryType: "limit" as const } : timed1;
-            const sz = sizeSetup(timed, equity, corrected.marginPct, spec.maxLeverage);
+            const sz = sizeSetup(
+              timed,
+              equity,
+              marginForConviction(timed.confidence ?? conf, corrected.marginPct),
+              spec.maxLeverage,
+            );
             if (!sz) {
               whyNot.unshift(`${tag} size rejected (min notional / stop too wide)`);
               continue;
