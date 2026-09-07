@@ -14,9 +14,13 @@ function sealSecrets(): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const s of raw) {
-    if (!s || seen.has(s)) continue;
-    seen.add(s);
-    out.push(s);
+    if (!s) continue;
+    // Try trimmed and raw — Render/env paste sometimes keeps whitespace.
+    for (const v of [s.trim(), s]) {
+      if (!v || seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+    }
   }
   return out;
 }
@@ -35,7 +39,7 @@ export function seal(plain: string): string {
 }
 
 export function openSeal(packed: string): string {
-  const buf = Buffer.from(packed, "base64");
+  const buf = Buffer.from(String(packed).trim(), "base64");
   const iv = buf.subarray(0, 12);
   const tag = buf.subarray(12, 28);
   const enc = buf.subarray(28);
@@ -49,6 +53,23 @@ export function openSeal(packed: string): string {
     }
   }
   throw new Error("WEEX keys unreadable — re-save keys");
+}
+
+/** Safe diagnostics for book/tick — never returns secret material. */
+export function sealProbe(packed: string | null | undefined): {
+  materials: number;
+  blobLen: number;
+  openOk: boolean;
+} {
+  const materials = sealSecrets().length;
+  if (!packed) return { materials, blobLen: 0, openOk: false };
+  const blobLen = packed.length;
+  try {
+    openSeal(packed);
+    return { materials, blobLen, openOk: true };
+  } catch {
+    return { materials, blobLen, openOk: false };
+  }
 }
 
 function sign(secret: string, timestamp: string, method: string, path: string, query: string, body: string) {
