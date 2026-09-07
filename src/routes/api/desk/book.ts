@@ -68,31 +68,44 @@ async function handle(request: Request) {
       if (hasKeys) {
         try {
           const { openSeal, getWeexEquity, listWeexPositions } = await import("@/lib/weex.server");
-          const creds = {
-            apiKey: openSeal(row.api_key_enc!),
-            apiSecret: openSeal(row.api_secret_enc!),
-            passphrase: openSeal(row.api_pass_enc!),
-          };
-          const bal = await getWeexEquity(creds);
-          if (bal.ok) {
-            accountUsd = bal.data.equity;
-            peakUsd = Math.max(peakUsd, accountUsd);
-          } else {
-            weexError = bal.error;
+          let creds: { apiKey: string; apiSecret: string; passphrase: string } | null = null;
+          try {
+            creds = {
+              apiKey: openSeal(row.api_key_enc!),
+              apiSecret: openSeal(row.api_secret_enc!),
+              passphrase: openSeal(row.api_pass_enc!),
+            };
+          } catch (err) {
+            const m = err instanceof Error ? err.message : String(err);
+            weexError = /authenticate|Unsupported state|seal|decrypt/i.test(m)
+              ? "WEEX keys unreadable — re-save keys"
+              : m.slice(0, 160);
           }
-          const book = await listWeexPositions(creds).catch(() => null);
-          if (book) {
-            positions = book.map((p) => ({
-              symbol: p.symbol,
-              side: p.side,
-              qty: p.qty,
-              entry: p.entry,
-              uPnL: p.pnl,
-              mark: p.mark,
-            }));
+          if (creds) {
+            const bal = await getWeexEquity(creds);
+            if (bal.ok) {
+              accountUsd = bal.data.equity;
+              peakUsd = Math.max(peakUsd, accountUsd);
+            } else {
+              weexError = bal.error;
+            }
+            const book = await listWeexPositions(creds).catch(() => null);
+            if (book) {
+              positions = book.map((p) => ({
+                symbol: p.symbol,
+                side: p.side,
+                qty: p.qty,
+                entry: p.entry,
+                uPnL: p.pnl,
+                mark: p.mark,
+              }));
+            }
           }
         } catch (err) {
-          weexError = err instanceof Error ? err.message.slice(0, 160) : "weex failed";
+          const m = err instanceof Error ? err.message : "weex failed";
+          weexError = /authenticate|Unsupported state|seal|decrypt/i.test(m)
+            ? "WEEX keys unreadable — re-save keys"
+            : m.slice(0, 160);
         }
       }
 

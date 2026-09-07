@@ -185,11 +185,16 @@ function publicSettings(
 async function credsFrom(row: SettingsRow) {
   if (!(row.api_key_enc && row.api_secret_enc && row.api_pass_enc)) return null;
   const { openSeal } = await import("@/lib/weex.server");
-  return {
-    apiKey: openSeal(row.api_key_enc),
-    apiSecret: openSeal(row.api_secret_enc),
-    passphrase: openSeal(row.api_pass_enc),
-  };
+  try {
+    return {
+      apiKey: openSeal(row.api_key_enc),
+      apiSecret: openSeal(row.api_secret_enc),
+      passphrase: openSeal(row.api_pass_enc),
+    };
+  } catch {
+    // Soft-fail seal/decrypt — keep hunt tape; caller treats null like missing keys.
+    return null;
+  }
 }
 
 async function pullWeexBook(row: SettingsRow) {
@@ -1524,6 +1529,35 @@ export async function executeAutoTick(userId: string): Promise<{ opened: number;
         /* ignore */
       }
       return { opened: 0, closed: 0, note: "Skip duplicate ticket." };
+    }
+    // Seal/decrypt failures must not clobber a multi-line hunt tape in last_tick_note.
+    if (/authenticate|Unsupported state|seal|decrypt/i.test(msg)) {
+      const soft = "WEEX keys unreadable — re-save keys";
+      try {
+        const { getSql } = await import("@/lib/db");
+        const sql = await getSql();
+        const [row] = await sql<{ last_tick_note: string | null }>`
+          select last_tick_note from auto_settings where user_id = ${userId} limit 1
+        `;
+        const prior = String(row?.last_tick_note ?? "");
+        const looksLikeHunt = prior.includes("\n") || /hunt|Last Pass|A\+|scanning|pass\b/i.test(prior);
+        if (looksLikeHunt && prior.trim()) {
+          await sql`
+            update auto_settings
+            set last_tick_at = now(), updated_at = now()
+            where user_id = ${userId}
+          `;
+          return { opened: 0, closed: 0, note: prior };
+        }
+        await sql`
+          update auto_settings
+          set last_tick_at = now(), last_tick_note = ${soft}, updated_at = now()
+          where user_id = ${userId}
+        `;
+      } catch {
+        /* ignore */
+      }
+      return { opened: 0, closed: 0, note: soft };
     }
     const note = /is not a function|stats_from|not-null/i.test(msg)
       ? "Tick recovered. Hunting A+ only."
