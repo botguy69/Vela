@@ -1355,7 +1355,7 @@ export const saveWeexKeys = createServerFn({ method: "POST" })
       throw new Error("Key, secret, and passphrase are all required.");
     }
     const { getSql } = await import("@/lib/db");
-    const { seal, verifyKeys } = await import("@/lib/weex.server");
+    const { assertSealRoundTrip, verifyKeys } = await import("@/lib/weex.server");
     const sql = await getSql();
     await ensureSettings(sql, context.userId);
     const check = await verifyKeys({
@@ -1365,6 +1365,18 @@ export const saveWeexKeys = createServerFn({ method: "POST" })
     });
     if (!check.ok) {
       throw new Error(check.error || "WEEX rejected those keys.");
+    }
+    // Seal with round-trip verify BEFORE write so we never store blobs we cannot open.
+    let keyEnc: string;
+    let secretEnc: string;
+    let passEnc: string;
+    try {
+      keyEnc = assertSealRoundTrip(data.apiKey);
+      secretEnc = assertSealRoundTrip(data.apiSecret);
+      passEnc = assertSealRoundTrip(data.passphrase);
+    } catch (err) {
+      const m = err instanceof Error ? err.message : String(err);
+      throw new Error(m);
     }
     const hint = `${data.apiKey.slice(0, 3)}…${data.apiKey.slice(-4)}`;
     const { getWeexEquity } = await import("@/lib/weex.server");
@@ -1376,9 +1388,9 @@ export const saveWeexKeys = createServerFn({ method: "POST" })
     const eq = bal.ok ? bal.data.equity : null;
     await sql`
       update auto_settings
-      set api_key_enc = ${seal(data.apiKey)},
-          api_secret_enc = ${seal(data.apiSecret)},
-          api_pass_enc = ${seal(data.passphrase)},
+      set api_key_enc = ${keyEnc},
+          api_secret_enc = ${secretEnc},
+          api_pass_enc = ${passEnc},
           key_hint = ${hint},
           venue = 'weex',
           weex_mode = 'live',
