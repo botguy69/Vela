@@ -68,7 +68,8 @@ async function handle(request: Request) {
       const hasKeys = Boolean(row.api_key_enc && row.api_secret_enc && row.api_pass_enc);
       if (hasKeys) {
         try {
-          const { openSeal, getWeexEquity, listWeexPositions } = await import("@/lib/weex.server");
+          const { openSeal, getWeexEquity, listWeexPositions, sealProbe } = await import("@/lib/weex.server");
+          const keyProbe = sealProbe(row.api_key_enc);
           let creds: { apiKey: string; apiSecret: string; passphrase: string } | null = null;
           try {
             creds = {
@@ -167,6 +168,7 @@ async function handle(request: Request) {
         lastTickNote: row.last_tick_note,
         hasKeys,
         weexError,
+        keyProbe,
         positions,
         signals,
       });
