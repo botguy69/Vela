@@ -15,7 +15,9 @@ export function clampRiskPct(raw: number): number {
   return Math.min(3, Math.max(1, raw));
 }
 
-/** 3% of the book is margin (1.8% after 3 losses). Notional = margin × coin max leverage on cross. */
+/** 3% of the book is margin (1.8% after 3 losses). Notional = margin × coin max leverage on cross.
+ * Leverage MUST remain coin max — size down margin / trade count on risk, never the lev. */
+
 export function sizeSetup(
   setup: RawSetup,
   accountUsd: number,

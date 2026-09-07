@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { adaptMethod, clampPeak, GOAL_USD, STAGE2_USD, multipleToGoal, phaseForRun, progressPct, stageTarget } from "@/lib/goal";
 import { setupTag } from "@/lib/desk-rules";
+import { huntHeader, composePass } from "@/lib/desk-hunt";
 import { feeBePx, n, oneRUsd, origQty, parseNums, planTakes, shouldRestateAfterWipe } from "@/lib/takes";
 
 /** WR / streaks: this 4h-21 + 4-mix book. Live tickets still count when they close. */
@@ -114,40 +115,6 @@ function livePhase(
   });
 }
 
-function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
-  const at = liveL + liveS;
-  const live = liveTotal ?? at + beN;
-  if (live >= 6) {
-    return `Not hunting — ${live} live. Cap 6 (4 at-risk + BE extras).`;
-  }
-  if (at >= 4) {
-    return `4/4 at-risk (${liveL}L/${liveS}S, ${beN} BE). Next ticket only after TP1→BE.`;
-  }
-  if (at >= 1) {
-    return `Hunting next A++ (${at}/4 at-risk, ${liveL}L/${liveS}S, ${beN} BE). Either side. Best location. One per tick.`;
-  }
-  return `Hunting 1 A++ per tick. Either side. Best location. 4 at-risk. BE extras to 6.`;
-}
-
-function composePass(
-  note: string | null,
-  liveL: number,
-  liveS: number,
-  liveLines: string[],
-  beN = 0,
-  liveTotal?: number,
-) {
-  const head = huntHeader(liveL, liveS, beN, liveTotal);
-  const fromTick = (note ?? "")
-    .split("\n")
-    .map((ln) => ln.trim())
-    .filter((ln) =>
-      /^(Eying |Took |Skip |BTC |Book |One |A\+\+|Closed )/i.test(ln),
-    )
-    .filter((ln) => !/trend cooling|80%\+|21h-mean|No dip-buy vs a dump/i.test(ln));
-  const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
-  return [head, ...uniq].filter(Boolean).join("\n");
-}
 
 function publicSettings(
   row: SettingsRow,
@@ -2262,8 +2229,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const atRisk = stillOpen.filter(
       (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
     );
-    const LIVE_CAP = 6;
+    const LIVE_CAP = 6; // seats: 4 at-risk + BE extras to 6
     const AT_RISK = 4;
+    // TODO(desk-place): extract placeTicket into src/lib/desk-place.ts when clean.
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 85, note: "A++ · engulf/double/pin/climax. Failed-bounce + continuation off." };
 
