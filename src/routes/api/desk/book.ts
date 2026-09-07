@@ -46,7 +46,8 @@ async function handle(request: Request) {
       select user_id, account_usd, peak_usd, last_tick_note,
              api_key_enc, api_secret_enc, api_pass_enc, armed
       from auto_settings
-      where armed = true
+      order by updated_at desc nulls last
+      limit 20
     `;
 
     const desks: unknown[] = [];
