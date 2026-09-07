@@ -125,9 +125,14 @@ function publicSettings(
   keyProbe?: { materials: number; blobLen: number; openOk: boolean } | null,
 ) {
   const liveEq = live?.equity;
-  const equity = liveEq != null ? liveEq : 0;
-  let peak = liveEq != null ? Math.max(n(row.peak_usd) || liveEq, liveEq) : 0;
+  // Never zero the desk book when WEEX pull fails — keep last known DB equity.
+  const equity = liveEq != null ? liveEq : Math.max(0.01, n(row.account_usd) || 0);
+  let peak =
+    liveEq != null
+      ? Math.max(n(row.peak_usd) || liveEq, liveEq)
+      : Math.max(n(row.peak_usd) || equity, equity);
   if (liveEq != null) peak = clampPeak(liveEq, peak);
+  else peak = clampPeak(equity, peak);
   const dd = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
   const phase = livePhase({ ...row, account_usd: Math.max(equity, liveEq != null ? equity : 0) }, stats);
   return {
@@ -1719,7 +1724,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const creds = await credsFrom(settings);
       if (creds) {
         const { listWeexPositions, listWeexClosedPnl } = await import("@/lib/weex.server");
-        weexBook = await listWeexPositions(creds);
+        // null = API paths failed; empty [] = flat. Only missing creds leave weexBook null (unread).
+        weexBook = (await listWeexPositions(creds)) ?? [];
         weexCloses = await listWeexClosedPnl(creds).catch(() => []);
         await resurrectLive(sql, userId, weexBook, notes, creds);
         const flat = await closeFlatOnWeex(sql, userId, weexBook, notes, creds);
@@ -1738,10 +1744,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     let closed = 0;
     let opened = 0;
     let huntTape = "";
-    let equity = pub.accountUsd;
+    let equity = live ? live.equity : Math.max(0.01, n(settings.account_usd) || pub.accountUsd || 0);
     let streak = pub.lossStreak;
     let winStreak = n((settings as SettingsRow).win_streak) || 0;
-    let peak = clampPeak(equity, pub.peakUsd);
+    let peak = clampPeak(equity, Math.max(n(settings.peak_usd) || 0, pub.peakUsd || 0, equity));
     for (const pnl of bookedFlat) {
       closed += 1;
       streak = pnl >= 0 ? 0 : streak + 1;
@@ -2250,8 +2256,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       equity = refreshed.live.equity;
       peak = clampPeak(equity, Math.max(peak, equity));
     } else {
-      equity = Math.max(0.01, equity);
-      peak = clampPeak(equity, Math.max(peak, equity));
+      // Keep last known DB equity — never stamp 0.01 over a real book on seal/API blip.
+      equity = Math.max(0.01, n(settings.account_usd) || equity || 0);
+      peak = clampPeak(equity, Math.max(n(settings.peak_usd) || peak, peak, equity));
       if (refreshed.error) notes.push(refreshed.error);
     }
     const afterStats = { closed: stats.closed + closed, wins: stats.wins };
@@ -2321,6 +2328,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 85, note: "A++ · engulf/double/pin/climax. Failed-bounce + continuation off." };
 
+    // Unread = could not open keys (weexBook stays null). Empty book [] still hunts.
     const bookUnread = weexBook == null;
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
     const beFree = new Set<string>();
