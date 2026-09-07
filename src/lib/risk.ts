@@ -12,7 +12,8 @@ export type SizedSetup = RawSetup & {
 
 export function clampRiskPct(raw: number): number {
   if (!Number.isFinite(raw)) return 3;
-  return Math.min(3, Math.max(1, raw));
+  // Allow up to 5 for rare one-shot overrides; normal desk still passes 1–3.
+  return Math.min(5, Math.max(1, raw));
 }
 
 /** Snap to discretionary 1 / 2 / 3% of book. Cap 3%. */
