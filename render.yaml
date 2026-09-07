@@ -3,7 +3,7 @@ services:
     name: vela
     runtime: docker
     plan: free
-    healthCheckPath: /api/health
+    healthCheckPath: /api/cron/tick?src=alive
     envVars:
       - key: VELA_WORKER
         value: "1"
