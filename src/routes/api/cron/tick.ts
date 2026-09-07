@@ -27,6 +27,24 @@ async function handle(request: Request) {
     const { ensureAutoLoop, kickArmedTicks } = await import("@/lib/auto-loop.server");
     ensureAutoLoop();
 
+    // Challenge path: if keys exist but desk was left disarmed after a key re-save, re-arm once.
+    if (src === "challenge") {
+      try {
+        const { getSql } = await import("@/lib/db");
+        const sql = await getSql();
+        await sql`
+          update auto_settings
+          set armed = true, venue = 'weex', weex_mode = 'live', updated_at = now()
+          where api_key_enc is not null
+            and api_secret_enc is not null
+            and api_pass_enc is not null
+            and armed = false
+        `;
+      } catch {
+        /* ignore */
+      }
+    }
+
     try {
       const { stampCronHit } = await import("@/lib/fns/auto");
       await stampCronHit();
