@@ -1724,7 +1724,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const creds = await credsFrom(settings);
       if (creds) {
         const { listWeexPositions, listWeexClosedPnl } = await import("@/lib/weex.server");
-        // null = API paths failed; empty [] = flat. Only missing creds leave weexBook null (unread).
+        // null = API paths failed; empty [] = flat.
         weexBook = (await listWeexPositions(creds)) ?? [];
         weexCloses = await listWeexClosedPnl(creds).catch(() => []);
         await resurrectLive(sql, userId, weexBook, notes, creds);
@@ -1733,6 +1733,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         flattenedTick = flat.flattened;
         await restampWeexPnl(sql, userId, creds, notes, weexCloses);
         stats = await closedStats(sql, userId, settings.stats_from);
+      } else if (settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc) {
+        // Keys on file — never park hunt on a soft unwrap blip. Empty book; place retries next tick.
+        weexBook = [];
+        notes.push("WEEX book soft — hunting on DB seats");
       }
     }
 
@@ -2328,8 +2332,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 85, note: "A++ · engulf/double/pin/climax. Failed-bounce + continuation off." };
 
-    // Unread = could not open keys (weexBook stays null). Empty book [] still hunts.
-    const bookUnread = weexBook == null;
+    // Unread only if no key blobs at all. Enc present + soft book [] still hunts.
+    const bookUnread =
+      weexBook == null &&
+      !(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc);
     const liveN = (weexBook ?? []).filter((p) => p.qty > 0);
     const beFree = new Set<string>();
     for (const p of liveN) {
@@ -2393,7 +2399,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
       : bookUnread
-        ? "WEEX unread — not hunting. Leave live tickets."
+        ? "No WEEX keys on file — not hunting."
         : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN));
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
