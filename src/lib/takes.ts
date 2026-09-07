@@ -225,11 +225,8 @@ export function planTakes(input: {
     const plannedFar = planned.find((p) => Math.abs(p - t1) / Math.max(t1, 1) > 0.004);
     let t2 = plannedFar && plannedFar > 0 ? plannedFar : twoR;
     if (side === "short" ? t2 >= t1 : t2 <= t1) t2 = twoR;
-    if (afterTp1 && mark > 0 && taggedTake(side, mark, t2)) {
-      t2 = side === "short" ? mark * 0.992 : mark * 1.008;
-    }
     if (afterTp1) {
-      pushTp(t2, true);
+      if (!(mark > 0 && taggedTake(side, mark, t2))) pushTp(t2, true);
     } else {
       pushTp(t1, true);
       pushTp(t2, true);
@@ -257,11 +254,16 @@ export function planTakes(input: {
     listed.length > 3 || slRows.length > 1 || tpRows.length > (afterTp1 ? 1 : 2) || collapsed;
   const setAt = Number(/tps:set@(\d+)/.exec(input.weexResp ?? "")?.[1] ?? 0);
   const recentSet = setAt > 0 && (input.now ?? Date.now()) - setAt < 5 * 60_000;
-  const noop = slOk && tpOk && !extras;
-  const wipe = !afterTp1 && (extras || listed.length > 3);
+  const quiet =
+    recentSet &&
+    slRows.length === 1 &&
+    tpRows.length >= (afterTp1 ? 1 : 2) &&
+    !collapsed;
+  const noop = quiet || (slOk && tpOk && !extras);
+  const wipe = !afterTp1 && !quiet && (extras || listed.length > 3);
   const beMove = input.stopOverride != null && input.stopOverride > 0 && !slOk;
-  const placeSl = stopPx > 0 && (extras || slRows.length !== 1 || !slOk);
-  const placeTp = extras || !tpOk;
+  const placeSl = !quiet && stopPx > 0 && (extras || slRows.length !== 1 || !slOk);
+  const placeTp = !quiet && (extras || !tpOk);
   const slices = takeQtys(liveQty, afterTp1 ? 1 : 2, quantityPrecision, formatQty);
 
   return {
