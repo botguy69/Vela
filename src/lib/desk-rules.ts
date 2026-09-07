@@ -65,7 +65,7 @@ export function htfAllows(
   fade?: "high" | "low" | null,
   thesis = "",
 ): boolean {
-  if (fourHour.length < 24) return true;
+  if (fourHour.length < 24) return false;
   const closed = closedCandles(fourHour, FOUR_H_MS);
   const live = fourHour[fourHour.length - 1];
   const last = live?.close ?? closed[closed.length - 1]?.close;
@@ -74,7 +74,7 @@ export function htfAllows(
       ? [...closed.map((c) => c.close), live.close]
       : closed.map((c) => c.close);
   const mid = sma(smaSrc.length >= 21 ? smaSrc : fourHour.map((c) => c.close), 21);
-  if (mid == null || last == null) return true;
+  if (mid == null || last == null) return false;
   const band = 0.02;
   const skip21 = (fade === "high" && side === "short") || (fade === "low" && side === "long");
   if (!skip21) {
@@ -206,7 +206,7 @@ export function ltfTrigger(
   side: Side,
   fifteen: Candle[],
 ): { ok: boolean; wait: boolean; reason: string; pullback: number | null } {
-  if (fifteen.length < 24) return { ok: true, wait: false, reason: "thin 15m", pullback: null };
+  if (fifteen.length < 24) return { ok: false, wait: false, reason: "thin 15m", pullback: null };
   const closes = fifteen.map((c) => c.close);
   const e9 = ema(closes, 9);
   const e21 = ema(closes, 21);
@@ -215,7 +215,7 @@ export function ltfTrigger(
   const last = closes[closes.length - 1];
   const prev = closes[closes.length - 2];
   if (e9 == null || e21 == null || a == null || a <= 0 || last == null) {
-    return { ok: true, wait: false, reason: "thin 15m", pullback: null };
+    return { ok: false, wait: false, reason: "thin 15m", pullback: null };
   }
   const lastBar = fifteen[fifteen.length - 1]!;
   const trs: number[] = [];
@@ -422,14 +422,17 @@ export function structureStop(
   return s;
 }
 
-/** Side is the coin's 4h+1h+15m. BTC 1h is info. No one-opposite lock. */
+/** Reject opposite of BTC 1h book unless the thesis is a real fade at extreme. */
 export function mixAllows(
-  _pickSide: Side,
-  _thesis: string,
+  pickSide: Side,
+  thesis: string,
   _conf: number,
-  _heat: "long" | "short" | "chop",
+  heat: "long" | "short" | "chop",
   _live: { side: string }[],
 ): { ok: boolean; why: string } {
+  if ((heat === "long" || heat === "short") && pickSide !== heat && !fadeAtExtreme(thesis, pickSide)) {
+    return { ok: false, why: `against ${heat} book` };
+  }
   return { ok: true, why: "coin tape" };
 }
 
@@ -826,16 +829,21 @@ export function eliteScalp(
 ): boolean {
   const floor = Math.max(85, bar);
   if (
-    /Failed bounce|lower high|Continuation (on|short on) 21h|Oversold bounce|washout RSI|Trend cooling|Dry-up at/i.test(
+    /Failed bounce|lower high|Continuation (on|short on) 21h|Oversold bounce|washout RSI|Trend cooling|Dry-up at|With-trend 1h|Swing hold/i.test(
       thesis,
     )
   )
     return false;
   const structure =
-    /double (top|bottom)|failed range|vol fade|climax rejection|Pin bar|engulf|buyers on 2nd|supply on 2nd|With-trend 1h/i.test(
+    /double (top|bottom)|failed range|vol fade|climax rejection|Pin bar|engulf|buyers on 2nd|supply on 2nd/i.test(
       thesis,
     );
-  return structure && conf >= floor;
+  if (!(structure && conf >= floor)) return false;
+  const side: Side | null = /^long\b/i.test(thesis) ? "long" : /^short\b/i.test(thesis) ? "short" : null;
+  if ((bias === "long" || bias === "short") && side && side !== bias && !fadeAtExtreme(thesis, side)) {
+    return false;
+  }
+  return true;
 }
 
 export const APLUS_MENU =
@@ -845,15 +853,8 @@ export const APLUS_MENU =
 export function setupQuality(thesis: string): number {
   const k = aPlusKind(thesis);
   if (k === "continuation" || k === "failed bounce") return -1;
-  if (
-    k === "double" ||
-    k === "pin" ||
-    k === "engulf" ||
-    k === "failed range" ||
-    k === "climax" ||
-    k === "with-trend"
-  )
-    return 2;
+  if (k === "double" || k === "pin" || k === "engulf" || k === "failed range" || k === "climax") return 2;
+  if (k === "with-trend") return 1;
   return 0;
 }
 

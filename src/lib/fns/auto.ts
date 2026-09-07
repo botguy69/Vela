@@ -2562,6 +2562,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const conf = s.confidence ?? scoreToConf(s.score);
             const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(conf)}%`;
             const h4 = h4map[s.weexSymbol] ?? [];
+            if (h4.length < 24) {
+              whyNot.push(`${tag} thin 4h — fail closed`);
+              continue;
+            }
             const hour = rules.closedCandles(books[s.weexSymbol] ?? [], 60 * 60 * 1000);
             const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", tape.side, fade);
             if (!mtf.ok) {
@@ -2618,6 +2622,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
             spec: Awaited<ReturnType<typeof specFor>>;
             score: number;
+            rank: number;
           }[] = [];
 
           for (let pick of pool) {
@@ -2673,6 +2678,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               }
             }
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
+            if (h4.length < 24) {
+              whyNot.push(`${tag} thin 4h — fail closed`);
+              continue;
+            }
             const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
             const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "", tape.side, fade);
             if (!mtfPick.ok) {
@@ -2695,41 +2704,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not a ${fade} reject — no with-trend fade`);
               continue;
             }
-            if (rules.setupQuality(pick.thesis ?? "") < 2 && !/Swing hold/i.test(pick.thesis ?? "")) {
+            if (rules.setupQuality(pick.thesis ?? "") < 2) {
               whyNot.push(`${tag} not location structure`);
               continue;
             }
-            let trig = rules.ltfTrigger(pick.side, coin15);
-            if (!trig.ok && !trig.wait && /ripping/i.test(trig.reason) && pick.side === "short") {
-              const hold = rules.swingHold("long", coin15);
-              if (hold.ok) {
-                pick = {
-                  ...pick,
-                  side: "long",
-                  thesis: hold.why,
-                  stop: hold.stop,
-                  target: hold.tp,
-                  targets: [hold.tp],
-                };
-                trig = { ok: true, wait: false, reason: hold.why, pullback: null };
-                whyNot.push(`${tag} flipped long — last low / last high`);
-              }
-            }
-            if (!trig.ok && !trig.wait && /dumping/i.test(trig.reason) && pick.side === "long") {
-              const hold = rules.swingHold("short", coin15);
-              if (hold.ok) {
-                pick = {
-                  ...pick,
-                  side: "short",
-                  thesis: hold.why,
-                  stop: hold.stop,
-                  target: hold.tp,
-                  targets: [hold.tp],
-                };
-                trig = { ok: true, wait: false, reason: hold.why, pullback: null };
-                whyNot.push(`${tag} flipped short — last high / last low`);
-              }
-            }
+            const trig = rules.ltfTrigger(pick.side, coin15);
             if (!trig.ok && !trig.wait) {
               veto = `Skip ${tag} ${trig.reason}`;
               whyNot.unshift(`${tag} ${trig.reason}`);
@@ -2807,13 +2786,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const timed0 = rules.withLtfEntry(pick, trig.pullback);
-            const swing = /Swing hold/i.test(timed0.thesis ?? pick.thesis ?? "");
             const stopped = {
               ...timed0,
-              stop:
-                swing && timed0.stop > 0
-                  ? timed0.stop
-                  : rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15, hourPick),
+              stop: rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15, hourPick),
             };
             const dist = Math.abs(stopped.entry - stopped.stop);
             const stretch = rules.stretchTp(stopped.side, stopped.entry, stopped.stop, h4);
@@ -2860,9 +2835,19 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} thin book — 1R would walk`);
               continue;
             }
-            ready.push({ sized: sz, spec, score: conf });
+            ready.push({
+              sized: sz,
+              spec,
+              score: conf,
+              rank: rules.huntRank({
+                thesis: pick.thesis ?? "",
+                side: pick.side,
+                fourHour: h4,
+                conf,
+              }),
+            });
           }
-          ready.sort((a, b) => b.score - a.score);
+          ready.sort((a, b) => b.rank - a.rank || b.score - a.score);
           const best = ready.find((r) => r.sized.entryType !== "limit" || openLimits < 2) ?? null;
           if (best) {
             batch.push({ sized: best.sized, spec: best.spec });
