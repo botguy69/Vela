@@ -8,14 +8,27 @@ export type WeexCreds = {
   passphrase: string;
 };
 
-function material(): Buffer {
-  const secret = process.env.BETTER_AUTH_SECRET || "vela-preview-wrap";
+/** Prefer WEEX_SEAL_SECRET, then BETTER_AUTH_SECRET, then preview fallback. Never log these. */
+function sealSecrets(): string[] {
+  const raw = [process.env.WEEX_SEAL_SECRET, process.env.BETTER_AUTH_SECRET, "vela-preview-wrap"];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const s of raw) {
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+function material(secret: string): Buffer {
   return scryptSync(secret, "vela-weex-v1", 32);
 }
 
 export function seal(plain: string): string {
+  const secret = sealSecrets()[0]!;
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", material(), iv);
+  const cipher = createCipheriv("aes-256-gcm", material(secret), iv);
   const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, tag, enc]).toString("base64");
@@ -26,9 +39,16 @@ export function openSeal(packed: string): string {
   const iv = buf.subarray(0, 12);
   const tag = buf.subarray(12, 28);
   const enc = buf.subarray(28);
-  const decipher = createDecipheriv("aes-256-gcm", material(), iv);
-  decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(enc), decipher.final()]).toString("utf8");
+  for (const secret of sealSecrets()) {
+    try {
+      const decipher = createDecipheriv("aes-256-gcm", material(secret), iv);
+      decipher.setAuthTag(tag);
+      return Buffer.concat([decipher.update(enc), decipher.final()]).toString("utf8");
+    } catch {
+      // try next seal material (secret drift across deploys)
+    }
+  }
+  throw new Error("WEEX keys unreadable — re-save keys");
 }
 
 function sign(secret: string, timestamp: string, method: string, path: string, query: string, body: string) {

@@ -13,6 +13,8 @@ services:
         value: production
       - key: BETTER_AUTH_SECRET
         generateValue: true
+      - key: WEEX_SEAL_SECRET
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: BETTER_AUTH_URL
