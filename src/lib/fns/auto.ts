@@ -2612,7 +2612,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. No A++ this pass. 1h book. Slots stay empty.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Closed 15m only. Rank by 4h location. Either side. Soft Sunday/Asia on with-trend.";
+          const aPlusLine = "Closed 15m only. Longs bottom 38% of 4h box, shorts top 38%. Mid-box skip. Stale 15m pullback skip.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;

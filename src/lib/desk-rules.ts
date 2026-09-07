@@ -81,23 +81,20 @@ export function htfAllows(
     if (side === "long" && last < mid * (1 - band)) return false;
     if (side === "short" && last > mid * (1 + band)) return false;
   }
-  const prior = (closed.length >= 8 ? closed : fourHour).slice(-21);
+  const prior = (closed.length >= 8 ? closed : fourHour).slice(-20);
   if (prior.length < 8) return true;
   const sh = Math.max(...prior.map((c) => c.high));
   const sl = Math.min(...prior.map((c) => c.low));
   const a = atr(closed.length >= 16 ? closed : fourHour, 14) ?? 0;
   if (a <= 0) return true;
-  if (side === "long" && last >= sh - 0.2 * a) return false;
-  if (side === "short" && last <= sl + 0.2 * a) return false;
+  const px = closed[closed.length - 1]?.close ?? last;
+  if (side === "long" && px >= sh - 0.2 * a) return false;
+  if (side === "short" && px <= sl + 0.2 * a) return false;
   const span = sh - sl;
-  const structure =
-    /double (top|bottom)|Pin bar|engulf|failed range|climax rejection|buyers on 2nd|supply on 2nd/i.test(
-      thesis,
-    );
-  if (span > 0 && !structure) {
-    const loc = (last - sl) / span;
-    if (side === "short" && fade !== "high" && loc < 0.50) return false;
-    if (side === "long" && fade !== "low" && loc > 0.50) return false;
+  if (span > 0) {
+    const loc = (px - sl) / span;
+    if (side === "long" && fade !== "low" && loc > 0.38) return false;
+    if (side === "short" && fade !== "high" && loc < 0.62) return false;
   }
   return true;
 }
@@ -129,7 +126,7 @@ export function btcExtended(fourHour: Candle[]): {
       ? "BTC 4h high — no new longs. Shorts only pin/double/climax at the high."
       : shortChase
         ? "BTC 4h low — no new shorts. Longs only pin/double/climax at the low."
-        : "BTC 4h mid. Coin must still be the right half of its own 4h box.",
+        : "BTC 4h mid. Coin must be in the demand/supply 38% of its own 4h box.",
   };
 }
 
@@ -274,7 +271,11 @@ export function ltfTrigger(
       return { ok: false, wait: false, reason: "15m still dumping", pullback: null };
     }
     if (last > e21 + 0.35 * a && !reclaim) {
-      return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
+      const pb = vwap ?? mean;
+      if (last > pb + 0.25 * a) {
+        return { ok: false, wait: false, reason: "stale 15m pullback — skip", pullback: null };
+      }
+      return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: pb };
     }
     return { ok: true, wait: false, reason: reclaim ? "VWAP reclaim" : "15m pullback + VWAP", pullback: mean };
   }
@@ -287,7 +288,11 @@ export function ltfTrigger(
     return { ok: false, wait: false, reason: "15m ripping — no short", pullback: null };
   }
   if (last < e21 - 0.35 * a && !reclaim) {
-    return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: vwap ?? mean };
+    const pb = vwap ?? mean;
+    if (last < pb - 0.25 * a) {
+      return { ok: false, wait: false, reason: "stale 15m pullback — skip", pullback: null };
+    }
+    return { ok: false, wait: true, reason: "limit at 15m mean / VWAP", pullback: pb };
   }
   return { ok: true, wait: false, reason: reclaim ? "VWAP reject" : "15m bounce + VWAP", pullback: mean };
 }
