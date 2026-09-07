@@ -72,6 +72,24 @@ export function sealProbe(packed: string | null | undefined): {
   }
 }
 
+/** Seal then immediately open; throws if current materials cannot round-trip. */
+export function assertSealRoundTrip(plain: string): string {
+  const packed = seal(plain);
+  let opened: string;
+  try {
+    opened = openSeal(packed);
+  } catch {
+    throw new Error(
+      "Seal round-trip failed — set WEEX_SEAL_SECRET (stable) or re-check BETTER_AUTH_SECRET on Render, then re-save keys.",
+    );
+  }
+  if (opened !== plain) {
+    throw new Error("Seal round-trip mismatch — refusing to store keys.");
+  }
+  return packed;
+}
+
+
 function sign(secret: string, timestamp: string, method: string, path: string, query: string, body: string) {
   const qs = query ? `?${query}` : "";
   const message = `${timestamp}${method.toUpperCase()}${path}${qs}${body}`;
