@@ -21,7 +21,7 @@ COPY tsconfig.json vite.config.ts eslint.config.mjs ./
 
 ENV NITRO_PRESET=node-server
 ENV VELA_WORKER=1
-RUN npm run build
+RUN NODE_ENV=production npm run build
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
