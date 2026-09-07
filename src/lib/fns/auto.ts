@@ -122,6 +122,7 @@ function publicSettings(
   live?: { equity: number; available: number } | null,
   weexError?: string | null,
   book?: { liveL?: number; liveS?: number; liveLines?: string[]; beN?: number; liveTotal?: number },
+  keyProbe?: { materials: number; blobLen: number; openOk: boolean } | null,
 ) {
   const liveEq = live?.equity;
   const equity = liveEq != null ? liveEq : 0;
@@ -136,6 +137,7 @@ function publicSettings(
     armed: Boolean(row.armed),
     hasKeys: Boolean(row.api_key_enc && row.api_secret_enc && row.api_pass_enc),
     keyHint: row.key_hint,
+    keyProbe: keyProbe ?? null,
     riskPct: liveEq != null ? phase.marginPct : 3,
     accountUsd: equity,
     availableUsd: live?.available ?? 0,
@@ -198,12 +200,29 @@ async function credsFrom(row: SettingsRow) {
 }
 
 async function pullWeexBook(row: SettingsRow) {
+  const hasEnc = Boolean(row.api_key_enc && row.api_secret_enc && row.api_pass_enc);
+  if (!hasEnc) {
+    return {
+      live: null as { equity: number; available: number } | null,
+      error: null as string | null,
+      keyProbe: null as { materials: number; blobLen: number; openOk: boolean } | null,
+    };
+  }
+  const { sealProbe, getWeexEquity } = await import("@/lib/weex.server");
+  const keyProbe = sealProbe(row.api_key_enc);
   const creds = await credsFrom(row);
-  if (!creds) return { live: null as { equity: number; available: number } | null, error: null as string | null };
-  const { getWeexEquity } = await import("@/lib/weex.server");
+  if (!creds) {
+    return {
+      live: null,
+      error: keyProbe.openOk
+        ? "WEEX keys present but could not load credentials"
+        : "WEEX keys unreadable — re-save keys",
+      keyProbe,
+    };
+  }
   const bal = await getWeexEquity(creds);
-  if (!bal.ok) return { live: null, error: bal.error };
-  return { live: bal.data, error: null };
+  if (!bal.ok) return { live: null, error: bal.error, keyProbe };
+  return { live: bal.data, error: null, keyProbe };
 }
 
 function uniqueFills<T extends {
@@ -1142,7 +1161,9 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     const [settings] = await sql<SettingsRow>`
       select * from auto_settings where user_id = ${context.userId}
     `;
-    const pulled = settings ? await pullWeexBook(settings) : { live: null, error: null };
+    const pulled = settings
+      ? await pullWeexBook(settings)
+      : { live: null, error: null, keyProbe: null };
     const live = pulled.live;
     let livePos: Awaited<ReturnType<typeof import("@/lib/weex.server").listWeexPositions>> | null = null;
     const creds = settings ? await credsFrom(settings) : null;
@@ -1309,7 +1330,7 @@ export const getAutoDesk = createServerFn({ method: "GET" })
         liveLines,
         beN,
         liveTotal,
-      }),
+      }, pulled.keyProbe),
       signals: mapped,
       universe: (await import("@/lib/universe")).TOP25.map((c) => ({
         id: c.id,
@@ -1345,67 +1366,86 @@ export const saveAutoSettings = createServerFn({ method: "POST" })
 
 export const saveWeexKeys = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { apiKey: string; apiSecret: string; passphrase: string }) => ({
-    apiKey: input.apiKey.trim(),
-    apiSecret: input.apiSecret.trim(),
-    passphrase: input.passphrase.trim(),
-  }))
+  .validator((input: { apiKey: string; apiSecret: string; passphrase: string }) => {
+    const apiKey = String(input?.apiKey ?? "").trim();
+    const apiSecret = String(input?.apiSecret ?? "").trim();
+    const passphrase = String(input?.passphrase ?? "").trim();
+    return { apiKey, apiSecret, passphrase };
+  })
   .handler(async ({ context, data }) => {
     if (!data.apiKey || !data.apiSecret || !data.passphrase) {
       throw new Error("Key, secret, and passphrase are all required.");
     }
-    const { getSql } = await import("@/lib/db");
-    const { assertSealRoundTrip, verifyKeys } = await import("@/lib/weex.server");
-    const sql = await getSql();
-    await ensureSettings(sql, context.userId);
-    const check = await verifyKeys({
-      apiKey: data.apiKey,
-      apiSecret: data.apiSecret,
-      passphrase: data.passphrase,
-    });
-    if (!check.ok) {
-      throw new Error(check.error || "WEEX rejected those keys.");
-    }
-    // Seal with round-trip verify BEFORE write so we never store blobs we cannot open.
-    let keyEnc: string;
-    let secretEnc: string;
-    let passEnc: string;
     try {
-      keyEnc = assertSealRoundTrip(data.apiKey);
-      secretEnc = assertSealRoundTrip(data.apiSecret);
-      passEnc = assertSealRoundTrip(data.passphrase);
+      const { getSql } = await import("@/lib/db");
+      const { assertSealRoundTrip, verifyKeys, sealProbe, getWeexEquity } = await import(
+        "@/lib/weex.server"
+      );
+      const sql = await getSql();
+      await ensureSettings(sql, context.userId);
+      const check = await verifyKeys({
+        apiKey: data.apiKey,
+        apiSecret: data.apiSecret,
+        passphrase: data.passphrase,
+      });
+      if (!check.ok) {
+        throw new Error(check.error || "WEEX rejected those keys.");
+      }
+      // Seal with round-trip verify BEFORE write so we never store blobs we cannot open.
+      const keyEnc = assertSealRoundTrip(data.apiKey);
+      const secretEnc = assertSealRoundTrip(data.apiSecret);
+      const passEnc = assertSealRoundTrip(data.passphrase);
+      const probe = sealProbe(keyEnc);
+      if (!probe.openOk) {
+        throw new Error(
+          "Seal wrote a blob this deploy cannot open — set WEEX_SEAL_SECRET on Render and retry Store.",
+        );
+      }
+      const hint = `${data.apiKey.slice(0, 3)}…${data.apiKey.slice(-4)}`;
+      const bal = await getWeexEquity({
+        apiKey: data.apiKey,
+        apiSecret: data.apiSecret,
+        passphrase: data.passphrase,
+      });
+      const eq = bal.ok ? bal.data.equity : null;
+      let accountUsd = eq;
+      if (accountUsd == null) {
+        const [cur] = await sql<SettingsRow>`
+          select account_usd from auto_settings where user_id = ${context.userId}
+        `;
+        accountUsd = n(cur?.account_usd);
+      }
+      await sql`
+        update auto_settings
+        set api_key_enc = ${keyEnc},
+            api_secret_enc = ${secretEnc},
+            api_pass_enc = ${passEnc},
+            key_hint = ${hint},
+            venue = 'weex',
+            weex_mode = 'live',
+            account_usd = ${accountUsd},
+            peak_usd = ${eq ?? 0},
+            updated_at = now()
+        where user_id = ${context.userId}
+      `;
+      return {
+        ok: true as const,
+        hint,
+        openOk: probe.openOk,
+        materials: probe.materials,
+        weexNote: bal.ok
+          ? `Keys stored and readable. Live WEEX equity ${bal.data.equity.toFixed(2)} USDT.`
+          : `Keys stored and readable. Balance check: ${bal.error.slice(0, 80)}`,
+      };
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);
-      throw new Error(m);
+      if (/Invariant failed/i.test(m)) {
+        throw new Error(
+          "Save failed (server response). Refresh, sign in again, then Store keys. Prefer setting WEEX_SEAL_SECRET on Render.",
+        );
+      }
+      throw new Error(m || "Key save failed");
     }
-    const hint = `${data.apiKey.slice(0, 3)}…${data.apiKey.slice(-4)}`;
-    const { getWeexEquity } = await import("@/lib/weex.server");
-    const bal = await getWeexEquity({
-      apiKey: data.apiKey,
-      apiSecret: data.apiSecret,
-      passphrase: data.passphrase,
-    });
-    const eq = bal.ok ? bal.data.equity : null;
-    await sql`
-      update auto_settings
-      set api_key_enc = ${keyEnc},
-          api_secret_enc = ${secretEnc},
-          api_pass_enc = ${passEnc},
-          key_hint = ${hint},
-          venue = 'weex',
-          weex_mode = 'live',
-          account_usd = ${eq ?? n((await sql<SettingsRow>`select account_usd from auto_settings where user_id = ${context.userId}`)[0]?.account_usd)},
-          peak_usd = ${eq ?? 0},
-          updated_at = now()
-      where user_id = ${context.userId}
-    `;
-    return {
-      ok: true as const,
-      hint,
-      weexNote: bal.ok
-        ? `Keys accepted. Live WEEX equity ${bal.data.equity.toFixed(2)} USDT.`
-        : `Stored. Could not read balance yet: ${bal.error.slice(0, 80)}`,
-    };
   });
 
 export const clearWeexKeys = createServerFn({ method: "POST" })
@@ -1629,7 +1669,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       /* shown in last tick note if we skip size */
     }
     let stats = await closedStats(sql, userId, settings.stats_from);
-    const pub = publicSettings(settings, stats, live, pulled.error);
+    const pub = publicSettings(settings, stats, live, pulled.error, undefined, pulled.keyProbe);
     const phase = livePhase(settings, stats);
 
     if (phase.id === "done") {
@@ -3092,8 +3132,12 @@ export const reviewBook = createServerFn({ method: "POST" })
     const [settings] = await sql<SettingsRow>`select * from auto_settings where user_id = ${context.userId}`;
     if (!settings) return { ok: false as const, error: "No desk yet." };
     let stats = await closedStats(sql, context.userId, settings?.stats_from);
-    const pulled = await pullWeexBook(settings).catch(() => ({ live: null as { equity: number; available: number } | null, error: null as string | null }));
-    const pub = publicSettings(settings, stats, pulled.live, pulled.error);
+    const pulled = await pullWeexBook(settings).catch(() => ({
+      live: null as { equity: number; available: number } | null,
+      error: null as string | null,
+      keyProbe: null as { materials: number; blobLen: number; openOk: boolean } | null,
+    }));
+    const pub = publicSettings(settings, stats, pulled.live, pulled.error, undefined, pulled.keyProbe);
     const open = await sql<SignalRow>`
       select * from auto_signals
       where user_id = ${context.userId} and status in ('working','filled')

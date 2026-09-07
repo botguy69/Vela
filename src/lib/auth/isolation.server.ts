@@ -32,8 +32,14 @@ export class CrossSiteRequestError extends Error {
 
 /** Throw `CrossSiteRequestError` for a scripted cross-site/sibling request. */
 export function assertSameSiteRequest(): void {
-  const request = getRequest();
-  if (!request) return; // no request context (e.g. build) — nothing to guard
+  let request: Request | undefined;
+  try {
+    request = getRequest();
+  } catch {
+    // TanStack getRequest() throws when ALS is missing (build / odd runtime).
+    return;
+  }
+  if (!request) return; // no request context — nothing to guard
   const h = request.headers;
   const site = h.get("sec-fetch-site");
   // Non-browser client (no header), the app's own origin, or a direct

@@ -37,10 +37,27 @@ export const authMiddleware = createMiddleware({ type: "function" })
     // (bearer hook on the client). A plain `./isolation` path was renamed to
     // `isolation.server.ts` — keep this import in sync so image `tsc` resolves
     // it, and so Vite does not ship `@tanstack/react-start/server` to the browser.
-    const { assertSameSiteRequest } = await import("./isolation.server");
-    const { requireUserId } = await import("./verify.server");
-    // Reject scripted cross-site/sibling requests before touching per-user data.
-    assertSameSiteRequest();
-    const userId = await requireUserId(context.bearerToken);
-    return next({ context: { userId } });
+    const { assertSameSiteRequest, CrossSiteRequestError } = await import("./isolation.server");
+    const { requireUserId, UnauthorizedError } = await import("./verify.server");
+    try {
+      // Reject scripted cross-site/sibling requests before touching per-user data.
+      assertSameSiteRequest();
+      const userId = await requireUserId(context.bearerToken);
+      return next({ context: { userId } });
+    } catch (err) {
+      // Re-throw as plain Error so TanStack Start always serializes a clear
+      // message (avoids empty/no-content-type responses that surface as
+      // client-side "Invariant failed").
+      if (err instanceof UnauthorizedError) {
+        throw new Error("Unauthorized");
+      }
+      if (err instanceof CrossSiteRequestError) {
+        throw new Error(err.message);
+      }
+      const m = err instanceof Error ? err.message : String(err);
+      if (/AsyncLocalStorage|No StartEvent|No Start context|Invariant failed/i.test(m)) {
+        throw new Error("Session context missing — refresh the page and sign in again, then re-store keys.");
+      }
+      throw err instanceof Error ? err : new Error(m || "Auth failed");
+    }
   });

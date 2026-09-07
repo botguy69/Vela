@@ -57,7 +57,12 @@ export async function getSessionUser(
   bearerToken?: string,
 ): Promise<VerifiedUser | null> {
   if (!authConfigured) return null;
-  const request = getRequest();
+  let request: Request | undefined;
+  try {
+    request = getRequest();
+  } catch {
+    return null;
+  }
   if (!request) return null;
   let headers = request.headers;
   if (bearerToken) {

@@ -526,11 +526,28 @@ function SettingsCard() {
   );
 }
 
+function keySaveErrorMessage(err: unknown): string {
+  const m =
+    err instanceof Error
+      ? err.message
+      : err && typeof err === "object" && "message" in err
+        ? String((err as { message: unknown }).message)
+        : "";
+  if (!m) return "Key save failed";
+  if (/Invariant failed/i.test(m)) {
+    return "Save failed (server response). Refresh, sign in again, then Store keys. Prefer WEEX_SEAL_SECRET on Render.";
+  }
+  return m;
+}
+
 function KeysCard({ onSaved }: { onSaved: () => void }) {
   const desk = useQuery({ queryKey: ["auto"], queryFn: () => getAutoDesk() });
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [pass, setPass] = useState("");
+  const [busy, setBusy] = useState(false);
+  const s = desk.data?.settings;
+  const probe = s?.keyProbe;
 
   return (
     <div className="rounded-xl bg-surface p-5 shadow-border">
@@ -540,8 +557,25 @@ function KeysCard({ onSaved }: { onSaved: () => void }) {
         (this server is not your home IP). Wait 15 minutes after creating a new key. Passphrase
         letters and numbers only. After they land, Auto reads the live USDT book.
       </p>
-      {desk.data?.settings.hasKeys && (
-        <p className="mt-3 text-xs text-muted">Stored key {desk.data.settings.keyHint}</p>
+      {s?.hasKeys && (
+        <div className="mt-3 space-y-1 text-xs">
+          <p className="text-muted">
+            On file: hint <span className="font-mono">{s.keyHint ?? "—"}</span>
+            {probe ? (
+              <>
+                {" "}
+                · openOk={String(probe.openOk)} · materials={probe.materials} · blobLen={probe.blobLen}
+              </>
+            ) : null}
+          </p>
+          <p className={probe?.openOk ? "text-muted" : "text-loss"}>
+            {probe?.openOk
+              ? "Stored blobs open on this deploy."
+              : s.weexError
+                ? s.weexError
+                : "Stored hint is not a successful save — blobs do not open. Paste keys and Store again."}
+          </p>
+        </div>
       )}
       <div className="mt-4 grid gap-3">
         <div className="grid gap-1.5">
@@ -559,22 +593,30 @@ function KeysCard({ onSaved }: { onSaved: () => void }) {
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
         <Button
-          onClick={() =>
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
             void saveWeexKeys({ data: { apiKey, apiSecret, passphrase: pass } })
               .then((r) => {
-                toast.success(r.weexNote);
+                if (!r?.ok) {
+                  toast.error("Store did not confirm ok — keys were not cleared; try again.");
+                  return;
+                }
+                toast.success(r.weexNote || "Keys stored and readable.");
                 setApiKey("");
                 setApiSecret("");
                 setPass("");
                 onSaved();
               })
-              .catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Key save failed"))
-          }
+              .catch((err: unknown) => toast.error(keySaveErrorMessage(err)))
+              .finally(() => setBusy(false));
+          }}
         >
-          Store keys
+          {busy ? "Storing…" : "Store keys"}
         </Button>
         <Button
           variant="ghost"
+          disabled={busy}
           onClick={() =>
             void clearWeexKeys().then(() => {
               toast.message("Keys cleared. Disarmed.");

@@ -8,13 +8,24 @@ export type WeexCreds = {
   passphrase: string;
 };
 
-/** Prefer WEEX_SEAL_SECRET, then BETTER_AUTH_SECRET, then preview fallback. Never log these. */
+/**
+ * Seal materials for WEEX API key blobs.
+ * Prefer dedicated WEEX_SEAL_SECRET (stable across auth rotations), then
+ * BETTER_AUTH_SECRET (legacy), then preview fallback.
+ * Bracket env access so Vite/Nitro cannot inline an empty build-time value.
+ * Never log these values.
+ */
 function sealSecrets(): string[] {
-  const raw = [process.env.WEEX_SEAL_SECRET, process.env.BETTER_AUTH_SECRET, "vela-preview-wrap"];
+  const raw = [
+    process.env["WEEX_SEAL_SECRET"],
+    process.env["BETTER_AUTH_SECRET"],
+    "vela-preview-wrap",
+  ];
   const out: string[] = [];
   const seen = new Set<string>();
   for (const s of raw) {
-    if (!s) continue;
+    // Empty string env (set-but-blank) counts as unset — never seal with "".
+    if (typeof s !== "string" || !s) continue;
     // Try trimmed and raw — Render/env paste sometimes keeps whitespace.
     for (const v of [s.trim(), s]) {
       if (!v || seen.has(v)) continue;
@@ -22,15 +33,35 @@ function sealSecrets(): string[] {
       out.push(v);
     }
   }
+  // Preview fallback is always present; keep this assert for paranoia.
+  if (out.length === 0) out.push("vela-preview-wrap");
   return out;
 }
 
+const materialCache = new Map<string, Buffer>();
+
 function material(secret: string): Buffer {
-  return scryptSync(secret, "vela-weex-v1", 32);
+  let buf = materialCache.get(secret);
+  if (!buf) {
+    buf = scryptSync(secret, "vela-weex-v1", 32);
+    materialCache.set(secret, buf);
+  }
+  return buf;
+}
+
+/** Primary seal secret — never undefined; never empty string. */
+function primarySealSecret(): string {
+  const secret = sealSecrets()[0];
+  if (!secret) {
+    throw new Error(
+      "No seal material available — set WEEX_SEAL_SECRET on Render, then re-save keys.",
+    );
+  }
+  return secret;
 }
 
 export function seal(plain: string): string {
-  const secret = sealSecrets()[0]!;
+  const secret = primarySealSecret();
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", material(secret), iv);
   const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
@@ -39,7 +70,10 @@ export function seal(plain: string): string {
 }
 
 export function openSeal(packed: string): string {
-  const buf = Buffer.from(String(packed).trim(), "base64");
+  const raw = String(packed ?? "").trim();
+  if (!raw) throw new Error("WEEX keys unreadable — re-save keys");
+  const buf = Buffer.from(raw, "base64");
+  if (buf.length < 29) throw new Error("WEEX keys unreadable — re-save keys");
   const iv = buf.subarray(0, 12);
   const tag = buf.subarray(12, 28);
   const enc = buf.subarray(28);
@@ -49,7 +83,7 @@ export function openSeal(packed: string): string {
       decipher.setAuthTag(tag);
       return Buffer.concat([decipher.update(enc), decipher.final()]).toString("utf8");
     } catch {
-      // try next seal material (secret drift across deploys)
+      // try next seal material (secret drift across deploys / auth rotations)
     }
   }
   throw new Error("WEEX keys unreadable — re-save keys");
@@ -80,7 +114,7 @@ export function assertSealRoundTrip(plain: string): string {
     opened = openSeal(packed);
   } catch {
     throw new Error(
-      "Seal round-trip failed — set WEEX_SEAL_SECRET (stable) or re-check BETTER_AUTH_SECRET on Render, then re-save keys.",
+      "Seal round-trip failed — set WEEX_SEAL_SECRET on Render (stable; do not rotate BETTER_AUTH_SECRET for keys), then re-save keys.",
     );
   }
   if (opened !== plain) {
