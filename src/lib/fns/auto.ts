@@ -2881,10 +2881,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const timed = trig.wait ? { ...timed1, entryType: "limit" as const } : timed1;
+            // One-shot night challenge: 5% margin until 2026-09-08 04:00Z (midnight ET), then back to 1/2/3.
+            const challenge5 =
+              Date.now() < Date.parse("2026-09-08T04:00:00.000Z") ? 5 : null;
             const sz = sizeSetup(
               timed,
               equity,
-              marginForConviction(timed.confidence ?? conf, corrected.marginPct),
+              challenge5 ?? marginForConviction(timed.confidence ?? conf, corrected.marginPct),
               spec.maxLeverage,
             );
             if (!sz) {
