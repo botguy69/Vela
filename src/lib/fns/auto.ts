@@ -2884,31 +2884,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               notes.push(`Skip ${sized.weexSymbol} — already one ticket`);
               tookLines.push(`Skip ${sized.weexSymbol.replace("USDT", "")} — already a ticket.`);
             } else {
-            const { gateLiveTicket } = await import("@/lib/fns/ai");
-            const gate = await gateLiveTicket({
-              symbol: sized.symbol,
-              weexSymbol: sized.weexSymbol,
-              side: sized.side === "short" ? "short" : "long",
-              entry: sized.entry,
-              stop: sized.stop,
-              target: sized.target,
-              rr: sized.rr,
-              thesis: sized.thesis ?? "",
-              confidence: Number(sized.confidence) || 0,
-              style: sized.style,
-              bias: compass.bias,
-              plan: sized.plan,
-            });
-            if (gate.action === "skip") {
-              notes.push(`AI skip ${sized.weexSymbol}: ${gate.reason}`);
-              tookLines.push(
-                `AI skip ${sized.weexSymbol.replace("USDT", "")} — ${gate.reason}`,
-              );
-              continue;
-            }
-            if (gate.source === "ai") {
-              notes.push(`AI take ${sized.weexSymbol}: ${gate.reason}`);
-            }
             const { placeWeexOrder, setCrossMaxLeverage } = await import("@/lib/weex.server");
             const creds = (await credsFrom(settings))!;
             let ticketId: number | null = null;
