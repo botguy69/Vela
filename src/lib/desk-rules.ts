@@ -125,7 +125,7 @@ export function btcExtended(fourHour: Candle[]): {
     note: longChase
       ? "BTC 4h high — no new longs. Shorts only pin/double/climax at the high."
       : shortChase
-        ? "BTC 4h low — no new shorts. Longs only pin/double/climax at the low."
+        ? "BTC 4h low — no dump-shorts. Longs pin/double/climax at the low. Shorts ok if alt ripped (top 38% own 4h + fade structure)."
         : "BTC 4h mid. Coin must be in the demand/supply 38% of its own 4h box.",
   };
 }
@@ -819,6 +819,18 @@ export function fadeAtExtreme(thesis: string, side: Side): boolean {
     return /double top|Failed range high|Pin bar at high|climax rejection at high/i.test(thesis);
   }
   return /double bottom|Failed range low|Pin bar at low|climax rejection at low/i.test(thesis);
+}
+
+/** Alt ripped vs BTC wash: short only if coin is in top 38% of its own 4h box + fade structure. */
+export function altRipShortOk(thesis: string, fourHour: Candle[]): boolean {
+  if (!fadeAtExtreme(thesis, "short")) return false;
+  return locationScore("short", fourHour) >= 62;
+}
+
+/** Alt washed vs BTC melt-up: long only if coin is in bottom 38% of its own 4h box + fade structure. */
+export function altWashLongOk(thesis: string, fourHour: Candle[]): boolean {
+  if (!fadeAtExtreme(thesis, "long")) return false;
+  return locationScore("long", fourHour) >= 62;
 }
 
 export function eliteScalp(
