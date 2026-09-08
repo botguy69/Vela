@@ -191,7 +191,7 @@ function publicSettings(
 
 async function credsFrom(row: SettingsRow) {
   if (!(row.api_key_enc && row.api_secret_enc && row.api_pass_enc)) return null;
-  const { openSeal } = await import("@/lib/weex.server");
+  const { openSeal, sealHealth } = await import("@/lib/weex.server");
   try {
     return {
       apiKey: openSeal(row.api_key_enc),
@@ -1376,7 +1376,7 @@ export const saveWeexKeys = createServerFn({ method: "POST" })
     }
     try {
       const { getSql } = await import("@/lib/db");
-      const { assertSealRoundTrip, verifyKeys, sealProbe, getWeexEquity } = await import(
+      const { assertSealRoundTrip, verifyKeys, sealProbe, sealHealth, getWeexEquity } = await import(
         "@/lib/weex.server"
       );
       const sql = await getSql();
@@ -1393,6 +1393,12 @@ export const saveWeexKeys = createServerFn({ method: "POST" })
       const keyEnc = assertSealRoundTrip(data.apiKey);
       const secretEnc = assertSealRoundTrip(data.apiSecret);
       const passEnc = assertSealRoundTrip(data.passphrase);
+      const health = sealHealth();
+      if (!health.hasDedicated || !health.roundTripOk) {
+        throw new Error(
+          "WEEX_SEAL_SECRET missing or broken on this deploy — set it on Render, redeploy, then Store.",
+        );
+      }
       const probe = sealProbe(keyEnc);
       if (!probe.openOk) {
         throw new Error(
@@ -1426,11 +1432,21 @@ export const saveWeexKeys = createServerFn({ method: "POST" })
             updated_at = now()
         where user_id = ${context.userId}
       `;
+      // Re-read from DB — catch write/env drift so we never toast success on dead blobs.
+      const [stored] = await sql<{ api_key_enc: string | null }>`
+        select api_key_enc from auto_settings where user_id = ${context.userId}
+      `;
+      const storedProbe = sealProbe(stored?.api_key_enc);
+      if (!storedProbe.openOk) {
+        throw new Error(
+          "Store wrote blobs this deploy cannot re-open from DB. Confirm WEEX_SEAL_SECRET on Render, redeploy, Clear, Store again.",
+        );
+      }
       return {
         ok: true as const,
         hint,
-        openOk: probe.openOk,
-        materials: probe.materials,
+        openOk: storedProbe.openOk,
+        materials: storedProbe.materials,
         weexNote: bal.ok
           ? `Keys stored and readable. Live WEEX equity ${bal.data.equity.toFixed(2)} USDT.`
           : `Keys stored and readable. Balance check: ${bal.error.slice(0, 80)}`,
