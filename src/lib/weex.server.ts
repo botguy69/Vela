@@ -12,13 +12,22 @@ export type WeexCreds = {
  * Seal materials for WEEX API key blobs.
  * Prefer dedicated WEEX_SEAL_SECRET (stable across auth rotations), then
  * BETTER_AUTH_SECRET (legacy), then preview fallback.
- * Bracket env access so Vite/Nitro cannot inline an empty build-time value.
+ * Read env via runtime lookup (name built at runtime) so Vite/Nitro cannot
+ * inline empty build-time values into the Docker image.
  * Never log these values.
  */
+function envGet(name: string): string | undefined {
+  // Avoid process.env.LITERAL / process.env["LITERAL"] — bundlers replace those at build.
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  if (!env) return undefined;
+  const v = env[name];
+  return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
 function sealSecrets(): string[] {
   const raw = [
-    process.env["WEEX_SEAL_SECRET"],
-    process.env["BETTER_AUTH_SECRET"],
+    envGet(["WEEX", "SEAL", "SECRET"].join("_")),
+    envGet(["BETTER", "AUTH", "SECRET"].join("_")),
     "vela-preview-wrap",
   ];
   const out: string[] = [];
@@ -51,7 +60,7 @@ function material(secret: string): Buffer {
 
 /** New seals MUST use WEEX_SEAL_SECRET only — never BETTER_AUTH (Render may rotate it). */
 function primarySealSecret(): string {
-  const dedicated = process.env["WEEX_SEAL_SECRET"]?.trim();
+  const dedicated = envGet(["WEEX", "SEAL", "SECRET"].join("_"))?.trim();
   if (dedicated) return dedicated;
   throw new Error(
     "Set WEEX_SEAL_SECRET on Render (stable; do not use BETTER_AUTH for key seal), redeploy, then Store keys.",
@@ -95,7 +104,7 @@ export function sealProbe(packed: string | null | undefined): {
   hint?: string;
 } {
   const materials = sealSecrets().length;
-  const hasDedicated = Boolean(process.env["WEEX_SEAL_SECRET"]?.trim());
+  const hasDedicated = Boolean(envGet(["WEEX", "SEAL", "SECRET"].join("_"))?.trim());
   if (!packed) {
     return {
       materials,
@@ -117,7 +126,7 @@ export function sealProbe(packed: string | null | undefined): {
       openOk: false,
       hint: hasDedicated
         ? "Blobs sealed under an old secret — Clear keys, then Store again on this deploy."
-        : "Missing WEEX_SEAL_SECRET (or auth secret rotated). Set WEEX_SEAL_SECRET on Render, redeploy, Clear keys, Store again.",
+        : "Missing WEEX_SEAL_SECRET at runtime. Set it on Render, redeploy, Clear keys, Store again.",
     };
   }
 }
@@ -130,7 +139,7 @@ export function sealHealth(): {
   roundTripOk: boolean;
 } {
   const materials = sealSecrets().length;
-  const hasDedicated = Boolean(process.env["WEEX_SEAL_SECRET"]?.trim());
+  const hasDedicated = Boolean(envGet(["WEEX", "SEAL", "SECRET"].join("_"))?.trim());
   if (!hasDedicated) {
     return { materials, hasDedicated: false, roundTripOk: false };
   }
