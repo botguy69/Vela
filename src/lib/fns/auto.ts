@@ -2332,7 +2332,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
     );
     const rebuild = inRebuildMode(equity);
-    const LIVE_CAP = rebuild ? 1 : 6; // rebuild: one seat only
+    // Rebuild: 1 at-risk 15% seat; after TP1→BE that seat frees at-risk → second 15% A++ allowed (LIVE_CAP 2).
+    const LIVE_CAP = rebuild ? 2 : 6;
     const AT_RISK = rebuild ? 1 : 4;
     // TODO(desk-place): extract placeTicket into src/lib/desk-place.ts when clean.
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
@@ -2404,7 +2405,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     // Force path exists but only conf≥99 (user rule). Never widen seats for challenges.
     const challengeForce = true;
     const roomN = blocked ? 0 : 1;
-    if (rebuild) notes.push(`Rebuild mode — 1×${REBUILD_MARGIN_PCT}% until $${REBUILD_EQUITY_USD}`);
+    if (rebuild) notes.push(`Rebuild — 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd after TP1→BE; until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
       : bookUnread
@@ -2708,7 +2709,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. No A++ this pass. 1h book. Slots stay empty.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
           const aPlusLine = rebuild
-            ? `REBUILD → $${REBUILD_EQUITY_USD}: one seat · ${REBUILD_MARGIN_PCT}% margin · compound. A++ only.`
+            ? `REBUILD → $${REBUILD_EQUITY_USD}: 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd ${REBUILD_MARGIN_PCT}% after TP1→BE. A++ only.`
             : "Closed 15m only. Longs bottom 38% of 4h box, shorts top 38%. BTC wash: short only ripped alts. Mid-box skip. Stale 15m pullback skip.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
@@ -3155,7 +3156,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const learned =
       (stats.tpWins ?? 0) >= 20 && (stats.expectancyR ?? 0) > 0
         ? "A++ · 15m fill / 15m stop · 2 TPs (1R + 2R). BE after TP1. 4 at-risk, 6 with BE."
-        : (rebuild ? `REBUILD · 1 seat · ${REBUILD_MARGIN_PCT}% · to $${REBUILD_EQUITY_USD}` : "A++ · closed 15m · location rank · 2 TPs. 3%. Either side.");
+        : (rebuild ? `REBUILD · 1 at-risk (+1 after BE) · ${REBUILD_MARGIN_PCT}% · to $${REBUILD_EQUITY_USD}` : "A++ · closed 15m · location rank · 2 TPs. 3%. Either side.");
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))
