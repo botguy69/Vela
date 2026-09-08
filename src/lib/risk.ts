@@ -10,10 +10,10 @@ export type SizedSetup = RawSetup & {
   stopAccountPct: number;
 };
 
+/** Rebuild → $500: allow 15%. Normal desk 1–3. */
 export function clampRiskPct(raw: number): number {
   if (!Number.isFinite(raw)) return 3;
-  // Allow up to 5 for rare one-shot overrides; normal desk still passes 1–3.
-  return Math.min(5, Math.max(1, raw));
+  return Math.min(15, Math.max(1, raw));
 }
 
 /** Snap to discretionary 1 / 2 / 3% of book. Cap 3%. */
@@ -33,6 +33,20 @@ export function marginForConviction(confidence: number, baseMarginPct = 3): 1 | 
   else if (c >= 88) want = 2;
   else want = 1;
   return (want <= base ? want : base) as 1 | 2 | 3;
+}
+
+/** One-at-a-time 15% compound until equity hits rebuild target. */
+export const REBUILD_EQUITY_USD = 500;
+export const REBUILD_MARGIN_PCT = 15;
+
+export function inRebuildMode(accountUsd: number): boolean {
+  return Number.isFinite(accountUsd) && accountUsd > 0 && accountUsd < REBUILD_EQUITY_USD;
+}
+
+/** 15% single-seat while rebuilding; else conviction 1/2/3. */
+export function deskMarginPct(confidence: number, accountUsd: number, baseMarginPct = 3): number {
+  if (inRebuildMode(accountUsd)) return REBUILD_MARGIN_PCT;
+  return marginForConviction(confidence, baseMarginPct);
 }
 
 /** 3% of the book is margin (2% after 3 losses, 1% after 5). Notional = margin × coin max leverage on cross.
@@ -56,7 +70,9 @@ export function sizeSetup(
   const qty = notional / setup.entry;
   const stopDist = Math.abs(setup.entry - setup.stop);
   const stopAccountPct = stopDist > 0 ? (notional * (stopDist / setup.entry) / accountUsd) * 100 : 0;
-  if (stopAccountPct > 40) return null;
+  // Rebuild 15% + max lev can print a wide stopAccountPct on alts — allow up to 80% of wallet at stop (cross; unused backs it).
+  const stopCap = alloc >= 10 ? 80 : 40;
+  if (stopAccountPct > stopCap) return null;
 
   return {
     ...setup,
