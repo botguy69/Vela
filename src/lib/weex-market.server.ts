@@ -79,11 +79,20 @@ export function formatWeexPx(px: number, precision: number): string {
   return px.toFixed(Math.max(0, precision));
 }
 
+function klineTtlMs(interval: string): number {
+  // Longer TTL = less WEEX egress on Render. 1h/4h bars barely move intra-minute.
+  if (interval === "4h" || interval === "1d") return 180_000;
+  if (interval === "1h") return 90_000;
+  if (interval === "15m") return 45_000;
+  if (interval === "5m") return 20_000;
+  return 45_000;
+}
+
 export async function getWeexKlines(symbol: string, interval = "1h", limit = 120): Promise<Candle[]> {
   const key = `${symbol}:${interval}:${limit}`;
   const now = Date.now();
   const hit = klineCache.get(key);
-  if (hit && now - hit.at < 25_000) return hit.value;
+  if (hit && now - hit.at < klineTtlMs(interval)) return hit.value;
   const raw = await fetchJson<unknown[]>(
     `https://api-contract.weex.com/capi/v3/market/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`,
   );
@@ -109,7 +118,7 @@ export async function getWeexKlines(symbol: string, interval = "1h", limit = 120
 export async function getWeexLast(symbol: string): Promise<number> {
   const now = Date.now();
   const hit = pxCache.get(symbol);
-  if (hit && now - hit.at < 6_000) return hit.value;
+  if (hit && now - hit.at < 12_000) return hit.value;
   const raw = await fetchJson<{ price: string }>(
     `https://api-contract.weex.com/capi/v3/market/symbolPrice?symbol=${encodeURIComponent(symbol)}`,
   );
@@ -126,7 +135,7 @@ export async function loadTop25Hours(): Promise<Record<string, Candle[]>> {
     await Promise.all(
       TOP25.slice(i, i + chunk).map(async (c) => {
         try {
-          out[c.weex] = await getWeexKlines(c.weex, "1h", 120);
+          out[c.weex] = await getWeexKlines(c.weex, "1h", 96);
         } catch {
           /* skip thin */
         }
@@ -153,7 +162,7 @@ const fundCache = new Map<string, CacheEntry<number>>();
 export async function getBookTicker(symbol: string): Promise<{ bid: number; ask: number } | null> {
   const now = Date.now();
   const hit = bookCache.get(symbol);
-  if (hit && now - hit.at < 12_000) return hit.value;
+  if (hit && now - hit.at < 25_000) return hit.value;
   try {
     const raw = await fetchJson<Record<string, string> | Record<string, string>[]>(
       `https://api-contract.weex.com/capi/v3/market/ticker/bookTicker?symbol=${encodeURIComponent(symbol)}`,
