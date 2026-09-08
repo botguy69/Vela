@@ -2315,36 +2315,30 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       select * from auto_signals
       where user_id = ${userId} and status in ('proposed','working','filled')
     `;
-    // Soft book + flat WEEX list: DB working/filled ghosts block rebuild (1/1 at-risk, 0 public signals).
-    // Free the seat so we can hunt; user/UI SoT for real flat. Fix WEEX_SEAL_SECRET to end the blindness.
+    // Soft book + empty list: only orphan working/proposed limits may ghost-block rebuild.
+    // NEVER skip status=filled here — failed decrypt/[] is not proof of flat (keeps live tickets; see 8bf4d41).
     if (!bookReliable && (weexBook ?? []).every((p) => !(p.qty > 0))) {
-      const ghosts = stillOpenRaw.filter(
-        (s) => s.status === "working" || s.status === "proposed" || s.status === "filled",
-      );
-      if (ghosts.length) {
+      const orphans = stillOpenRaw.filter((s) => s.status === "working" || s.status === "proposed");
+      if (orphans.length) {
         const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
         const credsOrphan = await credsFrom(settings);
-        for (const row of ghosts) {
+        for (const row of orphans) {
           if (credsOrphan && row.client_oid) {
             await cancelWeexOrder(credsOrphan, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
           }
           if (credsOrphan) await cancelWeexProtective(credsOrphan, row.weex_symbol).catch(() => null);
-          const why =
-            row.status === "filled"
-              ? "Soft book — freed rebuild seat (verify flat on WEEX)"
-              : "Cancelled — soft book ghost limit";
           await sql`
             update auto_signals
             set status = 'skipped',
-                close_reason = ${why},
-                pnl = ${n(row.pnl)},
+                close_reason = ${"Cancelled — soft book ghost limit"},
+                pnl = 0,
                 updated_at = now()
             where id = ${row.id} and user_id = ${userId}
           `;
-          notes.push(`${row.weex_symbol} ${row.status} cleared — soft book seat free`);
+          notes.push(`${row.weex_symbol} ghost limit cleared — soft book`);
         }
         for (let i = stillOpenRaw.length - 1; i >= 0; i -= 1) {
-          if (ghosts.some((g) => g.id === stillOpenRaw[i]!.id)) stillOpenRaw.splice(i, 1);
+          if (orphans.some((g) => g.id === stillOpenRaw[i]!.id)) stillOpenRaw.splice(i, 1);
         }
       }
     }
@@ -2359,6 +2353,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const stillOpen = stillOpenRaw.filter((s) => {
       if (flattened.has(s.weex_symbol)) return false;
       if (s.status === "working" || s.status === "proposed") return true;
+      // Filled: trust WEEX list when reliable; when soft/unreadable keep DB fills (do not treat [] as flat).
+      if (!bookReliable) return true;
       return onWeex(s.weex_symbol);
     });
     const atRisk = stillOpen.filter(
@@ -2431,11 +2427,18 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       riskS = stillOpen.filter((s) => s.side === "short" && !(s.be_moved && s.tp1_hit)).length;
     }
     let atRiskN = Math.max(riskL + riskS, seatN - beNLive);
-    // Soft+flat: never let phantom DB seats block rebuild hunt.
+    // Soft+empty WEEX: ignore only phantom working/proposed DB seats — filled DB tickets still count as at-risk.
     if (rebuild && !bookReliable && liveN.length === 0) {
-      riskL = 0;
-      riskS = 0;
-      atRiskN = 0;
+      const filledDb = stillOpenRaw.filter((s) => s.status === "filled" && !flattened.has(s.weex_symbol));
+      if (filledDb.length === 0) {
+        riskL = 0;
+        riskS = 0;
+        atRiskN = 0;
+      } else {
+        riskL = filledDb.filter((s) => s.side !== "short").length;
+        riskS = filledDb.filter((s) => s.side === "short").length;
+        atRiskN = Math.max(atRiskN, riskL + riskS, filledDb.length);
+      }
     }
     const blocked =
       bookUnread ||
