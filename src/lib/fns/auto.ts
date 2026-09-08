@@ -2400,9 +2400,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       bookUnread ||
       liveN.length >= LIVE_CAP ||
       atRiskN >= AT_RISK;
-    // Challenge force window (until midnight ET): up to 2 A++ seats per tick if user authorized force.
-    const challengeForce = Date.now() < Date.parse("2026-09-08T04:00:00.000Z");
-    const roomN = blocked ? 0 : challengeForce ? 2 : 1;
+    // Force path exists but only conf≥99 (user rule). Never widen seats for challenges.
+    const challengeForce = true;
+    const roomN = blocked ? 0 : 1;
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
       : bookUnread
@@ -2920,8 +2920,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
           // User-authorized challenge force: if filters left the book empty, take best A++ structure
           // through soft location/VWAP (not mid-box junk — still needs eliteScalp + structure).
+          // Force only when ~99% sure (user rule 2026-09-08). Never for clock/challenge fill-rate.
           if (challengeForce && ready.length < room && room > 0) {
-            notes.push("Challenge force on — best A++ through soft location/VWAP");
+            notes.push("Force gate — only conf≥99 A++ through soft location/VWAP");
             const forced = [...elite].sort((a, b) => {
               const ca = a.confidence ?? scoreToConf(a.score);
               const cb = b.confidence ?? scoreToConf(b.score);
@@ -2932,6 +2933,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               if (ready.length >= room) break;
               const conf = pick.confidence ?? scoreToConf(pick.score);
               const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(conf)}%`;
+              if (conf < 99) continue;
               if (!rules.eliteScalp(pick.thesis ?? "", conf, bar.minConf, compass.bias)) continue;
               if (rules.setupQuality(pick.thesis ?? "") < 2) continue;
               if (conf < bar.minConf) continue;
