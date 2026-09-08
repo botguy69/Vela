@@ -11,8 +11,9 @@ services:
         value: node-server
       - key: NODE_ENV
         value: production
+      # NEVER generateValue — rotating BETTER_AUTH orphans sealed WEEX blobs.
       - key: BETTER_AUTH_SECRET
-        generateValue: true
+        sync: false
       - key: WEEX_SEAL_SECRET
         sync: false
       - key: DATABASE_URL
