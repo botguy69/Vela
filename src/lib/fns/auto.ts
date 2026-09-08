@@ -2551,9 +2551,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     } else if (settings.armed && !bookUnread && liveN.length < LIVE_CAP && atRiskN < AT_RISK) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
         notes.push("Armed with no keys. Store keys on this page.");
-      } else if (!live) {
-        notes.push(pulled.error ?? "WEEX equity not readable. No new orders.");
       } else {
+        // Hunt even if WEEX equity pull failed — size off last known DB equity. Place retries when creds work.
+        if (!live) notes.push("WEEX equity soft — hunting on last book equity");
         const books = await loadTop25Hours();
         const btcBook = books.BTCUSDT ?? [];
         const regime = rules.regimeState(btcBook);
