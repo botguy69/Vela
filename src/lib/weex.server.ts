@@ -250,7 +250,17 @@ function weexHumanError(status: number, code: number, msg: string, text: string)
     return "WEEX CDN 403 from Render. Not your key. Next tick retries.";
   }
   if (code === -1044 || code === -1047 || code === -1049 || status === 401) {
-    return "WEEX says the key, secret, or passphrase is wrong. Passphrase must be letters/numbers only. Copy secret again — it is shown only once.";
+    // Surface code so we can tell signature vs passphrase vs timestamp.
+    if (code === -1047) {
+      return "WEEX signature rejected (−1047). Secret is wrong, or it was copied with a typo (shown only once). Re-create key if unsure.";
+    }
+    if (code === -1049) {
+      return "WEEX timestamp rejected (−1049). Server clock skew — retry in a minute; if it keeps failing, ping me.";
+    }
+    if (code === -1044) {
+      return "WEEX passphrase rejected (−1044). Must match exactly (case-sensitive), letters/numbers only — no spaces or symbols.";
+    }
+    return "WEEX auth rejected. Check key + secret + passphrase (case-sensitive, letters/numbers only). Secret is shown only once.";
   }
   if (code === -1052) {
     return "Key is missing Futures permission. Edit the key on WEEX and enable Futures / contract trade.";
@@ -268,8 +278,26 @@ export function accountPath(sim: boolean): string {
   return sim ? "/capi/v3/sim/account" : "/capi/v3/account";
 }
 
+function cleanCred(s: string): string {
+  return String(s ?? "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim();
+}
+
 export async function verifyKeys(creds: WeexCreds): Promise<WeexResult<unknown>> {
-  return getWeexEquity(creds);
+  const cleaned: WeexCreds = {
+    apiKey: cleanCred(creds.apiKey),
+    apiSecret: cleanCred(creds.apiSecret),
+    passphrase: cleanCred(creds.passphrase),
+  };
+  if (!/^[A-Za-z0-9]+$/.test(cleaned.passphrase)) {
+    return {
+      ok: false,
+      error: "Passphrase must be letters and numbers only (no spaces or symbols).",
+      status: 400,
+    };
+  }
+  return getWeexEquity(cleaned);
 }
 
 function pickUsdt(rows: unknown[]): { equity: number; available: number; asset: string } | null {
