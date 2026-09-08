@@ -1642,7 +1642,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       getWeexKlines,
     } = await import("@/lib/weex-market.server");
     const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, taggedTake } = await import("@/lib/ta");
-    const { sizeSetup, marginForConviction } = await import("@/lib/risk");
+    const { sizeSetup, marginForConviction, deskMarginPct, inRebuildMode, REBUILD_EQUITY_USD, REBUILD_MARGIN_PCT } = await import("@/lib/risk");
     const { coinByWeex, SKIP_WEEX, TOP25_WEEX } = await import("@/lib/universe");
     const rules = await import("@/lib/desk-rules");
     const sql = await getSql();
@@ -1760,7 +1760,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     {
       const creds = await credsFrom(settings);
       // Never trim/flatten off an unreliable empty book — that nukes live tickets.
-      if (creds && bookReliable) await trimToTwoPct(sql, userId, settings, weexBook, notes, creds, equity);
+      if (creds && bookReliable && !inRebuildMode(equity)) await trimToTwoPct(sql, userId, settings, weexBook, notes, creds, equity);
     }
 
     for (const pos of open) {
@@ -2331,8 +2331,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const atRisk = stillOpen.filter(
       (s) => s.status === "working" || (s.status === "filled" && !s.be_moved),
     );
-    const LIVE_CAP = 6; // seats: 4 at-risk + BE extras to 6
-    const AT_RISK = 4;
+    const rebuild = inRebuildMode(equity);
+    const LIVE_CAP = rebuild ? 1 : 6; // rebuild: one seat only
+    const AT_RISK = rebuild ? 1 : 4;
     // TODO(desk-place): extract placeTicket into src/lib/desk-place.ts when clean.
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 85, note: "A++ · engulf/double/pin/climax. Failed-bounce + continuation off." };
@@ -2403,6 +2404,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     // Force path exists but only conf≥99 (user rule). Never widen seats for challenges.
     const challengeForce = true;
     const roomN = blocked ? 0 : 1;
+    if (rebuild) notes.push(`Rebuild mode — 1×${REBUILD_MARGIN_PCT}% until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
       : bookUnread
@@ -2705,7 +2707,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. No A++ this pass. 1h book. Slots stay empty.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Closed 15m only. Longs bottom 38% of 4h box, shorts top 38%. BTC wash: short only ripped alts. Mid-box skip. Stale 15m pullback skip.";
+          const aPlusLine = rebuild
+            ? `REBUILD → $${REBUILD_EQUITY_USD}: one seat · ${REBUILD_MARGIN_PCT}% margin · compound. A++ only.`
+            : "Closed 15m only. Longs bottom 38% of 4h box, shorts top 38%. BTC wash: short only ripped alts. Mid-box skip. Stale 15m pullback skip.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2906,13 +2910,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const timed = trig.wait ? { ...timed1, entryType: "limit" as const } : timed1;
-            // One-shot night challenge: 5% margin until 2026-09-08 04:00Z (midnight ET), then back to 1/2/3.
-            const challenge5 =
-              Date.now() < Date.parse("2026-09-08T04:00:00.000Z") ? 5 : null;
+            // Rebuild (<$500): 15% one-at-a-time. Else conviction 1/2/3.
             const sz = sizeSetup(
               timed,
               equity,
-              challenge5 ?? marginForConviction(timed.confidence ?? conf, corrected.marginPct),
+              deskMarginPct(timed.confidence ?? conf, equity, corrected.marginPct),
               spec.maxLeverage,
             );
             if (!sz) {
@@ -2985,12 +2987,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                 dist > 0
                   ? { ...stopped, target: planned.target, targets: planned.targets, rr: planned.rr }
                   : stopped;
-              const challenge5 = Date.now() < Date.parse("2026-09-08T04:00:00.000Z") ? 5 : null;
               const spec = await specFor(coinByWeex(pick.weexSymbol));
               const sz = sizeSetup(
                 timed1,
                 equity,
-                challenge5 ?? marginForConviction(conf, corrected.marginPct),
+                deskMarginPct(conf, equity, corrected.marginPct),
                 spec.maxLeverage,
               );
               if (!sz) {
@@ -3154,7 +3155,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const learned =
       (stats.tpWins ?? 0) >= 20 && (stats.expectancyR ?? 0) > 0
         ? "A++ · 15m fill / 15m stop · 2 TPs (1R + 2R). BE after TP1. 4 at-risk, 6 with BE."
-        : "A++ · closed 15m · location rank · 2 TPs. 3%. Either side.";
+        : (rebuild ? `REBUILD · 1 seat · ${REBUILD_MARGIN_PCT}% · to $${REBUILD_EQUITY_USD}` : "A++ · closed 15m · location rank · 2 TPs. 3%. Either side.");
     const manage = notes
       .filter((n) => /TP1 printed|Took |swept to 1 SL|working limit filled/i.test(n))
       .filter((n) => !/restated|WEEX PnL|Closed in green|Closed on WEEX/i.test(n))
