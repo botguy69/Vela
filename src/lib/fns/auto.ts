@@ -989,32 +989,25 @@ async function closeFlatOnWeex(
     });
     if (onList) continue;
     if (!creds) continue;
-    const q = await getWeexPositionQty(creds, pos.weex_symbol);
-    if (q == null || q > 0) continue;
+    const q1 = await getWeexPositionQty(creds, pos.weex_symbol);
+    if (q1 == null || q1 > 0) continue;
+    // Confirm flat once more — a single false 0 (METIS-class) must not book a close or yank protects.
+    await new Promise((r) => setTimeout(r, 400));
+    const q2 = await getWeexPositionQty(creds, pos.weex_symbol);
+    if (q2 == null || q2 > 0) {
+      notes.push(`${pos.weex_symbol} flat flicker — kept live`);
+      continue;
+    }
     const { listWeexClosedPnl } = await import("@/lib/weex.server");
     let hit = matchWeexClose(pos, await listWeexClosedPnl(creds, pos.weex_symbol).catch(() => []));
     if (!hit) hit = matchWeexClose(pos, await listWeexClosedPnl(creds).catch(() => []));
+    // No WEEX close print + no list row: leave DB live; do not guess-close (METIS fate).
+    if (!hit) {
+      notes.push(`${pos.weex_symbol} qty 0 but no close print — kept live`);
+      continue;
+    }
     const last = await getWeexLast(pos.weex_symbol).catch(() => n(pos.fill_px ?? pos.entry));
-    const entry = n(pos.fill_px) || n(pos.entry);
-    const qty = origQty(pos);
-    const guess =
-      entry > 0 && last > 0 && qty > 0
-        ? pos.side === "short"
-          ? (entry - last) * qty
-          : (last - entry) * qty
-        : 0;
-    const book = hit
-      ? applyWeexHit(hit, pos)
-      : {
-          pnl: guess,
-          px: last,
-          why:
-            guess <= -0.05 ? "Flattened" : guess >= 0.15 ? "Closed in green" : "Closed on WEEX",
-          st: (guess >= 0.05 ? "targeted" : guess <= -0.05 ? "stopped" : "skipped") as
-            | "targeted"
-            | "stopped"
-            | "skipped",
-        };
+    const book = applyWeexHit(hit, pos);
     await sql`
       update auto_signals
       set status = ${book.st}, closed_px = ${book.px || last}, pnl = ${book.pnl}, close_reason = ${book.why}, updated_at = now()
