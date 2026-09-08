@@ -1,18 +1,36 @@
 /** Pure hunt note helpers lifted from auto.ts — no sql / weex. */
 
-export function huntHeader(liveL: number, liveS: number, beN = 0, liveTotal?: number) {
+export function huntHeader(
+  liveL: number,
+  liveS: number,
+  beN = 0,
+  liveTotal?: number,
+  opts?: { atRiskCap?: number; liveCap?: number; rebuild?: boolean; marginPct?: number },
+) {
+  const atRiskCap = opts?.atRiskCap ?? 4;
+  const liveCap = opts?.liveCap ?? 6;
   const at = liveL + liveS;
   const live = liveTotal ?? at + beN;
-  if (live >= 6) {
-    return `Not hunting — ${live} live. Cap 6 (4 at-risk + BE extras).`;
+  const rebuild = Boolean(opts?.rebuild);
+  const m = opts?.marginPct ?? 3;
+  if (live >= liveCap) {
+    return rebuild
+      ? `Not hunting — ${live} live. Rebuild cap ${liveCap} (1 at-risk ${m}% + BE extras).`
+      : `Not hunting — ${live} live. Cap ${liveCap} (${atRiskCap} at-risk + BE extras).`;
   }
-  if (at >= 4) {
-    return `4/4 at-risk (${liveL}L/${liveS}S, ${beN} BE). Next ticket only after TP1→BE.`;
+  if (at >= atRiskCap) {
+    return rebuild
+      ? `${at}/${atRiskCap} at-risk (${liveL}L/${liveS}S, ${beN} BE). Next ${m}% only after TP1→BE.`
+      : `${at}/${atRiskCap} at-risk (${liveL}L/${liveS}S, ${beN} BE). Next ticket only after TP1→BE.`;
   }
   if (at >= 1) {
-    return `Hunting next A++ (${at}/4 at-risk, ${liveL}L/${liveS}S, ${beN} BE). Either side. Best location. One per tick.`;
+    return rebuild
+      ? `Rebuild hunt (${at}/${atRiskCap} at-risk, ${liveL}L/${liveS}S, ${beN} BE). ${m}% A++. One per tick.`
+      : `Hunting next A++ (${at}/${atRiskCap} at-risk, ${liveL}L/${liveS}S, ${beN} BE). Either side. Best location. One per tick.`;
   }
-  return `Hunting 1 A++ per tick. Either side. Best location. 4 at-risk. BE extras to 6.`;
+  return rebuild
+    ? `Rebuild · flat · 1×${m}% A++ · 2nd after TP1→BE · to $500.`
+    : `Hunting 1 A++ per tick. Either side. Best location. ${atRiskCap} at-risk. BE extras to ${liveCap}.`;
 }
 
 export function composePass(
@@ -22,13 +40,14 @@ export function composePass(
   liveLines: string[],
   beN = 0,
   liveTotal?: number,
+  opts?: { atRiskCap?: number; liveCap?: number; rebuild?: boolean; marginPct?: number },
 ) {
-  const head = huntHeader(liveL, liveS, beN, liveTotal);
+  const head = huntHeader(liveL, liveS, beN, liveTotal, opts);
   const fromTick = (note ?? "")
     .split("\n")
     .map((ln) => ln.trim())
     .filter((ln) =>
-      /^(Eying |Took |Skip |BTC |Book |One |A\+\+|Closed )/i.test(ln),
+      /^(Eying |Took |Skip |BTC |Book |One |A\+\+|Closed |Rebuild )/i.test(ln),
     )
     .filter((ln) => !/trend cooling|80%\+|21h-mean|No dip-buy vs a dump/i.test(ln));
   const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
