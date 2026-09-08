@@ -2400,7 +2400,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       bookUnread ||
       liveN.length >= LIVE_CAP ||
       atRiskN >= AT_RISK;
-    const roomN = blocked ? 0 : 1;
+    // Challenge force window (until midnight ET): up to 2 A++ seats per tick if user authorized force.
+    const challengeForce = Date.now() < Date.parse("2026-09-08T04:00:00.000Z");
+    const roomN = blocked ? 0 : challengeForce ? 2 : 1;
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
       : bookUnread
@@ -2915,6 +2917,79 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                 conf,
               }),
             });
+          }
+          // User-authorized challenge force: if filters left the book empty, take best A++ structure
+          // through soft location/VWAP (not mid-box junk — still needs eliteScalp + structure).
+          if (challengeForce && ready.length < room && room > 0) {
+            notes.push("Challenge force on — best A++ through soft location/VWAP");
+            const forced = [...elite].sort((a, b) => {
+              const ca = a.confidence ?? scoreToConf(a.score);
+              const cb = b.confidence ?? scoreToConf(b.score);
+              if (cb !== ca) return cb - ca;
+              return rules.setupQuality(b.thesis ?? "") - rules.setupQuality(a.thesis ?? "");
+            });
+            for (const pick of forced) {
+              if (ready.length >= room) break;
+              const conf = pick.confidence ?? scoreToConf(pick.score);
+              const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(conf)}%`;
+              if (!rules.eliteScalp(pick.thesis ?? "", conf, bar.minConf, compass.bias)) continue;
+              if (rules.setupQuality(pick.thesis ?? "") < 2) continue;
+              if (conf < bar.minConf) continue;
+              if (SKIP_WEEX.has(pick.weexSymbol) || !TOP25_WEEX.includes(pick.weexSymbol)) continue;
+              if (busy.has(pick.weexSymbol) || flattened.has(pick.weexSymbol)) continue;
+              if (stillOpen.some((s) => s.weex_symbol === pick.weexSymbol)) continue;
+              if (ext.longChase && pick.side === "long") continue;
+              if (ext.shortChase && pick.side === "short") continue;
+              if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
+              if (ready.some((r) => r.sized.weexSymbol === pick.weexSymbol)) continue;
+              const h4 = h4map[pick.weexSymbol] ?? (await getWeexFourHour(pick.weexSymbol).catch(() => []));
+              if (h4.length < 24) continue;
+              const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
+              const coin15raw = await getWeexKlines(pick.weexSymbol, "15m", 210).catch(() => []);
+              const coin15 = rules.closedCandles(coin15raw, 15 * 60 * 1000);
+              const timed0 = rules.withLtfEntry(pick, undefined);
+              const stopped = {
+                ...timed0,
+                stop: rules.structureStop(timed0.side, timed0.entry, timed0.stop, coin15, hourPick),
+                entryType: "market" as const,
+              };
+              const planned = rules.planDeskTargets(
+                stopped.side,
+                stopped.entry,
+                stopped.stop,
+                h4,
+                { target: timed0.target, targets: timed0.targets },
+              );
+              const dist = Math.abs(stopped.entry - stopped.stop);
+              const timed1 =
+                dist > 0
+                  ? { ...stopped, target: planned.target, targets: planned.targets, rr: planned.rr }
+                  : stopped;
+              const challenge5 = Date.now() < Date.parse("2026-09-08T04:00:00.000Z") ? 5 : null;
+              const spec = await specFor(coinByWeex(pick.weexSymbol));
+              const sz = sizeSetup(
+                timed1,
+                equity,
+                challenge5 ?? marginForConviction(conf, corrected.marginPct),
+                spec.maxLeverage,
+              );
+              if (!sz) {
+                whyNot.push(`${tag} force size rejected`);
+                continue;
+              }
+              whyNot.push(`${tag} FORCE TAKE`);
+              ready.push({
+                sized: sz,
+                spec,
+                score: conf,
+                rank: rules.huntRank({
+                  thesis: pick.thesis ?? "",
+                  side: pick.side,
+                  fourHour: h4,
+                  conf,
+                }) + 50,
+              });
+            }
           }
           ready.sort((a, b) => b.rank - a.rank || b.score - a.score);
           const best = ready.find((r) => r.sized.entryType !== "limit" || openLimits < 2) ?? null;
