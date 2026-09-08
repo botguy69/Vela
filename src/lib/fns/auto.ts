@@ -2315,6 +2315,33 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       select * from auto_signals
       where user_id = ${userId} and status in ('proposed','working','filled')
     `;
+    // Soft book + flat WEEX: orphan working/proposed limits ghost-block rebuild (1/1 at-risk, 0 signals). Cancel them.
+    if (!bookReliable && (weexBook ?? []).every((p) => !(p.qty > 0))) {
+      const orphans = stillOpenRaw.filter((s) => s.status === "working" || s.status === "proposed");
+      if (orphans.length) {
+        const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
+        const credsOrphan = await credsFrom(settings);
+        for (const row of orphans) {
+          if (credsOrphan && row.client_oid) {
+            await cancelWeexOrder(credsOrphan, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
+          }
+          if (credsOrphan) await cancelWeexProtective(credsOrphan, row.weex_symbol).catch(() => null);
+          await sql`
+            update auto_signals
+            set status = 'skipped',
+                close_reason = ${"Cancelled — soft book ghost limit"},
+                pnl = 0,
+                updated_at = now()
+            where id = ${row.id} and user_id = ${userId}
+          `;
+          notes.push(`${row.weex_symbol} ghost limit cleared — soft book`);
+        }
+        for (const row of orphans) {
+          const i = stillOpenRaw.findIndex((s) => s.id === row.id);
+          if (i >= 0) stillOpenRaw.splice(i, 1);
+        }
+      }
+    }
     const onWeex = (sym: string) => {
       const key = sym.replace(/_/g, "").toUpperCase();
       return (weexBook ?? []).some(
