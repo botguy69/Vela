@@ -2315,30 +2315,36 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       select * from auto_signals
       where user_id = ${userId} and status in ('proposed','working','filled')
     `;
-    // Soft book + flat WEEX: orphan working/proposed limits ghost-block rebuild (1/1 at-risk, 0 signals). Cancel them.
+    // Soft book + flat WEEX list: DB working/filled ghosts block rebuild (1/1 at-risk, 0 public signals).
+    // Free the seat so we can hunt; user/UI SoT for real flat. Fix WEEX_SEAL_SECRET to end the blindness.
     if (!bookReliable && (weexBook ?? []).every((p) => !(p.qty > 0))) {
-      const orphans = stillOpenRaw.filter((s) => s.status === "working" || s.status === "proposed");
-      if (orphans.length) {
+      const ghosts = stillOpenRaw.filter(
+        (s) => s.status === "working" || s.status === "proposed" || s.status === "filled",
+      );
+      if (ghosts.length) {
         const { cancelWeexOrder, cancelWeexProtective } = await import("@/lib/weex.server");
         const credsOrphan = await credsFrom(settings);
-        for (const row of orphans) {
+        for (const row of ghosts) {
           if (credsOrphan && row.client_oid) {
             await cancelWeexOrder(credsOrphan, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
           }
           if (credsOrphan) await cancelWeexProtective(credsOrphan, row.weex_symbol).catch(() => null);
+          const why =
+            row.status === "filled"
+              ? "Soft book — freed rebuild seat (verify flat on WEEX)"
+              : "Cancelled — soft book ghost limit";
           await sql`
             update auto_signals
             set status = 'skipped',
-                close_reason = ${"Cancelled — soft book ghost limit"},
-                pnl = 0,
+                close_reason = ${why},
+                pnl = ${n(row.pnl)},
                 updated_at = now()
             where id = ${row.id} and user_id = ${userId}
           `;
-          notes.push(`${row.weex_symbol} ghost limit cleared — soft book`);
+          notes.push(`${row.weex_symbol} ${row.status} cleared — soft book seat free`);
         }
-        for (const row of orphans) {
-          const i = stillOpenRaw.findIndex((s) => s.id === row.id);
-          if (i >= 0) stillOpenRaw.splice(i, 1);
+        for (let i = stillOpenRaw.length - 1; i >= 0; i -= 1) {
+          if (ghosts.some((g) => g.id === stillOpenRaw[i]!.id)) stillOpenRaw.splice(i, 1);
         }
       }
     }
@@ -2424,7 +2430,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       riskL = stillOpen.filter((s) => s.side !== "short" && !(s.be_moved && s.tp1_hit)).length;
       riskS = stillOpen.filter((s) => s.side === "short" && !(s.be_moved && s.tp1_hit)).length;
     }
-    const atRiskN = Math.max(riskL + riskS, seatN - beNLive);
+    let atRiskN = Math.max(riskL + riskS, seatN - beNLive);
+    // Soft+flat: never let phantom DB seats block rebuild hunt.
+    if (rebuild && !bookReliable && liveN.length === 0) {
+      riskL = 0;
+      riskS = 0;
+      atRiskN = 0;
+    }
     const blocked =
       bookUnread ||
       liveN.length >= LIVE_CAP ||
