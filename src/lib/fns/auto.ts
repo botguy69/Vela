@@ -1702,6 +1702,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         and created_at < now() - interval '3 minutes'
     `;
     let weexBook: { symbol: string; qty: number; side?: string; pnl?: number | null }[] | null = null;
+    let bookReliable = false;
     let bookedFlat: number[] = [];
     let flattenedTick: string[] = [];
     let weexCloses: {
@@ -1717,19 +1718,25 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const creds = await credsFrom(settings);
       if (creds) {
         const { listWeexPositions, listWeexClosedPnl } = await import("@/lib/weex.server");
-        // null = API paths failed; empty [] = flat.
-        weexBook = (await listWeexPositions(creds)) ?? [];
+        // null = position API failed (unreliable). [] = reliable flat. Never treat null as flat.
+        const listed = await listWeexPositions(creds);
+        bookReliable = listed !== null;
+        weexBook = listed ?? [];
         weexCloses = await listWeexClosedPnl(creds).catch(() => []);
         await resurrectLive(sql, userId, weexBook, notes, creds);
-        const flat = await closeFlatOnWeex(sql, userId, weexBook, notes, creds);
-        bookedFlat = flat.booked;
-        flattenedTick = flat.flattened;
-        await restampWeexPnl(sql, userId, creds, notes, weexCloses);
+        if (bookReliable) {
+          const flat = await closeFlatOnWeex(sql, userId, weexBook, notes, creds);
+          bookedFlat = flat.booked;
+          flattenedTick = flat.flattened;
+          await restampWeexPnl(sql, userId, creds, notes, weexCloses);
+        } else {
+          notes.push("WEEX book unreliable — keep live tickets; skip flatten/sync");
+        }
         stats = await closedStats(sql, userId, settings.stats_from);
       } else if (settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc) {
-        // Keys on file — never park hunt on a soft unwrap blip. Empty book; place retries next tick.
+        // Keys on file — never park hunt. Do NOT run closeFlat (no creds / blind).
         weexBook = [];
-        notes.push("WEEX book soft — hunting on DB seats");
+        notes.push("WEEX book soft — hunting on DB seats; tickets stay live");
       }
     }
 
@@ -1752,7 +1759,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     }
     {
       const creds = await credsFrom(settings);
-      if (creds) await trimToTwoPct(sql, userId, settings, weexBook, notes, creds, equity);
+      // Never trim/flatten off an unreliable empty book — that nukes live tickets.
+      if (creds && bookReliable) await trimToTwoPct(sql, userId, settings, weexBook, notes, creds, equity);
     }
 
     for (const pos of open) {
@@ -1766,17 +1774,21 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           p.qty > 0,
       );
       if (pos.status === "filled" && !weexLive) {
-        const other = (weexBook ?? []).find(
-          (p) => p.symbol.replace(/_/g, "").toUpperCase() === keyPos && p.qty > 0,
-        );
-        if (other) {
-          await sql`
-            update auto_signals
-            set status = 'skipped', close_reason = ${"Ghost opposite side"}, pnl = 0, updated_at = now()
-            where id = ${pos.id} and user_id = ${userId}
-          `;
-          notes.push(`${pos.weex_symbol} ${side} ghost — WEEX is ${(other.side === "short" ? "short" : "long")}, skipped`);
-          continue;
+        if (!bookReliable) {
+          // Book didn't load — do not treat missing row as flat/ghost.
+        } else {
+          const other = (weexBook ?? []).find(
+            (p) => p.symbol.replace(/_/g, "").toUpperCase() === keyPos && p.qty > 0,
+          );
+          if (other) {
+            await sql`
+              update auto_signals
+              set status = 'skipped', close_reason = ${"Ghost opposite side"}, pnl = 0, updated_at = now()
+              where id = ${pos.id} and user_id = ${userId}
+            `;
+            notes.push(`${pos.weex_symbol} ${side} ghost — WEEX is ${(other.side === "short" ? "short" : "long")}, skipped`);
+            continue;
+          }
         }
       }
       let stop = n(pos.stop);
