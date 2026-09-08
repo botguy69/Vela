@@ -2648,12 +2648,18 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             if (ext.longChase && s.side === "long") {
-              whyNot.push(`${tag} BTC 4h high — no new longs`);
-              continue;
+              const h4s = h4map[s.weexSymbol] ?? [];
+              if (!rules.altWashLongOk(s.thesis ?? "", h4s)) {
+                whyNot.push(`${tag} BTC 4h high — no chase-longs (alt not washed)`);
+                continue;
+              }
             }
             if (ext.shortChase && s.side === "short") {
-              whyNot.push(`${tag} BTC 4h low — no new shorts`);
-              continue;
+              const h4s = h4map[s.weexSymbol] ?? [];
+              if (!rules.altRipShortOk(s.thesis ?? "", h4s)) {
+                whyNot.push(`${tag} BTC 4h low — no dump-shorts (alt not ripped)`);
+                continue;
+              }
             }
             if (fade && !rules.fadeAtExtreme(s.thesis ?? "", s.side)) {
               whyNot.push(`${tag} not a ${fade} reject — no with-trend fade`);
@@ -2665,7 +2671,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             pool.push(s);
           }
+          const liveL = liveN.filter((p) => (p.side === "short" ? "short" : "long") === "long").length;
+          const liveS = liveN.filter((p) => p.side === "short").length;
+          const wantBal = liveL - liveS >= 2 ? "short" : liveS - liveL >= 2 ? "long" : null;
           pool.sort((a, b) => {
+            if (wantBal) {
+              const ab = a.side === wantBal ? 1 : 0;
+              const bb = b.side === wantBal ? 1 : 0;
+              if (ab !== bb) return bb - ab;
+            }
             const ra = rules.huntRank({
               thesis: a.thesis ?? "",
               side: a.side,
@@ -2691,7 +2705,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. No A++ this pass. 1h book. Slots stay empty.`
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
-          const aPlusLine = "Closed 15m only. Longs bottom 38% of 4h box, shorts top 38%. Mid-box skip. Stale 15m pullback skip.";
+          const aPlusLine = "Closed 15m only. Longs bottom 38% of 4h box, shorts top 38%. BTC wash: short only ripped alts. Mid-box skip. Stale 15m pullback skip.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2765,14 +2779,18 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             if (ext.longChase && pick.side === "long") {
-              veto = `BTC 4h high — no new longs`;
-              whyNot.push(`${tag} BTC 4h high — no new longs`);
-              continue;
+              if (!rules.altWashLongOk(pick.thesis ?? "", h4)) {
+                veto = `BTC 4h high — no chase-longs`;
+                whyNot.push(`${tag} BTC 4h high — no chase-longs (alt not washed)`);
+                continue;
+              }
             }
             if (ext.shortChase && pick.side === "short") {
-              veto = `BTC 4h low — no new shorts`;
-              whyNot.push(`${tag} BTC 4h low — no new shorts`);
-              continue;
+              if (!rules.altRipShortOk(pick.thesis ?? "", h4)) {
+                veto = `BTC 4h low — no dump-shorts`;
+                whyNot.push(`${tag} BTC 4h low — no dump-shorts (alt not ripped)`);
+                continue;
+              }
             }
             if (fade && !rules.fadeAtExtreme(pick.thesis ?? "", pick.side)) {
               veto = `${tag} not a ${fade} reject`;
