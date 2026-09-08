@@ -49,15 +49,13 @@ function material(secret: string): Buffer {
   return buf;
 }
 
-/** Primary seal secret — never undefined; never empty string. */
+/** New seals MUST use WEEX_SEAL_SECRET only — never BETTER_AUTH (Render may rotate it). */
 function primarySealSecret(): string {
-  const secret = sealSecrets()[0];
-  if (!secret) {
-    throw new Error(
-      "No seal material available — set WEEX_SEAL_SECRET on Render, then re-save keys.",
-    );
-  }
-  return secret;
+  const dedicated = process.env["WEEX_SEAL_SECRET"]?.trim();
+  if (dedicated) return dedicated;
+  throw new Error(
+    "Set WEEX_SEAL_SECRET on Render (stable; do not use BETTER_AUTH for key seal), redeploy, then Store keys.",
+  );
 }
 
 export function seal(plain: string): string {
@@ -125,6 +123,26 @@ export function sealProbe(packed: string | null | undefined): {
 }
 
 /** Seal then immediately open; throws if current materials cannot round-trip. */
+/** Runtime seal check — does NOT touch stored blobs. */
+export function sealHealth(): {
+  materials: number;
+  hasDedicated: boolean;
+  roundTripOk: boolean;
+} {
+  const materials = sealSecrets().length;
+  const hasDedicated = Boolean(process.env["WEEX_SEAL_SECRET"]?.trim());
+  if (!hasDedicated) {
+    return { materials, hasDedicated: false, roundTripOk: false };
+  }
+  try {
+    const packed = assertSealRoundTrip("vela-seal-health");
+    openSeal(packed);
+    return { materials, hasDedicated: true, roundTripOk: true };
+  } catch {
+    return { materials, hasDedicated: true, roundTripOk: false };
+  }
+}
+
 export function assertSealRoundTrip(plain: string): string {
   const packed = seal(plain);
   let opened: string;
