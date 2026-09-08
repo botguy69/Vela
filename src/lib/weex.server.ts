@@ -94,15 +94,33 @@ export function sealProbe(packed: string | null | undefined): {
   materials: number;
   blobLen: number;
   openOk: boolean;
+  hint?: string;
 } {
   const materials = sealSecrets().length;
-  if (!packed) return { materials, blobLen: 0, openOk: false };
+  const hasDedicated = Boolean(process.env["WEEX_SEAL_SECRET"]?.trim());
+  if (!packed) {
+    return {
+      materials,
+      blobLen: 0,
+      openOk: false,
+      hint: hasDedicated
+        ? "No key blobs — Store keys in Vela after deploy."
+        : "Set WEEX_SEAL_SECRET on Render, redeploy, then Store keys.",
+    };
+  }
   const blobLen = packed.length;
   try {
     openSeal(packed);
     return { materials, blobLen, openOk: true };
   } catch {
-    return { materials, blobLen, openOk: false };
+    return {
+      materials,
+      blobLen,
+      openOk: false,
+      hint: hasDedicated
+        ? "Blobs sealed under an old secret — Clear keys, then Store again on this deploy."
+        : "Missing WEEX_SEAL_SECRET (or auth secret rotated). Set WEEX_SEAL_SECRET on Render, redeploy, Clear keys, Store again.",
+    };
   }
 }
 
