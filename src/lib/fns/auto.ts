@@ -2410,7 +2410,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ? "Disarmed. Not hunting."
       : bookUnread
         ? "No WEEX keys on file — not hunting."
-        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN));
+        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN), { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3 });
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -2466,7 +2466,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               updated_at = now()
           where id = ${row.id} and user_id = ${userId}
         `;
-        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or 4 at-risk`);
+        notes.push(ban ? `${row.weex_symbol} cancelled — off the book` : `${row.weex_symbol} limit cancelled — duplicate or at-risk full`);
       }
       for (const row of stillOpenRaw) {
         const sym = row.weex_symbol.replace(/_/g, "").toUpperCase();
@@ -2515,12 +2515,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           await sql`
             update auto_signals
             set status = 'skipped',
-                close_reason = ${"Cancelled — 4 at-risk already"},
+                close_reason = ${"Cancelled — at-risk full"},
                 pnl = 0,
                 updated_at = now()
             where id = ${row.id} and user_id = ${userId}
           `;
-          notes.push(`${row.weex_symbol} limit cancelled — 4 at-risk already`);
+          notes.push(`${row.weex_symbol} limit cancelled — at-risk full`);
           continue;
         }
         slotN += 1;
@@ -2551,7 +2551,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ];
       huntTape = [huntStatus, ...whyLive].filter(Boolean).join("\n");
       notes.push(
-        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk, ${beNLive} BE · 4 at-risk / 6 live. Leave live.`,
+        `${[...new Set(names)].join(" ")} · ${atRiskN} at-risk, ${beNLive} BE · ${AT_RISK} at-risk / ${LIVE_CAP} live. Leave live.`,
       );
     } else if (settings.armed && !bookUnread && liveN.length < LIVE_CAP && atRiskN < AT_RISK) {
       if (!(settings.api_key_enc && settings.api_secret_enc && settings.api_pass_enc)) {
@@ -3023,7 +3023,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
 
           let tookLine = veto;
           if (!batch.length && room <= 0) {
-            tookLine = `Book ${atRiskN}/4 at-risk · ${seatN} seats. Not adding.`;
+            tookLine = `Book ${atRiskN}/${AT_RISK} at-risk · ${seatN} seats. Not adding.`;
           }
 
           if (!batch.length) {
@@ -3139,7 +3139,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
           const at2 = riskL + riskS;
           const be2 = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened);
+          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3 });
           huntTape = [huntNow, compass.note, ...whyLive, tookLine, whyNot.length ? `Skip  ${whyNot.slice(0, 3).join(" · ")}${whyNot.length > 3 ? ` · +${whyNot.length - 3} more` : ""}` : "", eyeLine, aPlusLine].filter(Boolean).join("\n");
         }
       }
@@ -3147,7 +3147,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       huntTape = huntStatus;
       notes.push("Disarmed. No new orders.");
     } else if (stillOpen.length >= LIVE_CAP) {
-      huntTape = `${huntStatus}\nLive cap (4 names). Waiting on an exit.`;
+      huntTape = `${huntStatus}\nLive cap (${LIVE_CAP}). Waiting on an exit.`;
       notes.push("Live cap (4 names). Waiting on an exit.");
     } else {
       huntTape = huntTape || huntStatus;
