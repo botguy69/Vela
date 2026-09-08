@@ -42,7 +42,8 @@ export function ensureAutoLoop() {
   if (globalRef.__velaAutoLoop__) return;
   globalRef.__velaAutoLoop__ = true;
   void kickArmedTicks();
-  setInterval(() => void kickArmedTicks(), 20_000);
+  // 60s cadence cuts Render egress (~3× vs 20s). Tick itself still serializes; live tickets manage inside each pass.
+  setInterval(() => void kickArmedTicks(), 60_000);
 }
 
 if (typeof window === "undefined" && process.env.VELA_WORKER === "1") {
