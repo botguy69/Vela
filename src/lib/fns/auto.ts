@@ -2000,7 +2000,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const openPnl = side === "short" ? (entry - lastPx) * left : (lastPx - entry) * left;
         const pastStop =
           stop > 0 && (side === "short" ? lastPx >= stop * 0.997 : lastPx <= stop * 1.003);
-        const rKill = inRebuildMode(equity) ? 1.0 : 1.25;
+        const rKill = 1.0; // solo desk: never give more than ~1R on a live ticket
         if ((unit > 0.05 && openPnl <= -rKill * unit) || pastStop) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));
           const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
@@ -2085,7 +2085,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const tp1Live = tpsLive[0] ?? n(pos.target);
         const ticketRr = n(pos.rr);
         const ticketConf = n(pos.confidence);
-        const tightSeat = inRebuildMode(equity);
+        // Solo desk: always tight chop — cut dead theses early.
+        const tightSeat = true;
         let act = rules.chopAction({
           since,
           style,
@@ -2468,8 +2469,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       bookUnread ||
       liveN.length >= LIVE_CAP ||
       atRiskN >= AT_RISK;
-    // Force path exists but only conf≥99 (user rule). Never widen seats for challenges.
-    const challengeForce = true;
+    // Force path OFF for solo/offline desk — filters only, never clock/challenge fills.
+    const challengeForce = false;
     const roomN = blocked ? 0 : 1;
     if (rebuild) notes.push(`Rebuild — 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd after TP1→BE; until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed
