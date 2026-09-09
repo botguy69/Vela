@@ -2000,7 +2000,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const openPnl = side === "short" ? (entry - lastPx) * left : (lastPx - entry) * left;
         const pastStop =
           stop > 0 && (side === "short" ? lastPx >= stop * 0.997 : lastPx <= stop * 1.003);
-        if ((unit > 0.05 && openPnl <= -1.25 * unit) || pastStop) {
+        const rKill = inRebuildMode(equity) ? 1.0 : 1.25;
+        if ((unit > 0.05 && openPnl <= -rKill * unit) || pastStop) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));
           const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
           await cancelWeexProtective(credsNow, pos.weex_symbol).catch(() => null);
@@ -2013,7 +2014,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           });
           if (sent.ok) {
             notes.push(
-              `${pos.weex_symbol} flattened — ${pastStop ? "stop missed on WEEX" : "past 1.25R"}`,
+              `${pos.weex_symbol} flattened — ${pastStop ? "stop missed on WEEX" : `past ${rKill}R`}`,
             );
             left = 0;
           }
@@ -2084,6 +2085,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const tp1Live = tpsLive[0] ?? n(pos.target);
         const ticketRr = n(pos.rr);
         const ticketConf = n(pos.confidence);
+        const tightSeat = inRebuildMode(equity);
         let act = rules.chopAction({
           since,
           style,
@@ -2094,6 +2096,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           beMoved: Boolean(pos.be_moved),
           rr: ticketRr,
           conf: ticketConf,
+          tight: tightSeat,
         });
         let leftover = false;
         if (
