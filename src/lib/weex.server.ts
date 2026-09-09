@@ -223,9 +223,12 @@ export async function weexRequest<T>(opts: {
       opts.creds.passphrase,
       opts.passMode ?? "plain",
     ),
-    "Content-Type": "application/json",
     locale: "en-US",
     "User-Agent": "Mozilla/5.0 VELA/1.0",
+  };
+  // Only on POST/DELETE — Content-Type on GET can make runtimes send an unsigned body → WEEX -1047.
+  if (opts.method === "POST" || opts.method === "DELETE") {
+    headers["Content-Type"] = "application/json";
   }
   try {
     const ac = new AbortController();
