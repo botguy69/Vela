@@ -35,11 +35,14 @@ export function marginForConviction(confidence: number, baseMarginPct = 3): 1 | 
   return (want <= base ? want : base) as 1 | 2 | 3;
 }
 
-/** One-at-a-time 15% compound until equity hits rebuild target. */
+/** One-at-a-time 15% compound until equity hits rebuild target OR 10pm ET 2026-09-09. */
 export const REBUILD_EQUITY_USD = 500;
 export const REBUILD_MARGIN_PCT = 15;
+/** 10:00pm America/Toronto Sep 9 2026 = 02:00 UTC Sep 10 (EDT). */
+export const REBUILD_UNTIL_MS = Date.parse("2026-09-10T02:00:00.000Z");
 
 export function inRebuildMode(accountUsd: number): boolean {
+  if (!(Date.now() < REBUILD_UNTIL_MS)) return false;
   return Number.isFinite(accountUsd) && accountUsd > 0 && accountUsd < REBUILD_EQUITY_USD;
 }
 
