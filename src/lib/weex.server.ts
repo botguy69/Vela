@@ -279,7 +279,7 @@ function weexHumanError(status: number, code: number, msg: string, text: string)
   if (code === -1044 || code === -1047 || code === -1049 || status === 401) {
     // Surface code so we can tell signature vs passphrase vs timestamp.
     if (code === -1047) {
-      return "WEEX signature rejected (−1047). Usually the Secret was mistyped (shown only once) — re-create the key and paste Secret carefully. If you just rotated keys, wait 15 min.";
+      return "WEEX signature rejected (−1047). Secret/key paste is wrong, or the key is still propagating. Wait 15 min after create. Use a Futures key (not Spot/Copy). IP whitelist OFF. Paste Secret from Notes as one line — iPhone wrap adds spaces and breaks the sign. Then Store keys again.";
     }
     if (code === -1049) {
       return "WEEX timestamp rejected (−1049). Server clock skew — retry in a minute; if it keeps failing, ping me.";
@@ -308,6 +308,8 @@ export function accountPath(sim: boolean): string {
 function cleanCred(s: string): string {
   return String(s ?? "")
     .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[\u00A0\u202F\u2007]/g, "")
+    .replace(/\s+/g, "")
     .trim();
 }
 

@@ -1365,9 +1365,14 @@ export const saveAutoSettings = createServerFn({ method: "POST" })
 export const saveWeexKeys = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { apiKey: string; apiSecret: string; passphrase: string }) => {
-    const apiKey = String(input?.apiKey ?? "").trim();
-    const apiSecret = String(input?.apiSecret ?? "").trim();
-    const passphrase = String(input?.passphrase ?? "").trim();
+    const strip = (s: string) =>
+      String(s ?? "")
+        .replace(/[\u200B-\u200D\uFEFF\u00A0\u202F\u2007]/g, "")
+        .replace(/\s+/g, "")
+        .trim();
+    const apiKey = strip(String(input?.apiKey ?? ""));
+    const apiSecret = strip(String(input?.apiSecret ?? ""));
+    const passphrase = strip(String(input?.passphrase ?? ""));
     return { apiKey, apiSecret, passphrase };
   })
   .handler(async ({ context, data }) => {
