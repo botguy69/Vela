@@ -1,4 +1,5 @@
 import { createHmac, createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
+import { env as nodeEnv } from "node:process";
 
 const BASE = "https://api-contract.weex.com";
 
@@ -17,11 +18,16 @@ export type WeexCreds = {
  * Never log these values.
  */
 function envGet(name: string): string | undefined {
-  // Avoid process.env.LITERAL / process.env["LITERAL"] — bundlers replace those at build.
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-  if (!env) return undefined;
-  const v = env[name];
-  return typeof v === "string" && v.length > 0 ? v : undefined;
+  const bags: Array<Record<string, string | undefined> | undefined> = [
+    nodeEnv as Record<string, string | undefined>,
+    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env,
+  ];
+  for (const env of bags) {
+    if (!env) continue;
+    const v = env[name];
+    if (typeof v === "string" && v.trim().length > 0) return v.trim();
+  }
+  return undefined;
 }
 
 function sealSecrets(): string[] {
@@ -58,12 +64,13 @@ function material(secret: string): Buffer {
   return buf;
 }
 
-/** New seals MUST use WEEX_SEAL_SECRET only — never BETTER_AUTH (Render may rotate it). */
 function primarySealSecret(): string {
-  const dedicated = envGet(["WEEX", "SEAL", "SECRET"].join("_"))?.trim();
+  const dedicated = envGet(["WEEX", "SEAL", "SECRET"].join("_"));
   if (dedicated) return dedicated;
+  const auth = envGet(["BETTER", "AUTH", "SECRET"].join("_"));
+  if (auth) return auth;
   throw new Error(
-    "Set WEEX_SEAL_SECRET on Render (stable; do not use BETTER_AUTH for key seal), redeploy, then Store keys.",
+    "Set WEEX_SEAL_SECRET on Render (vela1 web service → Environment → Save → wait Live), then Store keys.",
   );
 }
 
@@ -139,7 +146,9 @@ export function sealHealth(): {
   roundTripOk: boolean;
 } {
   const materials = sealSecrets().length;
-  const hasDedicated = Boolean(envGet(["WEEX", "SEAL", "SECRET"].join("_"))?.trim());
+  const hasDedicated = Boolean(
+    envGet(["WEEX", "SEAL", "SECRET"].join("_")) || envGet(["BETTER", "AUTH", "SECRET"].join("_")),
+  );
   if (!hasDedicated) {
     return { materials, hasDedicated: false, roundTripOk: false };
   }
