@@ -300,7 +300,7 @@ function weexHumanError(status: number, code: number, msg: string, text: string)
       return "WEEX signature rejected (−1047) [vela-38c-retry]. Secret/key paste, key still propagating (wait 15 min), or Futures vs Spot key. IP whitelist OFF. One-line Secret from Notes.";
     }
     if (code === -1049) {
-      return "WEEX timestamp rejected (−1049). Server clock skew — retry in a minute; if it keeps failing, ping me.";
+      return "WEEX key or passphrase rejected (−1049). Not the clock. Passphrase must match the one you typed when you created this exact key (case-sensitive). Secret is shown only once — a new key needs a new Secret.";
     }
     if (code === -1044) {
       return "WEEX passphrase rejected (−1044). Must match exactly (case-sensitive), letters/numbers only — no spaces or symbols.";
@@ -434,7 +434,7 @@ export async function getWeexEquity(creds: WeexCreds): Promise<
   const plain = await equityOnce(creds, "plain");
   if (plain.ok) return plain;
   // −1047 often means secret typo; also try HMAC passphrase (Bitget-style) once.
-  if (plain.status === 401 || /−1047|-1047|−1044|-1044/i.test(plain.error)) {
+  if (plain.status === 401 || /−1047|-1047|−1044|-1044|−1049|-1049|−1046|-1046/i.test(plain.error)) {
     const hmac = await equityOnce(creds, "hmac");
     if (hmac.ok) return hmac;
   }
