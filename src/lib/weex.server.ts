@@ -177,12 +177,33 @@ function sign(secret: string, timestamp: string, method: string, path: string, q
 
 export type WeexResult<T> = { ok: true; data: T } | { ok: false; error: string; status: number };
 
+async function weexServerTs(): Promise<string> {
+  try {
+    const res = await fetch(`${BASE}/capi/v3/market/time`, {
+      headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0 VELA/1.0" },
+    });
+    const j = (await res.json()) as { serverTime?: number | string };
+    const n = Number(j.serverTime);
+    if (Number.isFinite(n) && n > 0) return String(Math.trunc(n));
+  } catch {
+    /* fall through */
+  }
+  return Date.now().toString();
+}
+
+/** Some WEEX stacks want Bitget-style passphrase: Base64(HMAC_SHA256(secret, passphrase)). */
+function passphraseHeader(secret: string, passphrase: string, mode: "plain" | "hmac"): string {
+  if (mode === "plain") return passphrase;
+  return createHmac("sha256", secret).update(passphrase).digest("base64");
+}
+
 export async function weexRequest<T>(opts: {
   creds: WeexCreds;
   method: "GET" | "POST" | "DELETE";
   path: string;
   query?: Record<string, string>;
   body?: unknown;
+  passMode?: "plain" | "hmac";
 }): Promise<WeexResult<T>> {
   const query = opts.query
     ? Object.entries(opts.query)
@@ -190,18 +211,21 @@ export async function weexRequest<T>(opts: {
         .join("&")
     : "";
   const body = opts.body ? JSON.stringify(opts.body) : "";
-  const timestamp = Date.now().toString();
+  const timestamp = await weexServerTs();
   const signature = sign(opts.creds.apiSecret, timestamp, opts.method, opts.path, query, body);
   const url = `${BASE}${opts.path}${query ? `?${query}` : ""}`;
   const headers: Record<string, string> = {
     "ACCESS-KEY": opts.creds.apiKey,
     "ACCESS-SIGN": signature,
     "ACCESS-TIMESTAMP": timestamp,
-    "ACCESS-PASSPHRASE": opts.creds.passphrase,
+    "ACCESS-PASSPHRASE": passphraseHeader(
+      opts.creds.apiSecret,
+      opts.creds.passphrase,
+      opts.passMode ?? "plain",
+    ),
+    "Content-Type": "application/json",
+    locale: "en-US",
     "User-Agent": "Mozilla/5.0 VELA/1.0",
-  };
-  if (opts.method === "POST" || opts.method === "DELETE") {
-    headers["Content-Type"] = "application/json";
   }
   try {
     const ac = new AbortController();
@@ -252,7 +276,7 @@ function weexHumanError(status: number, code: number, msg: string, text: string)
   if (code === -1044 || code === -1047 || code === -1049 || status === 401) {
     // Surface code so we can tell signature vs passphrase vs timestamp.
     if (code === -1047) {
-      return "WEEX signature rejected (−1047). Secret is wrong, or it was copied with a typo (shown only once). Re-create key if unsure.";
+      return "WEEX signature rejected (−1047). Usually the Secret was mistyped (shown only once) — re-create the key and paste Secret carefully. If you just rotated keys, wait 15 min.";
     }
     if (code === -1049) {
       return "WEEX timestamp rejected (−1049). Server clock skew — retry in a minute; if it keeps failing, ping me.";
@@ -341,15 +365,26 @@ function rowsFrom(raw: unknown): unknown[] {
   return [];
 }
 
-export async function getWeexEquity(creds: WeexCreds): Promise<
-  WeexResult<{ equity: number; available: number; asset: string }>
-> {
-  const v3 = await weexRequest<unknown>({ creds, method: "GET", path: "/capi/v3/account/balance" });
+async function equityOnce(
+  creds: WeexCreds,
+  passMode: "plain" | "hmac",
+): Promise<WeexResult<{ equity: number; available: number; asset: string }>> {
+  const v3 = await weexRequest<unknown>({
+    creds,
+    method: "GET",
+    path: "/capi/v3/account/balance",
+    passMode,
+  });
   if (v3.ok) {
     const picked = pickUsdt(rowsFrom(v3.data));
     if (picked) return { ok: true, data: picked };
   }
-  const v2 = await weexRequest<unknown>({ creds, method: "GET", path: "/capi/v2/account/assets" });
+  const v2 = await weexRequest<unknown>({
+    creds,
+    method: "GET",
+    path: "/capi/v2/account/assets",
+    passMode,
+  });
   if (v2.ok) {
     const picked = pickUsdt(rowsFrom(v2.data));
     if (picked) return { ok: true, data: picked };
@@ -357,6 +392,19 @@ export async function getWeexEquity(creds: WeexCreds): Promise<
   if (!v3.ok) return v3;
   if (!v2.ok) return v2;
   return { ok: false, error: "WEEX answered but no USDT futures row. Deposit USDT to futures, not spot.", status: 200 };
+}
+
+export async function getWeexEquity(creds: WeexCreds): Promise<
+  WeexResult<{ equity: number; available: number; asset: string }>
+> {
+  const plain = await equityOnce(creds, "plain");
+  if (plain.ok) return plain;
+  // −1047 often means secret typo; also try HMAC passphrase (Bitget-style) once.
+  if (plain.status === 401 || /−1047|-1047|−1044|-1044/i.test(plain.error)) {
+    const hmac = await equityOnce(creds, "hmac");
+    if (hmac.ok) return hmac;
+  }
+  return plain;
 }
 
 function numField(...vals: unknown[]): number | null {
