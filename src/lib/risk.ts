@@ -10,10 +10,10 @@ export type SizedSetup = RawSetup & {
   stopAccountPct: number;
 };
 
-/** Rebuild → $500: allow 15%. Normal desk 1–3. */
+/** Solo desk: hard-cap margin at 3% (rebuild 15% window ended). */
 export function clampRiskPct(raw: number): number {
   if (!Number.isFinite(raw)) return 3;
-  return Math.min(15, Math.max(1, raw));
+  return Math.min(3, Math.max(1, raw));
 }
 
 /** Snap to discretionary 1 / 2 / 3% of book. Cap 3%. */
@@ -46,9 +46,9 @@ export function inRebuildMode(accountUsd: number): boolean {
   return Number.isFinite(accountUsd) && accountUsd > 0 && accountUsd < REBUILD_EQUITY_USD;
 }
 
-/** 15% single-seat while rebuilding; else conviction 1/2/3. */
+/** Conviction 1/2/3 only — rebuild 15% ended. */
 export function deskMarginPct(confidence: number, accountUsd: number, baseMarginPct = 3): number {
-  if (inRebuildMode(accountUsd)) return REBUILD_MARGIN_PCT;
+  void accountUsd; // rebuild window closed
   return marginForConviction(confidence, baseMarginPct);
 }
 
