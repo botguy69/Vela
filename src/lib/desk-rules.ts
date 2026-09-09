@@ -586,13 +586,15 @@ export function limitMaxAgeMs(style: Style): number {
 /** Fills before this keep the old clock. Scalp fills still red after 12h flatten. Green / BE hold. */
 export const CHOP_V2_SINCE = Date.parse("2026-08-24T02:00:00.000Z");
 
-/** 30h floor on every fill. 48h on 3R or 92% conf. Live tickets use this clock. */
-export function fillMaxAgeMs(rr = 1, conf = 85): number {
+/** 30h floor on every fill. 48h on 3R or 92% conf. Rebuild/tight seats cap at 3h. */
+export function fillMaxAgeMs(rr = 1, conf = 85, tight = false): number {
   const r = Number.isFinite(rr) ? rr : 1;
   const c = Number.isFinite(conf) ? conf : 85;
   const rrT = Math.min(1, Math.max(0, (r - 1) / 2));
   const cT = Math.min(1, Math.max(0, (c - 85) / 7));
-  return (30 + Math.max(rrT, cT) * 18) * 3600_000;
+  const ms = (30 + Math.max(rrT, cT) * 18) * 3600_000;
+  // Rebuild 15% seats: don't hope for 30h — bank or cut within ~3h if still <0.4R.
+  return tight ? Math.min(ms, 3 * 3600_000) : ms;
 }
 
 export function flattenHoursLabel(rr = 1, conf = 85): string {
@@ -647,16 +649,19 @@ export function chopAction(opts: {
   beMoved: boolean;
   rr?: number;
   conf?: number;
+  tight?: boolean;
 }): "hold" | "flatten" {
   if (opts.beMoved) return "hold";
   const t = new Date(opts.since).getTime();
   if (!Number.isFinite(t)) return "hold";
   if (t < CHOP_V2_SINCE) return "hold";
   const age = Date.now() - t;
-  if (age < fillMaxAgeMs(opts.rr ?? 1, opts.conf ?? 85)) return "hold";
   const risk = Math.abs(opts.entry - opts.stop);
   const favor = opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last;
   const r = risk > 0 ? favor / risk : 0;
+  // Rebuild/tight: cut dead thesis earlier — 45m+ and still ≤−0.35R.
+  if (opts.tight && age >= 45 * 60_000 && r <= -0.35) return "flatten";
+  if (age < fillMaxAgeMs(opts.rr ?? 1, opts.conf ?? 85, Boolean(opts.tight))) return "hold";
   if (r >= 0.4) return "hold";
   return "flatten";
 }
