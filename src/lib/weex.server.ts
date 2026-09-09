@@ -182,9 +182,14 @@ async function weexServerTs(): Promise<string> {
     const res = await fetch(`${BASE}/capi/v3/market/time`, {
       headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0 VELA/1.0" },
     });
-    const j = (await res.json()) as { serverTime?: number | string };
-    const n = Number(j.serverTime);
-    if (Number.isFinite(n) && n > 0) return String(Math.trunc(n));
+    const j = (await res.json()) as {
+      serverTime?: number | string;
+      data?: { serverTime?: number | string } | number | string;
+    };
+    const raw = j.serverTime ?? (typeof j.data === "object" && j.data ? j.data.serverTime : j.data);
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 1e12) return String(Math.trunc(n));
+    if (Number.isFinite(n) && n > 1e9) return String(Math.trunc(n * 1000));
   } catch {
     /* fall through */
   }
@@ -204,6 +209,9 @@ export async function weexRequest<T>(opts: {
   query?: Record<string, string>;
   body?: unknown;
   passMode?: "plain" | "hmac";
+  /** Official GET balance curl sends Content-Type. Default off — unsigned GET body → -1047. */
+  getContentType?: boolean;
+  localTs?: boolean;
 }): Promise<WeexResult<T>> {
   const query = opts.query
     ? Object.entries(opts.query)
@@ -211,7 +219,7 @@ export async function weexRequest<T>(opts: {
         .join("&")
     : "";
   const body = opts.body ? JSON.stringify(opts.body) : "";
-  const timestamp = await weexServerTs();
+  const timestamp = opts.localTs ? Date.now().toString() : await weexServerTs();
   const signature = sign(opts.creds.apiSecret, timestamp, opts.method, opts.path, query, body);
   const url = `${BASE}${opts.path}${query ? `?${query}` : ""}`;
   const headers: Record<string, string> = {
@@ -225,18 +233,19 @@ export async function weexRequest<T>(opts: {
     ),
     locale: "en-US",
     "User-Agent": "Mozilla/5.0 VELA/1.0",
+    Accept: "application/json",
   };
-  // Only on POST/DELETE — Content-Type on GET can make runtimes send an unsigned body → WEEX -1047.
-  if (opts.method === "POST" || opts.method === "DELETE") {
+  const sendBody = opts.method === "POST" || (opts.method === "DELETE" && Boolean(body));
+  if (sendBody || (opts.method === "GET" && opts.getContentType)) {
     headers["Content-Type"] = "application/json";
   }
   try {
     const ac = new AbortController();
-    const to = setTimeout(() => ac.abort(), 4000);
+    const to = setTimeout(() => ac.abort(), 8000);
     const res = await fetch(url, {
       method: opts.method,
       headers,
-      body: opts.method === "POST" || (opts.method === "DELETE" && body) ? body : undefined,
+      body: sendBody ? body : undefined,
       signal: ac.signal,
     });
     clearTimeout(to);
@@ -279,7 +288,7 @@ function weexHumanError(status: number, code: number, msg: string, text: string)
   if (code === -1044 || code === -1047 || code === -1049 || status === 401) {
     // Surface code so we can tell signature vs passphrase vs timestamp.
     if (code === -1047) {
-      return "WEEX signature rejected (−1047). Secret/key paste is wrong, or the key is still propagating. Wait 15 min after create. Use a Futures key (not Spot/Copy). IP whitelist OFF. Paste Secret from Notes as one line — iPhone wrap adds spaces and breaks the sign. Then Store keys again.";
+      return "WEEX signature rejected (−1047) [vela-38c-retry]. Secret/key paste, key still propagating (wait 15 min), or Futures vs Spot key. IP whitelist OFF. One-line Secret from Notes.";
     }
     if (code === -1049) {
       return "WEEX timestamp rejected (−1049). Server clock skew — retry in a minute; if it keeps failing, ping me.";
@@ -374,15 +383,26 @@ async function equityOnce(
   creds: WeexCreds,
   passMode: "plain" | "hmac",
 ): Promise<WeexResult<{ equity: number; available: number; asset: string }>> {
-  const v3 = await weexRequest<unknown>({
-    creds,
-    method: "GET",
-    path: "/capi/v3/account/balance",
-    passMode,
-  });
-  if (v3.ok) {
-    const picked = pickUsdt(rowsFrom(v3.data));
-    if (picked) return { ok: true, data: picked };
+  const attempts: Array<{ localTs?: boolean; getContentType?: boolean }> = [
+    {},
+    { localTs: true },
+    { getContentType: true },
+  ];
+  let last: WeexResult<unknown> | null = null;
+  for (const extra of attempts) {
+    const v3 = await weexRequest<unknown>({
+      creds,
+      method: "GET",
+      path: "/capi/v3/account/balance",
+      passMode,
+      ...extra,
+    });
+    last = v3;
+    if (v3.ok) {
+      const picked = pickUsdt(rowsFrom(v3.data));
+      if (picked) return { ok: true, data: picked };
+    }
+    if (v3.ok || !(v3.status === 401 || /−1047|-1047|−1046|-1046/i.test(v3.error))) break;
   }
   const v2 = await weexRequest<unknown>({
     creds,
@@ -394,7 +414,7 @@ async function equityOnce(
     const picked = pickUsdt(rowsFrom(v2.data));
     if (picked) return { ok: true, data: picked };
   }
-  if (!v3.ok) return v3;
+  if (last && !last.ok) return last;
   if (!v2.ok) return v2;
   return { ok: false, error: "WEEX answered but no USDT futures row. Deposit USDT to futures, not spot.", status: 200 };
 }
