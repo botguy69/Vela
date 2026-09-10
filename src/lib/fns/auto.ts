@@ -539,13 +539,48 @@ function applyWeexHit(hit: { pnl: number; closePx: number; qty?: number; ts?: nu
 
 function coalesceWeexHit(
   cands: { symbol: string; side?: "long" | "short"; pnl: number; closePx: number; entry?: number; ts: number; qty?: number }[],
-  _orig: number,
+  orig: number,
+  opts?: { side?: string; entry?: number },
 ) {
   if (!cands.length) return null;
   const real = cands.filter((c) => Math.abs(c.pnl) >= 0.05);
   const pool = real.length ? real : cands;
-  const byPnl = [...pool].sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
-  return byPnl[0] ?? null;
+  const side = opts?.side ?? "";
+  const entry = opts?.entry ?? 0;
+  const score = (c: (typeof pool)[number]) => {
+    const q = c.qty && c.qty > 0 ? c.qty : orig;
+    const px = c.closePx > 0 ? c.closePx : 0;
+    const e = c.entry && c.entry > 0 ? c.entry : entry;
+    const est =
+      e > 0 && px > 0 && q > 0
+        ? side === "short"
+          ? (e - px) * q
+          : (px - e) * q
+        : null;
+    const notional = e > 0 && q > 0 ? e * q : Math.abs(est ?? 0);
+    const feeBand = Math.max(0.35, notional * 0.0025); // fees + slippage band
+    let s = 0;
+    if (est != null) {
+      const err = Math.abs(c.pnl - est);
+      // Prefer WEEX prints near price×qty (fees push realized slightly worse than raw).
+      if (err <= feeBand) s += 100 - (err / feeBand) * 20;
+      else s += Math.max(0, 40 - err);
+      // Prefer slightly more-negative/more-positive than raw in the fee direction
+      if (est < 0 && c.pnl <= est && c.pnl >= est - feeBand) s += 8;
+      if (est > 0 && c.pnl <= est && c.pnl >= est - feeBand) s += 8;
+    }
+    if (orig > 0 && c.qty && c.qty > 0) {
+      const qr = Math.abs(c.qty - orig) / orig;
+      if (qr <= 0.08) s += 25;
+      else if (qr <= 0.25) s += 10;
+      else s -= 15;
+    }
+    // Weak tie-break only — never let huge abs win over a tight price match.
+    s += Math.min(5, Math.abs(c.pnl) / 50);
+    return s;
+  };
+  const ranked = [...pool].sort((a, b) => score(b) - score(a) || Math.abs(b.pnl) - Math.abs(a.pnl));
+  return ranked[0] ?? null;
 }
 
 function matchWeexClose(
@@ -581,7 +616,7 @@ function matchWeexClose(
     return true;
   });
   if (!cands.length) return null;
-  const hit = coalesceWeexHit(cands, orig);
+  const hit = coalesceWeexHit(cands, orig, { side, entry });
   if (!hit) return null;
   for (const c of cands) used?.add(`${c.symbol}|${c.side ?? "?"}|${c.entry ?? 0}|${c.ts}|${c.pnl}`);
   return hit;
@@ -609,10 +644,28 @@ async function restampWeexPnl(
     const side = row.side === "short" ? "short" : "long";
     const key = row.weex_symbol.replace(/_/g, "").toUpperCase();
     let hit = matchWeexClose(row, closes, used);
-    if (!hit || Math.abs(hit.pnl) < Math.max(0.15, Math.abs(n(row.pnl)) + 0.4)) {
+    const rowEntry = n(row.fill_px) || n(row.entry);
+    const rowPx = n(row.closed_px);
+    const rowQ = origQty(row);
+    const rowEst =
+      rowEntry > 0 && rowPx > 0 && rowQ > 0
+        ? row.side === "short"
+          ? (rowEntry - rowPx) * rowQ
+          : (rowPx - rowEntry) * rowQ
+        : null;
+    const farFromEst =
+      hit != null &&
+      rowEst != null &&
+      Math.abs(hit.pnl - rowEst) > Math.max(0.75, Math.abs(rowEst) * 0.35);
+    if (!hit || Math.abs(hit.pnl) < 0.15 || farFromEst || Math.abs(hit.pnl - n(row.pnl)) > 0.5) {
       const extra = await listWeexClosedPnl(creds, row.weex_symbol).catch(() => []);
       const matched = matchWeexClose(row, [...extra, ...closes]);
-      if (matched && Math.abs(matched.pnl) >= Math.abs(hit?.pnl ?? 0)) hit = matched;
+      if (matched) {
+        if (!hit) hit = matched;
+        else if (rowEst != null) {
+          if (Math.abs(matched.pnl - rowEst) <= Math.abs(hit.pnl - rowEst)) hit = matched;
+        } else if (Math.abs(matched.pnl) >= Math.abs(hit.pnl)) hit = matched;
+      }
     }
     if (!hit || Math.abs(hit.pnl) < 0.05) {
       const ghost = matchWeexClose(row, closes);
@@ -2093,7 +2146,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           : null;
         if (!book) {
           const q = origQty(pos);
-          const est = q > 0 && entry > 0 ? (side === "short" ? (entry - px) * q : (px - entry) * q) : 0;
+          const raw = q > 0 && entry > 0 ? (side === "short" ? (entry - px) * q : (px - entry) * q) : 0;
+          // Rough taker fees both ways so estimate isn't optimistically small vs WEEX history.
+          const fee = entry > 0 && q > 0 ? entry * q * 0.0012 : 0;
+          const est = raw === 0 ? 0 : raw - Math.sign(raw) * fee;
           if (Math.abs(est) < 0.15) {
             notes.push(`${pos.weex_symbol} closed on WEEX — waiting PnL`);
             continue;
