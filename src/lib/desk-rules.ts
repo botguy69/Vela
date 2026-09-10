@@ -428,16 +428,27 @@ export function structureStop(
   return s;
 }
 
-/** Reject opposite of BTC 1h book unless the thesis is a real fade at extreme. */
+/** Reject opposite of BTC 1h book unless the thesis is a real fade at extreme.
+ *  Against-book fades: conf ≥ 90 and at most 1 live same-side seat (no stacked fade losers). */
 export function mixAllows(
   pickSide: Side,
   thesis: string,
-  _conf: number,
+  conf: number,
   heat: "long" | "short" | "chop",
-  _live: { side: string }[],
+  live: { side: string }[],
 ): { ok: boolean; why: string } {
-  if ((heat === "long" || heat === "short") && pickSide !== heat && !fadeAtExtreme(thesis, pickSide)) {
-    return { ok: false, why: `against ${heat} book` };
+  if ((heat === "long" || heat === "short") && pickSide !== heat) {
+    if (!fadeAtExtreme(thesis, pickSide)) {
+      return { ok: false, why: `against ${heat} book` };
+    }
+    const c = Number.isFinite(conf) ? conf : 0;
+    if (c < 90) {
+      return { ok: false, why: `fade vs ${heat} book needs 90%+` };
+    }
+    const same = live.filter((p) => (p.side === "short" ? "short" : "long") === pickSide).length;
+    if (same >= 1) {
+      return { ok: false, why: `fade seat full vs ${heat} book` };
+    }
   }
   return { ok: true, why: "coin tape" };
 }
