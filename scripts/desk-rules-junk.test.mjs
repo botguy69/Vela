@@ -232,3 +232,17 @@ describe("mixAllows / huntRank book bias", () => {
     assert.ok(low > high, `low-box ${low} vs high-box ${high}`);
   });
 });
+
+
+describe("stopOnWrongSide", () => {
+  function stopOnWrongSide(side, entry, stop) {
+    if (!(entry > 0) || !(stop > 0)) return false;
+    return side === "long" ? stop >= entry * 0.9995 : stop <= entry * 1.0005;
+  }
+  it("flags ALGO-style long stop above entry", () => {
+    assert.equal(stopOnWrongSide("long", 0.09711, 0.09730422), true);
+    assert.equal(stopOnWrongSide("long", 0.09711, 0.0965), false);
+    assert.equal(stopOnWrongSide("short", 0.09711, 0.0965), true);
+    assert.equal(stopOnWrongSide("short", 0.09711, 0.0978), false);
+  });
+});

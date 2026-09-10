@@ -392,6 +392,12 @@ function lastStructureSwing(bars: Candle[], side: Side, entry: number, minDist: 
 }
 
 /** 1h swing invalidation. Min 1× 1h ATR or 1.2% — never a 15m tick under last. */
+/** True when protective stop is on the wrong side of entry (invalid unless intentional BE). */
+export function stopOnWrongSide(side: Side, entry: number, stop: number): boolean {
+  if (!(entry > 0) || !(stop > 0)) return false;
+  return side === "long" ? stop >= entry * 0.9995 : stop <= entry * 1.0005;
+}
+
 export function structureStop(
   side: Side,
   entry: number,

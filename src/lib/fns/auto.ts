@@ -788,6 +788,7 @@ async function ensureTakes(
   const { placeWeexTake, moveWeexStop, listWeexPositions, listWeexAlgoRows, cancelWeexProtective } = await import("@/lib/weex.server");
   const stopPx = stopOverride != null && stopOverride > 0 ? stopOverride : n(pos.stop);
   const { coinByWeex } = await import("@/lib/universe");
+  const { stopOnWrongSide } = await import("@/lib/desk-rules");
   const spec = await specFor(coinByWeex(pos.weex_symbol));
   const book = await listWeexPositions(creds).catch(() => null);
   const key = pos.weex_symbol.replace(/_/g, "").toUpperCase();
@@ -804,6 +805,17 @@ async function ensureTakes(
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
   const entryPx = n(pos.fill_px) || n(pos.entry) || mark;
+  if (
+    entryPx > 0 &&
+    stopPx > 0 &&
+    stopOnWrongSide(sideLc, entryPx, stopPx) &&
+    !Boolean(pos.be_moved)
+  ) {
+    notes.push(
+      `${pos.weex_symbol} ensureTakes blocked wrong-side SL ${stopPx} vs entry ${entryPx} — not placing`,
+    );
+    return;
+  }
   const planned = parseNums(pos.targets);
   const listed = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => []);
   const plan = planTakes({
@@ -1819,7 +1831,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const target = tp1Px;
       const entry = n(pos.fill_px ?? pos.entry);
       const style = pos.style === "swing" ? "swing" : "scalp";
-      const hitStop = side === "long" ? px <= stop : px >= stop;
+      // Wrong-side SL (long stop ≥ entry without BE) must not count as hit — ALGO #2025.
+      const stopSideOk =
+        entry > 0 && stop > 0 && !rules.stopOnWrongSide(side, entry, stop);
+      const hitStop = Boolean(stopSideOk) && (side === "long" ? px <= stop : px >= stop);
       const hitTp1Px = tp1Px > 0 && (side === "long" ? px >= tp1Px : px <= tp1Px);
       const hitFinalTp =
         tp2Px > 0
@@ -1998,8 +2013,34 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const unit = oneRUsd(pos);
         const lastPx = mark || px;
         const openPnl = side === "short" ? (entry - lastPx) * left : (lastPx - entry) * left;
+        // Invalid SL side → repair to structure; never market-flatten as "past stop".
+        if (entry > 0 && stop > 0 && rules.stopOnWrongSide(side, entry, stop)) {
+          const badStop = stop;
+          const fifteenFix = await getWeexKlines(pos.weex_symbol, "15m", 48).catch(() => []);
+          const hourlyFix = await getWeexKlines(pos.weex_symbol, "1h", 48).catch(() => []);
+          const fixed = rules.structureStop(side, entry, stop, fifteenFix, hourlyFix);
+          if (fixed > 0 && !rules.stopOnWrongSide(side, entry, fixed)) {
+            pos.stop = fixed;
+            stop = fixed;
+            await ensureTakes(pos, notes, credsNow, fixed);
+            await sql`
+              update auto_signals
+              set stop = ${fixed}, updated_at = now()
+              where id = ${pos.id} and user_id = ${userId}
+            `;
+            notes.push(
+              `${pos.weex_symbol} repaired wrong-side SL ${badStop.toFixed(6)} → ${fixed.toFixed(4)} (no flatten)`,
+            );
+          } else {
+            notes.push(
+              `${pos.weex_symbol} wrong-side SL ${badStop} — could not repair; skip pastStop flatten`,
+            );
+          }
+        }
         const pastStop =
-          stop > 0 && (side === "short" ? lastPx >= stop * 0.997 : lastPx <= stop * 1.003);
+          stop > 0 &&
+          !rules.stopOnWrongSide(side, entry, stop) &&
+          (side === "short" ? lastPx >= stop * 0.997 : lastPx <= stop * 1.003);
         const rKill = 1.0; // solo desk: never give more than ~1R on a live ticket
         if ((unit > 0.05 && openPnl <= -rKill * unit) || pastStop) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));
