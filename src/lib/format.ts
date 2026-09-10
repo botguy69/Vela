@@ -16,6 +16,13 @@ export function formatUsd(value: number, compact = false): string {
   return compact ? usdCompact.format(value) : usdFull.format(value);
 }
 
+/** Ticket / position PnL — match WEEX history precision (4dp). */
+export function formatPnlUsd(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  const sign = value < 0 ? "-" : value > 0 ? "+" : "";
+  return `${sign}$${Math.abs(value).toFixed(4)}`;
+}
+
 export function formatPx(value: number): string {
   if (!Number.isFinite(value)) return "—";
   const abs = Math.abs(value);
