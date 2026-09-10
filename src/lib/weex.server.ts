@@ -598,8 +598,8 @@ function parseClose(r: Record<string, unknown>): WeexClose | null {
     r.realisedProfit,
   );
   const raw = numField(r.pnl, r.profit, r.income, r.closeProfit);
-  const pnl =
-    net != null && raw != null && Math.abs(raw) > Math.abs(net) * 4 ? net : (net ?? raw);
+  // WEEX position history UI shows netProfit — always prefer net when present.
+  const pnl = net != null ? net : raw;
   if (!symbol.includes("USDT") || pnl == null) return null;
   let ts = numField(r.cTime, r.uTime, r.closeTime, r.updatedTime, r.time, r.timestamp) ?? 0;
   if (ts > 0 && ts < 1e12) ts *= 1000;

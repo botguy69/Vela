@@ -685,7 +685,8 @@ async function restampWeexPnl(
     if (!hit || Math.abs(hit.pnl) < 0.05) continue;
     const book = applyWeexHit(hit, row);
     if (
-      Math.abs(book.pnl - n(row.pnl)) < 0.05 &&
+      row.pnl != null &&
+      Math.abs(book.pnl - n(row.pnl)) < 0.00005 &&
       row.close_reason === book.why &&
       row.status === book.st
     )
@@ -1347,23 +1348,11 @@ export const getAutoDesk = createServerFn({ method: "GET" })
         continue;
       }
       if (t.status !== "filled" && t.status !== "working") continue;
+      // Perfect match: only show WEEX unrealized. Never invent mark×qty (misses fees / funding).
       if (pos && pos.pnl != null && Number.isFinite(pos.pnl)) {
         t.pnl = pos.pnl;
-        continue;
-      }
-      const mark = pos?.mark && pos.mark > 0 ? pos.mark : 0;
-      if (!mark && !lastBy.has(t.weexSymbol)) {
-        try {
-          lastBy.set(t.weexSymbol, await getWeexLast(t.weexSymbol));
-        } catch {
-          lastBy.set(t.weexSymbol, 0);
-        }
-      }
-      const last = mark || lastBy.get(t.weexSymbol) || 0;
-      const entry = (pos?.entry && pos.entry > 0 ? pos.entry : 0) || t.fillPx || t.entry;
-      if (last > 0 && entry > 0) {
-        const qty = pos?.qty || t.qty;
-        t.pnl = t.side === "short" ? (entry - last) * qty : (last - entry) * qty;
+      } else {
+        t.pnl = null;
       }
     }
     const atRiskTick = (t: (typeof mapped)[number]) =>
@@ -2145,21 +2134,24 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           ? applyWeexHit(hit, pos)
           : null;
         if (!book) {
-          const q = origQty(pos);
-          const raw = q > 0 && entry > 0 ? (side === "short" ? (entry - px) * q : (px - entry) * q) : 0;
-          // Rough taker fees both ways so estimate isn't optimistically small vs WEEX history.
-          const fee = entry > 0 && q > 0 ? entry * q * 0.0012 : 0;
-          const est = raw === 0 ? 0 : raw - Math.sign(raw) * fee;
-          if (Math.abs(est) < 0.15) {
-            notes.push(`${pos.weex_symbol} closed on WEEX — waiting PnL`);
+          // Do not lock a price×qty estimate — wait for WEEX history so Vela matches exactly.
+          const ageMs = Date.now() - new Date(pos.filled_at ?? pos.created_at).getTime();
+          if (ageMs < 10 * 60_000) {
+            notes.push(`${pos.weex_symbol} flat on WEEX — waiting history PnL`);
             continue;
           }
-          book = {
-            pnl: est,
-            px,
-            why: est >= 0 ? "Hit TP1" : "Hit stop",
-            st: (est >= 0 ? "targeted" : "stopped") as "targeted" | "stopped",
-          };
+          // After 10m still no history: close row with null pnl; restamp will fill when history appears.
+          await sql`
+            update auto_signals
+            set status = 'stopped',
+                closed_px = ${px || null},
+                pnl = null,
+                close_reason = ${"WEEX closed — PnL pending"},
+                updated_at = now()
+            where id = ${pos.id} and user_id = ${userId}
+          `;
+          notes.push(`${pos.weex_symbol} closed — PnL pending WEEX history`);
+          continue;
         }
         await sql`
           update auto_signals

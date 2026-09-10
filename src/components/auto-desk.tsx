@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { BotBreakdown, LegalDisclaimer } from "@/components/legal";
 import { KeepAliveCard, PermanentDeskCard } from "@/components/keep-alive";
 import { flattenClockLabel } from "@/lib/desk-rules";
-import { formatPx, formatUsd, signedClass } from "@/lib/format";
+import { formatPx, formatUsd, formatPnlUsd, signedClass } from "@/lib/format";
 import {
   clearWeexKeys,
   flattenSignal,
@@ -431,7 +431,7 @@ function TicketSheet({
                   </td>
                   <td className="px-4 py-2.5 font-mono tabular-nums">{t.leverage}x</td>
                   <td className={cn("px-4 py-2.5 font-mono tabular-nums", signedClass(t.pnl ?? 0))}>
-                    {t.pnl == null ? "—" : formatUsd(t.pnl)}
+                    {t.pnl == null ? "—" : formatPnlUsd(t.pnl)}
                   </td>
                   <td className="px-4 py-2.5 font-mono text-xs tabular-nums text-subtle">
                     {live || pending
