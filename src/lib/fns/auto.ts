@@ -1305,8 +1305,6 @@ export const getAutoDesk = createServerFn({ method: "GET" })
     const mapped = signals
       .filter((r) => !(r.close_reason ?? "").startsWith("Duplicate"))
       .map(mapSignal);
-    const { getWeexLast } = await import("@/lib/weex-market.server");
-    const lastBy = new Map<string, number>();
     const leftBy = new Map<string, number>();
     const posBy = new Map<string, { qty: number; entry: number; pnl: number | null; mark: number; side: "long" | "short" }>();
     const seenLive = new Set<string>();
