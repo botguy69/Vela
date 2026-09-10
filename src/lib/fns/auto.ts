@@ -2172,8 +2172,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const tp1Live = tpsLive[0] ?? n(pos.target);
         const ticketRr = n(pos.rr);
         const ticketConf = n(pos.confidence);
-        // Solo desk: always tight chop — cut dead theses early.
-        const tightSeat = true;
+        // 30h floor. Tight 3h was flattening live tickets before TP/BE.
+        const tightSeat = false;
         let act = rules.chopAction({
           since,
           style,
