@@ -246,3 +246,30 @@ describe("stopOnWrongSide", () => {
     assert.equal(stopOnWrongSide("short", 0.09711, 0.0978), false);
   });
 });
+
+
+describe("mixAllows against-book fade cap", () => {
+  function fadeAtExtreme(thesis, side) {
+    return /pin|double|climax|failed range/i.test(thesis);
+  }
+  function mixAllows(pickSide, thesis, conf, heat, live) {
+    if ((heat === "long" || heat === "short") && pickSide !== heat) {
+      if (!fadeAtExtreme(thesis, pickSide)) return { ok: false, why: `against ${heat} book` };
+      if (conf < 90) return { ok: false, why: `fade vs ${heat} book needs 90%+` };
+      const same = live.filter((p) => p.side === pickSide).length;
+      if (same >= 1) return { ok: false, why: `fade seat full vs ${heat} book` };
+    }
+    return { ok: true, why: "coin tape" };
+  }
+  it("blocks stacked fade longs on BTC 1h offer", () => {
+    const live = [{ side: "long" }];
+    const a = mixAllows("long", "Pin bar at lows", 91, "short", live);
+    assert.equal(a.ok, false);
+    assert.match(a.why, /fade seat full/);
+    const b = mixAllows("long", "Pin bar at lows", 86, "short", []);
+    assert.equal(b.ok, false);
+    assert.match(b.why, /90%/);
+    const c = mixAllows("long", "Pin bar at lows", 91, "short", []);
+    assert.equal(c.ok, true);
+  });
+});
