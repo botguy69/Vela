@@ -446,13 +446,14 @@ export function boxLoc(fourHour: Candle[]): number {
 }
 
 export const BETA_WITH_BTC = 2;
-export const BURST_LOCK_MS = 20 * 60_000;
+export const BURST_LOCK_MS = 4 * 3600_000;
 
 export function burstLocked(lastPlaceMs: number, now = Date.now()): { ok: boolean; why: string } {
   if (!(lastPlaceMs > 0) || !Number.isFinite(lastPlaceMs)) return { ok: true, why: "" };
   const left = BURST_LOCK_MS - (now - lastPlaceMs);
   if (left <= 0) return { ok: true, why: "" };
-  return { ok: false, why: `burst lock ${Math.max(1, Math.ceil(left / 60_000))}m after last fill` };
+  const h = Math.max(1, Math.ceil(left / 3600_000));
+  return { ok: false, why: `same-side wait ${h}h after last with-BTC fill` };
 }
 
 /** Same side as the BTC 1h book = beta clone. */

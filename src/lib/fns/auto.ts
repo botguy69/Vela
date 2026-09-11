@@ -2878,11 +2878,16 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             rank: number;
           }[] = [];
 
-          const lastPlaceMs = stillOpen
+          const lastBetaMs = stillOpen
+            .filter((s) => {
+              const sd = s.side === "short" ? "short" : "long";
+              if (tape.side === "chop") return s.status === "filled";
+              return s.status === "filled" && sd === tape.side;
+            })
             .map((s) => new Date(s.filled_at ?? s.created_at).getTime())
             .filter((n) => Number.isFinite(n) && n > 0)
             .reduce((m, n) => Math.max(m, n), 0);
-          const burst = rules.burstLocked(lastPlaceMs);
+          const burst = rules.burstLocked(lastBetaMs);
           const bookSide = tape.side;
           const liveBeta = liveN.filter((p) => {
             const s = p.side === "short" ? "short" : "long";
@@ -2893,7 +2898,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }).length;
           for (let pick of pool) {
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
-            if (!burst.ok) {
+            if (!burst.ok && rules.withBtcBeta(pick.side === "short" ? "short" : "long", tape.side)) {
               whyNot.push(`${tag} ${burst.why}`);
               continue;
             }
