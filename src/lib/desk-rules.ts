@@ -73,14 +73,9 @@ export function htfAllows(
     live && (closed.length === 0 || closed[closed.length - 1]!.time !== live.time)
       ? [...closed.map((c) => c.close), live.close]
       : closed.map((c) => c.close);
-  const mid = sma(smaSrc.length >= 21 ? smaSrc : fourHour.map((c) => c.close), 21);
-  if (mid == null || last == null) return false;
-  const band = 0.02;
-  const skip21 = (fade === "high" && side === "short") || (fade === "low" && side === "long");
-  if (!skip21) {
-    if (side === "long" && last < mid * (1 - band)) return false;
-    if (side === "short" && last > mid * (1 + band)) return false;
-  }
+  if (last == null) return false;
+  // 38% box + swing extremes are the location veto.
+  // 4h 21 SMA used to require longs ABOVE the mean AND in the bottom 38% — those two almost never stack.
   const prior = (closed.length >= 8 ? closed : fourHour).slice(-20);
   if (prior.length < 8) return true;
   const sh = Math.max(...prior.map((c) => c.high));
