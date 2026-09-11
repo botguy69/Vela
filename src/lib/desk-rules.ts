@@ -74,7 +74,7 @@ export function htfAllows(
       ? [...closed.map((c) => c.close), live.close]
       : closed.map((c) => c.close);
   if (last == null) return false;
-  // 38% box + swing extremes are the location veto.
+  // 45% box + swing extremes are the location veto.
   // 4h 21 SMA used to require longs ABOVE the mean AND in the bottom 45% — those two almost never stack.
   const prior = (closed.length >= 8 ? closed : fourHour).slice(-20);
   if (prior.length < 8) return true;
@@ -120,8 +120,8 @@ export function btcExtended(fourHour: Candle[]): {
     note: longChase
       ? "BTC 4h high — no new longs. Shorts only pin/double/climax at the high."
       : shortChase
-        ? "BTC 4h low — no dump-shorts. Longs pin/double/climax at the low. Shorts ok if alt ripped (top 45% own 4h + fade structure)."
-        : "BTC 4h mid. Coin must be in the demand/supply 38% of its own 4h box.",
+        ? "BTC 4h low — no dump-shorts. Longs at demand. Shorts only if that alt is in its own supply."
+        : "BTC 4h mid. Coin must be in the demand/supply 45% of its own 4h box.",
   };
 }
 
