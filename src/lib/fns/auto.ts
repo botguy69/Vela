@@ -2987,7 +2987,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not location structure`);
               continue;
             }
-            const trig = rules.ltfTrigger(pick.side, coin15);
+            const locPx = rules.boxLoc(h4);
+            const atExt = pick.side === "long" ? locPx <= 0.38 : locPx >= 0.62;
+            const trig = rules.ltfTrigger(pick.side, coin15, atExt);
             if (!trig.ok && !trig.wait) {
               veto = `Skip ${tag} ${trig.reason}`;
               whyNot.unshift(`${tag} ${trig.reason}`);

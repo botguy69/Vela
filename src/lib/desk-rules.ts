@@ -200,6 +200,7 @@ function vwapCrosses(candles: Candle[], n: number, vwap: number): number {
 export function ltfTrigger(
   side: Side,
   fifteen: Candle[],
+  atExtreme = false,
 ): { ok: boolean; wait: boolean; reason: string; pullback: number | null } {
   if (fifteen.length < 24) return { ok: false, wait: false, reason: "thin 15m", pullback: null };
   const closes = fifteen.map((c) => c.close);
@@ -253,7 +254,8 @@ export function ltfTrigger(
         ? prev < vwap && last >= vwap
         : prev > vwap && last <= vwap
       : false;
-  if (vwap != null && !reclaim) {
+  // 4h box already required demand/supply. VWAP side-gate fights that (highs sit above VWAP).
+  if (!atExtreme && vwap != null && !reclaim) {
     if (side === "long" && last < vwap * 0.998) {
       return { ok: false, wait: false, reason: "15m below VWAP — no long", pullback: null };
     }
