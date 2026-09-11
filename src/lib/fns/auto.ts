@@ -2869,7 +2869,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
           const aPlusLine = rebuild
             ? `REBUILD → $${REBUILD_EQUITY_USD}: 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd ${REBUILD_MARGIN_PCT}% after TP1→BE. A++ only.`
-            : "Closed 15m only. Longs bottom 38% of own 4h box, shorts top 38%. Mid-box skip. Book follows BTC 1h. VWAP does not veto at the box.";
+            : "Closed 15m only. Longs bottom 45% of own 4h box, shorts top 45%. Mid-box skip. Book follows BTC 1h. VWAP does not veto at the box.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2988,7 +2988,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const locPx = rules.boxLoc(h4);
-            const atExt = pick.side === "long" ? locPx <= 0.38 : locPx >= 0.62;
+            const atExt = pick.side === "long" ? locPx <= 0.45 : locPx >= 0.55;
             const trig = rules.ltfTrigger(pick.side, coin15, atExt);
             if (!trig.ok && !trig.wait) {
               veto = `Skip ${tag} ${trig.reason}`;
