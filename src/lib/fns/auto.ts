@@ -1884,12 +1884,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         entry > 0 && stop > 0 && !rules.stopOnWrongSide(side, entry, stop);
       const hitStop = Boolean(stopSideOk) && (side === "long" ? px <= stop : px >= stop);
       const hitTp1Px = tp1Px > 0 && (side === "long" ? px >= tp1Px : px <= tp1Px);
+      // TP1 is a partial. Never treat it as the full exit — leftover runs to TP2.
       const hitFinalTp =
-        tp2Px > 0
-          ? side === "long"
-            ? px >= tp2Px
-            : px <= tp2Px
-          : hitTp1Px;
+        tp2Px > 0 && (side === "long" ? px >= tp2Px : px <= tp2Px);
       if (pos.status === "filled" && px > 0) {
         const unit = oneRUsd(pos);
         const q = origQty(pos);
