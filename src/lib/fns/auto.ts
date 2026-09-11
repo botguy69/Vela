@@ -2862,11 +2862,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
             return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
           });
+          const closest = whyNot.slice(0, 3).join(" · ");
           const eyeLine = eyeing.length
             ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}`
             : elite.length === 0
               ? `Scanned ${scannedN}/${TOP25_WEEX.length}. No A++ this pass. 1h book. Slots stay empty.`
-              : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
+              : `Closest (not through 4h+1h): ${closest || "—"}. ${elite.length} 1h A++ this pass, 0 cleared the box. Scanned ${scannedN}/${TOP25_WEEX.length}. Seat ${atRiskN}/${AT_RISK} open.`;
           const aPlusLine = rebuild
             ? `REBUILD → $${REBUILD_EQUITY_USD}: 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd ${REBUILD_MARGIN_PCT}% after TP1→BE. A++ only.`
             : "Closed 15m only. Longs bottom 45% of own 4h box, shorts top 45%. Mid-box skip. Book follows BTC 1h. VWAP does not veto at the box.";
