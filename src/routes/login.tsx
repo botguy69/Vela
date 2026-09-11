@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GROK_PROVIDERS, authClient, authEnabled, signIn } from "@/lib/auth/client";
+import { recoverDeskPassword } from "@/lib/fns/recover";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { LegalDisclaimer } from "@/components/legal";
 
@@ -38,9 +39,15 @@ function Login() {
         if (err) {
           const msg = err.message ?? "Could not create the account";
           if (/already|exist/i.test(msg)) {
-            throw new Error("That email is already the live bot. Tap Sign in with the same password.");
+            await recoverDeskPassword({ data: { email: email.trim(), password } });
+            const { error: again } = await authClient.signIn.email({
+              email: email.trim(),
+              password,
+            });
+            if (again) throw new Error(again.message ?? "Password reset. Tap Sign in.");
+          } else {
+            throw new Error(msg);
           }
-          throw new Error(msg);
         }
       } else {
         const { error: err } = await authClient.signIn.email({
@@ -48,16 +55,16 @@ function Login() {
           password,
         });
         if (err) {
-          const { error: upErr } = await authClient.signUp.email({
+          try {
+            await recoverDeskPassword({ data: { email: email.trim(), password } });
+          } catch (rec) {
+            throw new Error(rec instanceof Error ? rec.message : "Could not reset that desk password.");
+          }
+          const { error: again } = await authClient.signIn.email({
             email: email.trim(),
             password,
-            name: email.trim().split("@")[0] || "Desk",
           });
-          if (upErr) {
-            throw new Error(
-              "Wrong password, or that email is already this desk. Use the same password as last time. If Grok reset the preview, tap Create account, then paste keys again.",
-            );
-          }
+          if (again) throw new Error(again.message ?? "Password reset. Tap Sign in again.");
         }
       }
       goHome();
@@ -74,7 +81,7 @@ function Login() {
         <Wordmark />
         <h1 className="mt-8 font-display text-4xl font-medium tracking-tight">Open the bot</h1>
         <p className="mt-3 text-sm text-muted">
-          Same email and password as last time. If Grok reset the preview, Sign in will recreate
+          Sign in or Create account with this email sets a new password on this desk. If Grok reset the preview, Sign in will recreate
           this desk — then paste WEEX keys again. To check trades without this chat, open the{" "}
           <span className="text-fg">WEEX</span> app (positions, SL, TPs).
         </p>
