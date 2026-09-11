@@ -2869,7 +2869,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               : `Eying no A++ through 4h+1h. Scanned ${scannedN}/${TOP25_WEEX.length}. ${elite.length} 1h A++ died on location. Seat ${atRiskN}/${AT_RISK} open.`;
           const aPlusLine = rebuild
             ? `REBUILD → $${REBUILD_EQUITY_USD}: 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd ${REBUILD_MARGIN_PCT}% after TP1→BE. A++ only.`
-            : "Closed 15m only. Longs bottom 38% of 4h box, shorts top 38%. BTC wash: short only ripped alts. Mid-box skip. Stale 15m pullback skip.";
+            : "Closed 15m only. Longs bottom 38% of own 4h box, shorts top 38%. Mid-box skip. Book follows BTC 1h. VWAP does not veto at the box.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
