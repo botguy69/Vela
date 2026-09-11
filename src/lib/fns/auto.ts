@@ -2878,8 +2878,25 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             rank: number;
           }[] = [];
 
+          const lastPlaceMs = stillOpen
+            .map((s) => new Date(s.filled_at ?? s.created_at).getTime())
+            .filter((n) => Number.isFinite(n) && n > 0)
+            .reduce((m, n) => Math.max(m, n), 0);
+          const burst = rules.burstLocked(lastPlaceMs);
+          const bookSide = tape.side;
+          const liveBeta = liveN.filter((p) => {
+            const s = p.side === "short" ? "short" : "long";
+            const key = p.symbol.replace(/_/g, "").toUpperCase();
+            if (beFree.has(key)) return false;
+            if (bookSide === "chop") return true;
+            return s === bookSide;
+          }).length;
           for (let pick of pool) {
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
+            if (!burst.ok) {
+              whyNot.push(`${tag} ${burst.why}`);
+              continue;
+            }
             const confNow = pick.confidence ?? scoreToConf(pick.score);
             const aPlus = rules.eliteScalp(pick.thesis ?? "", confNow, bar.minConf, compass.bias);
             if (!aPlus) {
@@ -2981,6 +2998,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             if (!mix.ok) {
               veto = `${tag} ${mix.why}`;
               whyNot.push(`${tag} ${mix.why}`);
+              continue;
+            }
+            const idio = rules.idiosyncraticVsBtc(pick.side, h4, btc4h);
+            const beta = rules.betaCapAllows(pick.side, tape.side, liveBeta, idio);
+            if (!beta.ok) {
+              veto = `${tag} ${beta.why}`;
+              whyNot.push(`${tag} ${beta.why}`);
               continue;
             }
             const book = await getBookTicker(pick.weexSymbol);

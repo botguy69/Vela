@@ -430,6 +430,57 @@ export function structureStop(
 
 /** Reject opposite of BTC 1h book unless the thesis is a real fade at extreme.
  *  Against-book fades: conf ≥ 90 and at most 1 live same-side seat (no stacked fade losers). */
+/** 4h location 0 = lows, 1 = highs. */
+export function boxLoc(fourHour: Candle[]): number {
+  if (fourHour.length < 8) return 0.5;
+  const closed = closedCandles(fourHour, FOUR_H_MS);
+  const bars = closed.length >= 8 ? closed : fourHour;
+  const last = fourHour[fourHour.length - 1]?.close ?? bars[bars.length - 1]?.close;
+  if (last == null) return 0.5;
+  const win = bars.slice(-21);
+  const sh = Math.max(...win.map((c) => c.high));
+  const sl = Math.min(...win.map((c) => c.low));
+  const span = sh - sl;
+  if (!(span > 0)) return 0.5;
+  return (last - sl) / span;
+}
+
+export const BETA_WITH_BTC = 2;
+export const BURST_LOCK_MS = 20 * 60_000;
+
+export function burstLocked(lastPlaceMs: number, now = Date.now()): { ok: boolean; why: string } {
+  if (!(lastPlaceMs > 0) || !Number.isFinite(lastPlaceMs)) return { ok: true, why: "" };
+  const left = BURST_LOCK_MS - (now - lastPlaceMs);
+  if (left <= 0) return { ok: true, why: "" };
+  return { ok: false, why: `burst lock ${Math.max(1, Math.ceil(left / 60_000))}m after last fill` };
+}
+
+/** Same side as the BTC 1h book = beta clone. */
+export function withBtcBeta(pick: Side, book: "long" | "short" | "chop"): boolean {
+  if (book === "chop") return true;
+  return pick === book;
+}
+
+/** Coin 4h is not just riding BTC's box. */
+export function idiosyncraticVsBtc(pick: Side, coin4h: Candle[], btc4h: Candle[]): boolean {
+  const coin = boxLoc(coin4h);
+  const btc = boxLoc(btc4h);
+  if (pick === "long") return coin <= 0.38 && btc > 0.48;
+  return coin >= 0.62 && btc < 0.52;
+}
+
+export function betaCapAllows(
+  pick: Side,
+  book: "long" | "short" | "chop",
+  liveBeta: number,
+  idiosyncratic: boolean,
+): { ok: boolean; why: string } {
+  if (!withBtcBeta(pick, book)) return { ok: true, why: "own tape" };
+  if (liveBeta < BETA_WITH_BTC) return { ok: true, why: "beta room" };
+  if (idiosyncratic) return { ok: true, why: "4h ≠ BTC" };
+  return { ok: false, why: `beta cap ${BETA_WITH_BTC} with BTC` };
+}
+
 export function mixAllows(
   pickSide: Side,
   thesis: string,
