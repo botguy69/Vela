@@ -912,8 +912,16 @@ async function ensureTakes(
     pos.stop = stopPx;
     pos.targets = JSON.stringify(kept);
   };
-  if (plan.noop) return;
-  if (plan.wipe) {
+  if (listed.length > 3) {
+    await cancelWeexProtective(creds, pos.weex_symbol, sideLc);
+    notes.push(`${pos.weex_symbol} force-wiped ${listed.length} close-long/short algos`);
+    const afterForce = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => [] as typeof listed);
+    if (afterForce.length > 3) {
+      notes.push(`${pos.weex_symbol} still ${afterForce.length} after wipe — skip restack`);
+      return;
+    }
+  } else if (plan.noop) return;
+  if (plan.wipe && listed.length <= 3) {
     await cancelWeexProtective(creds, pos.weex_symbol, sideLc);
     const after = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => [] as typeof listed);
     notes.push(`${pos.weex_symbol} wiped ${listed.length} → ${after.length} leftover TP/SL`);

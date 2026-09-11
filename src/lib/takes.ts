@@ -260,7 +260,7 @@ export function planTakes(input: {
     tpRows.length >= (afterTp1 ? 1 : 2) &&
     !collapsed;
   const noop = quiet || (slOk && tpOk && !extras);
-  const wipe = !afterTp1 && !quiet && (extras || listed.length > 3);
+  const wipe = !quiet && (extras || listed.length > 3);
   const beMove = input.stopOverride != null && input.stopOverride > 0 && !slOk;
   const placeSl = !quiet && stopPx > 0 && (extras || slRows.length !== 1 || !slOk);
   const placeTp = !quiet && (extras || !tpOk);
