@@ -2878,6 +2878,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             rank: number;
           }[] = [];
 
+          const bookSide = tape.side;
+          const liveBeta = liveN.filter((p) => {
+            const s = p.side === "short" ? "short" : "long";
+            const key = p.symbol.replace(/_/g, "").toUpperCase();
+            if (beFree.has(key)) return false;
+            if (bookSide === "chop") return true;
+            return s === bookSide;
+          }).length;
           const lastBetaMs = stillOpen
             .filter((s) => {
               const sd = s.side === "short" ? "short" : "long";
@@ -2887,15 +2895,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             .map((s) => new Date(s.filled_at ?? s.created_at).getTime())
             .filter((n) => Number.isFinite(n) && n > 0)
             .reduce((m, n) => Math.max(m, n), 0);
-          const burst = rules.burstLocked(lastBetaMs);
-          const bookSide = tape.side;
-          const liveBeta = liveN.filter((p) => {
-            const s = p.side === "short" ? "short" : "long";
-            const key = p.symbol.replace(/_/g, "").toUpperCase();
-            if (beFree.has(key)) return false;
-            if (bookSide === "chop") return true;
-            return s === bookSide;
-          }).length;
+          const burst = rules.burstLocked(lastBetaMs, Date.now(), liveBeta);
           for (let pick of pool) {
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
             if (!burst.ok && rules.withBtcBeta(pick.side === "short" ? "short" : "long", tape.side)) {

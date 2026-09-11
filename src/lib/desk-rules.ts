@@ -446,14 +446,21 @@ export function boxLoc(fourHour: Candle[]): number {
 }
 
 export const BETA_WITH_BTC = 2;
-export const BURST_LOCK_MS = 4 * 3600_000;
+export const BURST_LOCK_MS = 20 * 60_000;
+export const SAME_SIDE_EXTRA_MS = 4 * 3600_000;
 
-export function burstLocked(lastPlaceMs: number, now = Date.now()): { ok: boolean; why: string } {
+/** 1st–2nd same-side: 20m. 3rd–4th same-side: 4h after last with-BTC fill. */
+export function burstLocked(lastPlaceMs: number, now = Date.now(), liveBeta = 0): { ok: boolean; why: string } {
   if (!(lastPlaceMs > 0) || !Number.isFinite(lastPlaceMs)) return { ok: true, why: "" };
-  const left = BURST_LOCK_MS - (now - lastPlaceMs);
+  const need = liveBeta >= BETA_WITH_BTC ? SAME_SIDE_EXTRA_MS : BURST_LOCK_MS;
+  const left = need - (now - lastPlaceMs);
   if (left <= 0) return { ok: true, why: "" };
-  const h = Math.max(1, Math.ceil(left / 3600_000));
-  return { ok: false, why: `same-side wait ${h}h after last with-BTC fill` };
+  if (liveBeta >= BETA_WITH_BTC) {
+    const h = Math.max(1, Math.ceil(left / 3600_000));
+    return { ok: false, why: `3rd/4th same-side wait ${h}h` };
+  }
+  const m = Math.max(1, Math.ceil(left / 60_000));
+  return { ok: false, why: `burst lock ${m}m` };
 }
 
 /** Same side as the BTC 1h book = beta clone. */
@@ -477,9 +484,9 @@ export function betaCapAllows(
   idiosyncratic: boolean,
 ): { ok: boolean; why: string } {
   if (!withBtcBeta(pick, book)) return { ok: true, why: "own tape" };
-  if (liveBeta < BETA_WITH_BTC) return { ok: true, why: "beta room" };
+  if (liveBeta < 4) return { ok: true, why: "beta room" };
   if (idiosyncratic) return { ok: true, why: "4h ≠ BTC" };
-  return { ok: false, why: `beta cap ${BETA_WITH_BTC} with BTC` };
+  return { ok: false, why: "4 same-side already" };
 }
 
 export function mixAllows(
