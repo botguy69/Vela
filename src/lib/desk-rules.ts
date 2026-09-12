@@ -120,7 +120,7 @@ export function btcExtended(fourHour: Candle[]): {
     note: longChase
       ? "BTC 4h high — no new longs. Shorts only pin/double/climax at the high."
       : shortChase
-        ? "BTC 4h low — no dump-shorts. Longs at demand. Shorts only if that alt is in its own supply."
+        ? "BTC 4h at the lows. Prefer longs in demand. Do not short names that already washed with BTC."
         : "BTC 4h mid. Coin must be in the demand/supply 45% of its own 4h box.",
   };
 }
