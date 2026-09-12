@@ -2812,17 +2812,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                 continue;
               }
             }
-            if (ext.shortChase && s.side === "short") {
-              const h4s = h4map[s.weexSymbol] ?? [];
-              if (!rules.altRipShortOk(s.thesis ?? "", h4s)) {
-                whyNot.push(`${tag} BTC 4h low — no dump-shorts (alt not ripped)`);
-                continue;
-              }
-            }
-            if (fade && !rules.fadeAtExtreme(s.thesis ?? "", s.side)) {
-              whyNot.push(`${tag} not a ${fade} reject — no with-trend fade`);
-              continue;
-            }
             if (rules.setupQuality(s.thesis ?? "") < 2) {
               whyNot.push(`${tag} not location structure`);
               continue;
@@ -2949,18 +2938,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                 whyNot.push(`${tag} BTC 4h high — no chase-longs (alt not washed)`);
                 continue;
               }
-            }
-            if (ext.shortChase && pick.side === "short") {
-              if (!rules.altRipShortOk(pick.thesis ?? "", h4)) {
-                veto = `BTC 4h low — no dump-shorts`;
-                whyNot.push(`${tag} BTC 4h low — no dump-shorts (alt not ripped)`);
-                continue;
-              }
-            }
-            if (fade && !rules.fadeAtExtreme(pick.thesis ?? "", pick.side)) {
-              veto = `${tag} not a ${fade} reject`;
-              whyNot.push(`${tag} not a ${fade} reject — no with-trend fade`);
-              continue;
             }
             if (rules.setupQuality(pick.thesis ?? "") < 2) {
               whyNot.push(`${tag} not location structure`);
@@ -3131,7 +3108,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               if (busy.has(pick.weexSymbol) || flattened.has(pick.weexSymbol)) continue;
               if (stillOpen.some((s) => s.weex_symbol === pick.weexSymbol)) continue;
               if (ext.longChase && pick.side === "long") continue;
-              if (ext.shortChase && pick.side === "short") continue;
               if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
               if (ready.some((r) => r.sized.weexSymbol === pick.weexSymbol)) continue;
               const h4 = h4map[pick.weexSymbol] ?? (await getWeexFourHour(pick.weexSymbol).catch(() => []));
