@@ -2807,13 +2807,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} ${mtf.why}`);
               continue;
             }
-            if (ext.longChase && s.side === "long") {
-              const h4s = h4map[s.weexSymbol] ?? [];
-              if (!rules.altWashLongOk(s.thesis ?? "", h4s)) {
-                whyNot.push(`${tag} BTC 4h high — no chase-longs (alt not washed)`);
-                continue;
-              }
-            }
             if (rules.setupQuality(s.thesis ?? "") < 2) {
               whyNot.push(`${tag} not location structure`);
               continue;
@@ -2934,13 +2927,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               veto = `${pick.weexSymbol} ${pick.side} ${mtfPick.why}`;
               whyNot.push(`${tag} ${mtfPick.why}`);
               continue;
-            }
-            if (ext.longChase && pick.side === "long") {
-              if (!rules.altWashLongOk(pick.thesis ?? "", h4)) {
-                veto = `BTC 4h high — no chase-longs`;
-                whyNot.push(`${tag} BTC 4h high — no chase-longs (alt not washed)`);
-                continue;
-              }
             }
             if (rules.setupQuality(pick.thesis ?? "") < 2) {
               whyNot.push(`${tag} not location structure`);
