@@ -250,10 +250,9 @@ export function planTakes(input: {
   ).length;
   const collapsed = !afterTp1 && tpRows.length >= 1 && distinctTp < 2;
   const tpOk = afterTp1 ? Boolean(runnerLive) : tpRows.length >= 2 && !collapsed;
-  const extras =
-    listed.length > 3 || slRows.length > 1 || tpRows.length > (afterTp1 ? 1 : 2) || collapsed;
-  const setAt = Number(/tps:set@(\d+)/.exec(input.weexResp ?? "")?.[1] ?? 0);
-  const recentSet = setAt > 0 && (input.now ?? Date.now()) - setAt < 5 * 60_000;
+  const extras = listed.length > 4;
+  const setAt = Number((/tps:(?:lock|set)@(\d+)/.exec(input.weexResp ?? "") ?? [])[1] ?? 0);
+  const recentSet = setAt > 0 && (input.now ?? Date.now()) - setAt < 30 * 60_000;
   const quiet =
     recentSet &&
     slRows.length === 1 &&

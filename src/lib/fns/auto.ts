@@ -896,7 +896,7 @@ async function ensureTakes(
   }
   const tps = plan.tps;
   const stampSet = async () => {
-    const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set|be|miss|clean)@?\d*/g, "").trim()} tps:set@${Date.now()}`.slice(0, 500);
+    const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set|be|miss|clean)@?\d*/g, "").trim()} tps:lock@${Date.now()}`.slice(0, 500);
     const kept =
       plan.afterTp1 && planned.length >= 2
         ? [planned[0]!, tps[0] ?? planned[1]!]
@@ -912,21 +912,25 @@ async function ensureTakes(
     pos.stop = stopPx;
     pos.targets = JSON.stringify(kept);
   };
-  if (listed.length > 3) {
+  const beMove = stopOverride != null && stopOverride > 0 && Boolean(pos.tp1_hit || pos.be_moved || plan.throughTp1);
+  const setAt = Number((/tps:(?:lock|set)@(\d+)/.exec(pos.weex_resp ?? "") ?? [])[1] ?? 0);
+  const justSet = setAt > 0 && Date.now() - setAt < 2 * 60_000;
+  // 1–4 working algos stay. Flicker was wipe+replace every tick when WEEX types didn't match.
+  if (!beMove && listed.length >= 1 && listed.length <= 4) {
+    notes.push(`${pos.weex_symbol} TP/SL stay (${listed.length} on WEEX)`);
+    return;
+  }
+  if (!beMove && listed.length === 0 && justSet) {
+    notes.push(`${pos.weex_symbol} TP/SL just set — wait for WEEX list`);
+    return;
+  }
+  if (plan.noop && !beMove) return;
+  if (listed.length > 4) {
     await cancelWeexProtective(creds, pos.weex_symbol, sideLc);
-    notes.push(`${pos.weex_symbol} force-wiped ${listed.length} close-long/short algos`);
+    notes.push(`${pos.weex_symbol} wiped ${listed.length} extras — place 1 SL + TPs once`);
     const afterForce = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => [] as typeof listed);
-    if (afterForce.length > 3) {
+    if (afterForce.length > 4) {
       notes.push(`${pos.weex_symbol} still ${afterForce.length} after wipe — skip restack`);
-      return;
-    }
-  } else if (plan.noop) return;
-  if (plan.wipe && listed.length <= 3) {
-    await cancelWeexProtective(creds, pos.weex_symbol, sideLc);
-    const after = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => [] as typeof listed);
-    notes.push(`${pos.weex_symbol} wiped ${listed.length} → ${after.length} leftover TP/SL`);
-    if (!shouldRestateAfterWipe(after.length)) {
-      notes.push(`${pos.weex_symbol} still ${after.length} on WEEX — wipe continues next tick, not restating`);
       return;
     }
   }
