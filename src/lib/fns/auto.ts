@@ -2800,7 +2800,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const hour = rules.closedCandles(books[s.weexSymbol] ?? [], 60 * 60 * 1000);
-            const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", tape.side, fade);
+            const boxS = { longMax: 0.38, shortMin: riskL >= 2 ? 0.55 : 0.62 };
+            const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", tape.side, fade, boxS);
             if (!mtf.ok) {
               whyNot.push(`${tag} ${mtf.why}`);
               continue;
@@ -2855,7 +2856,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               : `Closest (not through 4h+1h): ${closest || "—"}. ${elite.length} 1h A++ this pass, 0 cleared the box. Scanned ${scannedN}/${TOP25_WEEX.length}. Seat ${atRiskN}/${AT_RISK} open.`;
           const aPlusLine = rebuild
             ? `REBUILD → $${REBUILD_EQUITY_USD}: 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd ${REBUILD_MARGIN_PCT}% after TP1→BE. A++ only.`
-            : "Closed 15m only. Longs bottom 38% of own 4h box, shorts top 38%. Mid-box skip. Coin 4h picks long or short. BTC 1h is heat only. VWAP does not veto at the box.";
+            : "Closed 15m only. Longs bottom 38%. Shorts top 38% (top 45% if 2+ longs at-risk). Mid-box skip. 15m reject can short. 3rd same-side 50m.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -2926,7 +2927,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
-            const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "", tape.side, fade);
+            const boxP = { longMax: 0.38, shortMin: riskL >= 2 ? 0.55 : 0.62 };
+            const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "", tape.side, fade, boxP);
             if (!mtfPick.ok) {
               veto = `${pick.weexSymbol} ${pick.side} ${mtfPick.why}`;
               whyNot.push(`${tag} ${mtfPick.why}`);

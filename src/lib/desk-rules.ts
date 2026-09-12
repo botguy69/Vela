@@ -64,6 +64,7 @@ export function htfAllows(
   heat: "long" | "short" | "chop" = "chop",
   fade?: "high" | "low" | null,
   thesis = "",
+  box?: { longMax?: number; shortMin?: number },
 ): boolean {
   if (fourHour.length < 24) return false;
   const closed = closedCandles(fourHour, FOUR_H_MS);
@@ -88,8 +89,10 @@ export function htfAllows(
   const span = sh - sl;
   if (span > 0) {
     const loc = (px - sl) / span;
-    if (side === "long" && fade !== "low" && loc > 0.38) return false;
-    if (side === "short" && fade !== "high" && loc < 0.62) return false;
+    const longMax = box?.longMax ?? 0.38;
+    const shortMin = box?.shortMin ?? 0.62;
+    if (side === "long" && fade !== "low" && loc > longMax) return false;
+    if (side === "short" && fade !== "high" && loc < shortMin) return false;
   }
   return true;
 }
@@ -281,7 +284,9 @@ export function ltfTrigger(
   if (greensS >= 2 && last > (vwap ?? e21)) {
     return { ok: false, wait: false, reason: "15m ripping — no short", pullback: null };
   }
-  if (last > e21 + 0.25 * a) {
+  const rngS = lastBar.high - lastBar.low || 1;
+  const rejectShort = lastBar.close < lastBar.open && lastBar.high - lastBar.close >= 0.45 * rngS;
+  if (last > e21 + 0.25 * a && !rejectShort) {
     return { ok: false, wait: false, reason: "15m ripping — no short", pullback: null };
   }
   if (last < e21 - 0.35 * a && !reclaim) {
@@ -444,17 +449,17 @@ export function boxLoc(fourHour: Candle[]): number {
 
 export const BETA_WITH_BTC = 2;
 export const BURST_LOCK_MS = 20 * 60_000;
-export const SAME_SIDE_EXTRA_MS = 4 * 3600_000;
+export const SAME_SIDE_EXTRA_MS = 50 * 60_000;
 
-/** 1st–2nd same-side: 20m. 3rd–4th same-side: 4h after last with-BTC fill. */
+/** 1st–2nd same-side: 20m. 3rd–4th same-side: 50m (was 4h — seats sat empty). */
 export function burstLocked(lastPlaceMs: number, now = Date.now(), liveBeta = 0): { ok: boolean; why: string } {
   if (!(lastPlaceMs > 0) || !Number.isFinite(lastPlaceMs)) return { ok: true, why: "" };
   const need = liveBeta >= BETA_WITH_BTC ? SAME_SIDE_EXTRA_MS : BURST_LOCK_MS;
   const left = need - (now - lastPlaceMs);
   if (left <= 0) return { ok: true, why: "" };
   if (liveBeta >= BETA_WITH_BTC) {
-    const h = Math.max(1, Math.ceil(left / 3600_000));
-    return { ok: false, why: `3rd/4th same-side wait ${h}h` };
+    const m = Math.max(1, Math.ceil(left / 60_000));
+    return { ok: false, why: `3rd/4th same-side wait ${m}m` };
   }
   const m = Math.max(1, Math.ceil(left / 60_000));
   return { ok: false, why: `burst lock ${m}m` };
@@ -967,8 +972,9 @@ export function mtfAllows(
   thesis = "",
   heat: "long" | "short" | "chop" = "chop",
   fade?: "high" | "low" | null,
+  box?: { longMax?: number; shortMin?: number },
 ): { ok: boolean; why: string } {
-  if (!htfAllows(side, fourHour, heat, fade, thesis)) return { ok: false, why: "4h reject" };
+  if (!htfAllows(side, fourHour, heat, fade, thesis, box)) return { ok: false, why: "4h reject" };
   const knife = /washout|Oversold|Overbought/i.test(thesis);
   const fadeHigh = fade === "high" && side === "short";
   const fadeLow = fade === "low" && side === "long";
