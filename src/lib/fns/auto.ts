@@ -3319,7 +3319,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             ? `Skip ${whyUniq.slice(0, 3).join(" · ")}${whyUniq.length > 3 ? ` · +${whyUniq.length - 3} more` : ""}`
             : "Skip none";
           const tookClean = tookLine && !/^Skip /i.test(tookLine) && tookLine !== veto ? tookLine : "";
-          huntTape = [huntNow, thinkLine, skipBit, tookClean, compass.note].filter(Boolean).join("\n");
+          huntTape = [huntNow, eyeLine, thinkLine, skipBit, tookClean, compass.note].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {
