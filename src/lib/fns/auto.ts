@@ -2939,20 +2939,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} ${closed15.why}`);
               continue;
             }
-            const raw5 = await getWeexKlines(pick.weexSymbol, "5m", 48).catch(() => []);
-            const m5 = rules.closedCandles(raw5, 5 * 60 * 1000);
-            if (m5.length >= 4) {
-              const b = m5[m5.length - 1]!;
-              const rng = b.high - b.low || 1;
-              const against =
-                pick.side === "long"
-                  ? b.close < b.open && b.close <= b.low + 0.4 * rng
-                  : b.close > b.open && b.close >= b.high - 0.4 * rng;
-              if (against) {
-                whyNot.push(`${tag} 5m against — next name`);
-                continue;
-              }
-            }
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
             if (h4.length < 24) {
               whyNot.push(`${tag} thin 4h — fail closed`);
@@ -3359,7 +3345,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length
               ? `Thinking  no clean shot this bar. Closest: ${whyUniq.slice(0, 2).join(" · ") || "—"}. ${elite.length} A++ died on 4h/1h/15m. Scanned ${scannedN}/${TOP25_WEEX.length}.`
               : `Thinking  nothing at 85%+ structure this pass. Scanned ${scannedN}/${TOP25_WEEX.length}.`;
-          huntTape = [huntNow, compass.note, ...whyLive, tookLine, whyUniq.length ? `Skip  ${whyUniq.slice(0, 3).join(" · ")}${whyUniq.length > 3 ? ` · +${whyUniq.length - 3} more` : ""}` : "", thinkLine, aPlusLine].filter(Boolean).join("\n");
+          const skipLine = whyUniq.length
+            ? `Skip  ${whyUniq.slice(0, 3).join(" · ")}${whyUniq.length > 3 ? ` · +${whyUniq.length - 3} more` : ""}`
+            : "";
+          const tookClean = tookLine && !/^Skip /i.test(tookLine) && tookLine !== veto ? tookLine : "";
+          huntTape = [huntNow, compass.note, thinkLine, tookClean, skipLine].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {
