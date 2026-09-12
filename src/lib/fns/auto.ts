@@ -3345,11 +3345,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             : elite.length
               ? `Thinking  no clean shot this bar. Closest: ${whyUniq.slice(0, 2).join(" · ") || "—"}. ${elite.length} A++ died on 4h/1h/15m. Scanned ${scannedN}/${TOP25_WEEX.length}.`
               : `Thinking  nothing at 85%+ structure this pass. Scanned ${scannedN}/${TOP25_WEEX.length}.`;
-          const skipLine = whyUniq.length
-            ? `Skip  ${whyUniq.slice(0, 3).join(" · ")}${whyUniq.length > 3 ? ` · +${whyUniq.length - 3} more` : ""}`
-            : "";
+          const skipBit = whyUniq.length
+            ? `Skip ${whyUniq.slice(0, 3).join(" · ")}${whyUniq.length > 3 ? ` · +${whyUniq.length - 3} more` : ""}`
+            : "Skip none";
           const tookClean = tookLine && !/^Skip /i.test(tookLine) && tookLine !== veto ? tookLine : "";
-          huntTape = [huntNow, compass.note, thinkLine, tookClean, skipLine].filter(Boolean).join("\n");
+          huntTape = [huntNow, thinkLine, skipBit, tookClean, compass.note].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {
