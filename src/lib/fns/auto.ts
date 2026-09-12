@@ -3341,8 +3341,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
           const readyThink = ready.slice(0, 3).map((r) => {
             const how = r.sized.entryType === "market" ? "MARKET" : "LIMIT";
+            const when = r.sized.entryType === "market" ? "this tick" : "park limit this tick";
             const sym = r.sized.weexSymbol.replace("USDT", "");
-            return `${how} ${r.sized.side} ${sym} ${Math.round(r.sized.confidence)}%`;
+            return `${how} ${r.sized.side} ${sym} ${Math.round(r.sized.confidence)}% — ${when}`;
           });
           const readySym = new Set(ready.map((r) => r.sized.weexSymbol));
           const watchThink = pool
@@ -3350,7 +3351,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             .slice(0, 3)
             .map((s) => {
               const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
-              return `watch ${s.side} ${s.weexSymbol.replace("USDT", "")} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""} — next 15m`;
+              return `watch ${s.side} ${s.weexSymbol.replace("USDT", "")} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""} — next 15m close`;
             });
           const thinkBits = [...readyThink, ...watchThink].slice(0, 4);
           const thinkLine = thinkBits.length
