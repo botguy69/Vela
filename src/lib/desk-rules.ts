@@ -74,7 +74,7 @@ export function htfAllows(
       ? [...closed.map((c) => c.close), live.close]
       : closed.map((c) => c.close);
   if (last == null) return false;
-  // 45% box + swing extremes are the location veto.
+  // 38% box + swing extremes are the location veto.
   // 4h 21 SMA used to require longs ABOVE the mean AND in the bottom 45% — those two almost never stack.
   const prior = (closed.length >= 8 ? closed : fourHour).slice(-20);
   if (prior.length < 8) return true;
@@ -88,8 +88,8 @@ export function htfAllows(
   const span = sh - sl;
   if (span > 0) {
     const loc = (px - sl) / span;
-    if (side === "long" && fade !== "low" && loc > 0.45) return false;
-    if (side === "short" && fade !== "high" && loc < 0.55) return false;
+    if (side === "long" && fade !== "low" && loc > 0.38) return false;
+    if (side === "short" && fade !== "high" && loc < 0.62) return false;
   }
   return true;
 }
@@ -121,7 +121,7 @@ export function btcExtended(fourHour: Candle[]): {
       ? "BTC 4h high — no new longs. Shorts only pin/double/climax at the high."
       : shortChase
         ? "BTC 4h at the lows. Prefer longs in demand. Do not short names that already washed with BTC."
-        : "BTC 4h mid. Coin must be in the demand/supply 45% of its own 4h box.",
+        : "BTC 4h mid. Coin must be in the demand/supply 38% of its own 4h box.",
   };
 }
 
@@ -311,7 +311,7 @@ export function swingHold(
   const greens = win.slice(-3).filter((c) => c.close > c.open).length;
   const reds = win.slice(-3).filter((c) => c.close < c.open).length;
   if (side === "long") {
-    if (loc > 0.55) return { ok: false, stop: 0, tp: 0, why: "" };
+    if (loc > 0.38) return { ok: false, stop: 0, tp: 0, why: "" };
     if (greens < 2 && last.close <= last.open) return { ok: false, stop: 0, tp: 0, why: "" };
     if (last.low <= sl + 0.05 * span && last.close < sl + 0.2 * span) return { ok: false, stop: 0, tp: 0, why: "" };
     const stop = sl - 0.15 * a;
@@ -319,7 +319,7 @@ export function swingHold(
     if (tp <= last.close || last.close - stop < last.close * 0.002) return { ok: false, stop: 0, tp: 0, why: "" };
     return { ok: true, stop, tp, why: "Swing hold long — SL last low, TP last high" };
   }
-  if (loc < 0.45) return { ok: false, stop: 0, tp: 0, why: "" };
+  if (loc < 0.62) return { ok: false, stop: 0, tp: 0, why: "" };
   if (reds < 2 && last.close >= last.open) return { ok: false, stop: 0, tp: 0, why: "" };
   const stop = sh + 0.15 * a;
   const tp = sl + 0.1 * a;
@@ -470,8 +470,8 @@ export function withBtcBeta(pick: Side, book: "long" | "short" | "chop"): boolea
 export function idiosyncraticVsBtc(pick: Side, coin4h: Candle[], btc4h: Candle[]): boolean {
   const coin = boxLoc(coin4h);
   const btc = boxLoc(btc4h);
-  if (pick === "long") return coin <= 0.45 && btc > 0.48;
-  return coin >= 0.55 && btc < 0.52;
+  if (pick === "long") return coin <= 0.38 && btc > 0.48;
+  return coin >= 0.62 && btc < 0.52;
 }
 
 export function betaCapAllows(
@@ -886,13 +886,13 @@ export function fadeAtExtreme(thesis: string, side: Side): boolean {
   return /double bottom|Failed range low|Pin bar at low|climax rejection at low/i.test(thesis);
 }
 
-/** Alt ripped vs BTC wash: short only if coin is in top 45% of its own 4h box + fade structure. */
+/** Alt ripped vs BTC wash: short only if coin is in top 38% of its own 4h box + fade structure. */
 export function altRipShortOk(thesis: string, fourHour: Candle[]): boolean {
   if (!fadeAtExtreme(thesis, "short")) return false;
   return locationScore("short", fourHour) >= 62;
 }
 
-/** Alt washed vs BTC melt-up: long only if coin is in bottom 45% of its own 4h box + fade structure. */
+/** Alt washed vs BTC melt-up: long only if coin is in bottom 38% of its own 4h box + fade structure. */
 export function altWashLongOk(thesis: string, fourHour: Candle[]): boolean {
   if (!fadeAtExtreme(thesis, "long")) return false;
   return locationScore("long", fourHour) >= 62;
