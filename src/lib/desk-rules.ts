@@ -976,8 +976,9 @@ export function mtfAllows(
 ): { ok: boolean; why: string } {
   if (!htfAllows(side, fourHour, heat, fade, thesis, box)) return { ok: false, why: "4h reject" };
   const knife = /washout|Oversold|Overbought/i.test(thesis);
-  const fadeHigh = fade === "high" && side === "short";
-  const fadeLow = fade === "low" && side === "long";
+  const fadeHigh = false;
+  const fadeLow = false;
+  void fade;
   if (hourly.length >= 24) {
     const closes = hourly.map((c) => c.close);
     const e9 = ema(closes, 9);

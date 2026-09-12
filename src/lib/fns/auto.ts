@@ -2801,7 +2801,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             const hour = rules.closedCandles(books[s.weexSymbol] ?? [], 60 * 60 * 1000);
             const boxS = { longMax: 0.38, shortMin: riskL >= 2 ? 0.55 : 0.62 };
-            const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", tape.side, fade, boxS);
+            const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", tape.side, null, boxS);
             if (!mtf.ok) {
               whyNot.push(`${tag} ${mtf.why}`);
               continue;
@@ -2928,7 +2928,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
             const boxP = { longMax: 0.38, shortMin: riskL >= 2 ? 0.55 : 0.62 };
-            const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "", tape.side, fade, boxP);
+            const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "", tape.side, null, boxP);
             if (!mtfPick.ok) {
               veto = `${pick.weexSymbol} ${pick.side} ${mtfPick.why}`;
               whyNot.push(`${tag} ${mtfPick.why}`);
@@ -2946,7 +2946,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const locPx = rules.boxLoc(h4);
-            const atExt = pick.side === "long" ? locPx <= 0.38 : locPx >= 0.62;
+            const atExt = pick.side === "long" ? locPx <= boxP.longMax : locPx >= boxP.shortMin;
             const trig = rules.ltfTrigger(pick.side, coin15, atExt);
             if (!trig.ok && !trig.wait) {
               veto = `Skip ${tag} ${trig.reason}`;
