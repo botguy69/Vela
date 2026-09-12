@@ -3331,7 +3331,28 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const at2 = riskL + riskS;
           const be2 = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
           const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3 });
-          huntTape = [huntNow, compass.note, ...whyLive, tookLine, whyNot.length ? `Skip  ${whyNot.slice(0, 3).join(" · ")}${whyNot.length > 3 ? ` · +${whyNot.length - 3} more` : ""}` : "", eyeLine, aPlusLine].filter(Boolean).join("\n");
+          const whyUniq: string[] = [];
+          const seenWhy = new Set<string>();
+          for (const w of whyNot) {
+            const k = w.replace(/\s+/g, " ").trim();
+            if (seenWhy.has(k)) continue;
+            seenWhy.add(k);
+            whyUniq.push(w);
+          }
+          const stillLive = pool.filter((s) => {
+            const base = s.weexSymbol.replace("USDT", "");
+            return !whyUniq.some((w) => w.startsWith(`${base} `));
+          });
+          const eyeNow = (stillLive.length ? stillLive : []).slice(0, 2).map((s) => {
+            const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
+            return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
+          });
+          const eyeFinal = eyeNow.length
+            ? `Eying  ${eyeNow.join(" · ")} — waiting a clean 15m close. Scanned ${scannedN}/${TOP25_WEEX.length}`
+            : pool.length
+              ? `Best HTF this pass failed the 15m trigger (dumping / ripping / stale). Not an entry this bar. Scanned ${scannedN}/${TOP25_WEEX.length}`
+              : eyeLine;
+          huntTape = [huntNow, compass.note, ...whyLive, tookLine, whyUniq.length ? `Skip  ${whyUniq.slice(0, 3).join(" · ")}${whyUniq.length > 3 ? ` · +${whyUniq.length - 3} more` : ""}` : "", eyeFinal, aPlusLine].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {
