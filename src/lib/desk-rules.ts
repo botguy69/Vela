@@ -916,10 +916,6 @@ export function eliteScalp(
       thesis,
     );
   if (!(structure && conf >= floor)) return false;
-  const side: Side | null = /^long\b/i.test(thesis) ? "long" : /^short\b/i.test(thesis) ? "short" : null;
-  if ((bias === "long" || bias === "short") && side && side !== bias && !fadeAtExtreme(thesis, side)) {
-    return false;
-  }
   return true;
 }
 
