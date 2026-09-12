@@ -358,15 +358,15 @@ export function btcHeat(fifteen: Candle[]): {
 
 /** 1h decides long-book vs short-book. 15m heat is display only. */
 export function btcBook(hourly: Candle[]): { side: "long" | "short" | "chop"; note: string } {
-  if (hourly.length < 24) return { side: "chop", note: "BTC 1h thin — no book side." };
+  if (hourly.length < 24) return { side: "chop", note: "BTC 1h thin — heat only." };
   const closes = hourly.map((c) => c.close);
   const last = closes[closes.length - 1];
   const e9 = ema(closes, 9);
   const e21 = ema(closes, 21);
-  if (last == null || e9 == null || e21 == null) return { side: "chop", note: "BTC 1h thin — no book side." };
-  if (last > e21 && e9 >= e21 * 0.999) return { side: "long", note: "BTC 1h bid — long book." };
-  if (last < e21 && e9 <= e21 * 1.001) return { side: "short", note: "BTC 1h offer — short book." };
-  return { side: "chop", note: "BTC 1h mixed — book from live majority." };
+  if (last == null || e9 == null || e21 == null) return { side: "chop", note: "BTC 1h thin — heat only." };
+  if (last > e21 && e9 >= e21 * 0.999) return { side: "long", note: "BTC 1h bid — heat only. Coin 4h picks the side." };
+  if (last < e21 && e9 <= e21 * 1.001) return { side: "short", note: "BTC 1h offer — heat only. Coin 4h picks the side." };
+  return { side: "chop", note: "BTC 1h mixed — heat only. Coin 4h picks the side." };
 }
 
 /** Newest swing that is far enough from entry to be real invalidation — skip last-hour noise. */
@@ -487,26 +487,13 @@ export function betaCapAllows(
 }
 
 export function mixAllows(
-  pickSide: Side,
-  thesis: string,
-  conf: number,
-  heat: "long" | "short" | "chop",
-  live: { side: string }[],
+  _pickSide: Side,
+  _thesis: string,
+  _conf: number,
+  _heat: "long" | "short" | "chop",
+  _live: { side: string }[],
 ): { ok: boolean; why: string } {
-  if ((heat === "long" || heat === "short") && pickSide !== heat) {
-    if (!fadeAtExtreme(thesis, pickSide)) {
-      return { ok: false, why: `against ${heat} book` };
-    }
-    const c = Number.isFinite(conf) ? conf : 0;
-    if (c < 90) {
-      return { ok: false, why: `fade vs ${heat} book needs 90%+` };
-    }
-    const same = live.filter((p) => (p.side === "short" ? "short" : "long") === pickSide).length;
-    if (same >= 1) {
-      return { ok: false, why: `fade seat full vs ${heat} book` };
-    }
-  }
-  return { ok: true, why: "coin tape" };
+  return { ok: true, why: "coin 4h box" };
 }
 
 /** New entries after a 15m close. Bar.time is the open — age from close, not open. */
