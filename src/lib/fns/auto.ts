@@ -2565,7 +2565,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ? "Disarmed. Not hunting."
       : bookUnread
         ? "No WEEX keys on file — not hunting."
-        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN), { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3 });
+        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN), { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3, universe: TOP25_WEEX.length });
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -3286,7 +3286,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
           const at2 = riskL + riskS;
           const be2 = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3 });
+          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3, scanned: scannedN, universe: TOP25_WEEX.length });
           const whyUniq: string[] = [];
           const seenWhy = new Set<string>();
           for (const w of whyNot) {
