@@ -3339,20 +3339,26 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             seenWhy.add(k);
             whyUniq.push(w);
           }
-          const stillLive = pool.filter((s) => {
-            const base = s.weexSymbol.replace("USDT", "");
-            return !whyUniq.some((w) => w.startsWith(`${base} `));
+          const readyThink = ready.slice(0, 3).map((r) => {
+            const how = r.sized.entryType === "market" ? "MARKET" : "LIMIT";
+            const sym = r.sized.weexSymbol.replace("USDT", "");
+            return `${how} ${r.sized.side} ${sym} ${Math.round(r.sized.confidence)}%`;
           });
-          const eyeNow = (stillLive.length ? stillLive : []).slice(0, 2).map((s) => {
-            const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
-            return `${s.weexSymbol.replace("USDT", "")} ${s.side} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""}`;
-          });
-          const eyeFinal = eyeNow.length
-            ? `Eying  ${eyeNow.join(" · ")} — waiting a clean 15m close. Scanned ${scannedN}/${TOP25_WEEX.length}`
-            : pool.length
-              ? `Best HTF this pass failed the 15m trigger (dumping / ripping / stale). Not an entry this bar. Scanned ${scannedN}/${TOP25_WEEX.length}`
-              : eyeLine;
-          huntTape = [huntNow, compass.note, ...whyLive, tookLine, whyUniq.length ? `Skip  ${whyUniq.slice(0, 3).join(" · ")}${whyUniq.length > 3 ? ` · +${whyUniq.length - 3} more` : ""}` : "", eyeFinal, aPlusLine].filter(Boolean).join("\n");
+          const readySym = new Set(ready.map((r) => r.sized.weexSymbol));
+          const watchThink = pool
+            .filter((s) => !readySym.has(s.weexSymbol))
+            .slice(0, 3)
+            .map((s) => {
+              const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
+              return `watch ${s.side} ${s.weexSymbol.replace("USDT", "")} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""} — next 15m`;
+            });
+          const thinkBits = [...readyThink, ...watchThink].slice(0, 4);
+          const thinkLine = thinkBits.length
+            ? `Thinking  ${thinkBits.join(" · ")}. Scanned ${scannedN}/${TOP25_WEEX.length}.`
+            : elite.length
+              ? `Thinking  no clean shot this bar. Closest: ${whyUniq.slice(0, 2).join(" · ") || "—"}. ${elite.length} A++ died on 4h/1h/15m. Scanned ${scannedN}/${TOP25_WEEX.length}.`
+              : `Thinking  nothing at 85%+ structure this pass. Scanned ${scannedN}/${TOP25_WEEX.length}.`;
+          huntTape = [huntNow, compass.note, ...whyLive, tookLine, whyUniq.length ? `Skip  ${whyUniq.slice(0, 3).join(" · ")}${whyUniq.length > 3 ? ` · +${whyUniq.length - 3} more` : ""}` : "", thinkLine, aPlusLine].filter(Boolean).join("\n");
         }
       }
     } else if (!settings.armed) {
