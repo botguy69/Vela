@@ -5,7 +5,7 @@ export function huntHeader(
   liveS: number,
   beN = 0,
   liveTotal?: number,
-  opts?: { atRiskCap?: number; liveCap?: number; rebuild?: boolean; marginPct?: number; scanned?: number; universe?: number },
+  opts?: { atRiskCap?: number; liveCap?: number; rebuild?: boolean; marginPct?: number; scanned?: number; universe?: number; missed?: number },
 ) {
   const atRiskCap = opts?.atRiskCap ?? 4;
   const liveCap = opts?.liveCap ?? 6;
@@ -15,7 +15,7 @@ export function huntHeader(
   const m = opts?.marginPct ?? 3;
   const scan =
     opts?.universe && opts.universe > 0
-      ? ` Scanned ${opts.scanned ?? opts.universe}/${opts.universe}.`
+      ? ` Scanned ${opts.scanned ?? opts.universe}/${opts.universe}${opts.missed ? ` · ${opts.missed} no 1h book` : ""}.`
       : "";
   if (live >= liveCap) {
     return rebuild
@@ -44,7 +44,7 @@ export function composePass(
   liveLines: string[],
   beN = 0,
   liveTotal?: number,
-  opts?: { atRiskCap?: number; liveCap?: number; rebuild?: boolean; marginPct?: number; scanned?: number; universe?: number },
+  opts?: { atRiskCap?: number; liveCap?: number; rebuild?: boolean; marginPct?: number; scanned?: number; universe?: number; missed?: number },
 ) {
   const head = huntHeader(liveL, liveS, beN, liveTotal, opts);
   const fromTick = (note ?? "")

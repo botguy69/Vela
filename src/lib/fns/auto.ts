@@ -2727,6 +2727,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           );
           const raw = rawAll.filter((s) => TOP25_WEEX.includes(s.weexSymbol) && !SKIP_WEEX.has(s.weexSymbol));
           const scannedN = Object.keys(books).length;
+          const missedN = Math.max(0, TOP25_WEEX.length - scannedN);
           const busy = new Set(
             stillOpen.filter((s) => s.status === "filled").map((s) => s.weex_symbol),
           );
@@ -2850,10 +2851,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           });
           const closest = whyNot.slice(0, 3).join(" · ");
           const eyeLine = eyeing.length
-            ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}`
+            ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}`
             : elite.length === 0
-              ? `Scanned ${scannedN}/${TOP25_WEEX.length}. No A++ this pass. 1h book. Slots stay empty.`
-              : `Closest (not through 4h+1h): ${closest || "—"}. ${elite.length} 1h A++ this pass, 0 cleared the box. Scanned ${scannedN}/${TOP25_WEEX.length}. Seat ${atRiskN}/${AT_RISK} open.`;
+              ? `Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}. No A++ this pass. 1h book. Slots stay empty.`
+              : `Closest (not through 4h+1h): ${closest || "—"}. ${elite.length} 1h A++ this pass, 0 cleared the box. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}. Seat ${atRiskN}/${AT_RISK} open.`;
           const aPlusLine = rebuild
             ? `REBUILD → $${REBUILD_EQUITY_USD}: 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd ${REBUILD_MARGIN_PCT}% after TP1→BE. A++ only.`
             : "Closed 15m only. Longs bottom 38%. Shorts top 38% (top 45% if 2+ longs at-risk). Mid-box skip. 15m reject can short. 3rd same-side 50m.";
@@ -3286,7 +3287,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
           const at2 = riskL + riskS;
           const be2 = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3, scanned: scannedN, universe: TOP25_WEEX.length });
+          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3, scanned: scannedN, universe: TOP25_WEEX.length, missed: missedN });
           const whyUniq: string[] = [];
           const seenWhy = new Set<string>();
           for (const w of whyNot) {
@@ -3311,10 +3312,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             });
           const thinkBits = [...readyThink, ...watchThink].slice(0, 4);
           const thinkLine = thinkBits.length
-            ? `Thinking  ${thinkBits.join(" · ")}. Scanned ${scannedN}/${TOP25_WEEX.length}.`
+            ? `Thinking  ${thinkBits.join(" · ")}. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}.`
             : elite.length
-              ? `Thinking  no clean shot this bar. Closest: ${whyUniq.slice(0, 2).join(" · ") || "—"}. ${elite.length} A++ died on 4h/1h/15m. Scanned ${scannedN}/${TOP25_WEEX.length}.`
-              : `Thinking  nothing at 85%+ structure this pass. Scanned ${scannedN}/${TOP25_WEEX.length}.`;
+              ? `Thinking  no clean shot this bar. Closest: ${whyUniq.slice(0, 2).join(" · ") || "—"}. ${elite.length} A++ died on 4h/1h/15m. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}.`
+              : `Thinking  nothing at 85%+ structure this pass. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}.`;
           const skipBit = whyUniq.length
             ? `Skip ${whyUniq.slice(0, 3).join(" · ")}${whyUniq.length > 3 ? ` · +${whyUniq.length - 3} more` : ""}`
             : "Skip none";
