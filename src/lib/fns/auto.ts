@@ -3,7 +3,7 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import { adaptMethod, clampPeak, GOAL_USD, STAGE2_USD, multipleToGoal, phaseForRun, progressPct, stageTarget } from "@/lib/goal";
 import { setupTag } from "@/lib/desk-rules";
 import { huntHeader, composePass } from "@/lib/desk-hunt";
-import { feeBePx, n, oneRUsd, origQty, parseNums, planTakes, shouldRestateAfterWipe } from "@/lib/takes";
+import { feeBePx, n, oneRUsd, origQty, parseNums, planTakes } from "@/lib/takes";
 
 /** WR / streaks: this 4h-21 + 4-mix book. Live tickets still count when they close. */
 const TAPE_FROM = "2026-09-03T05:20:00.000Z";
