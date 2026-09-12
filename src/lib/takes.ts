@@ -222,9 +222,11 @@ export function planTakes(input: {
   if (entryPx > 0 && r1 > 0) {
     const t1 = side === "short" ? entryPx - r1 : entryPx + r1;
     const twoR = side === "short" ? entryPx - 2 * r1 : entryPx + 2 * r1;
-    const plannedFar = planned.find((p) => Math.abs(p - t1) / Math.max(t1, 1) > 0.004);
-    let t2 = plannedFar && plannedFar > 0 ? plannedFar : twoR;
+    const gapOk = (a: number, b: number) => Math.abs(a - b) >= 0.8 * r1;
+    const plannedFar = planned.find((p) => gapOk(p, t1));
+    let t2 = plannedFar && plannedFar > 0 && gapOk(plannedFar, t1) ? plannedFar : twoR;
     if (side === "short" ? t2 >= t1 : t2 <= t1) t2 = twoR;
+    if (!gapOk(t2, t1)) t2 = twoR;
     if (afterTp1) {
       if (!(mark > 0 && taggedTake(side, mark, t2))) pushTp(t2, true);
     } else {

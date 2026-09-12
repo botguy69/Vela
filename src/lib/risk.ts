@@ -28,10 +28,8 @@ export function discreteMarginCap(raw: number): 1 | 2 | 3 {
 export function marginForConviction(confidence: number, baseMarginPct = 3): 1 | 2 | 3 {
   const base = discreteMarginCap(baseMarginPct);
   const c = Number.isFinite(confidence) ? confidence : 0;
-  let want: 1 | 2 | 3 = 1;
-  if (c >= 92) want = 3;
-  else if (c >= 88) want = 2;
-  else want = 1;
+  // A++ (>=85) is 3%. Loss-streak phase can cap at 2%. Never 1% on a live A++.
+  const want: 1 | 2 | 3 = c >= 85 ? 3 : 2;
   return (want <= base ? want : base) as 1 | 2 | 3;
 }
 

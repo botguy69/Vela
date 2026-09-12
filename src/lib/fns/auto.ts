@@ -1964,27 +1964,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const beLocked = Boolean(pos.be_moved) && stopLooksBe;
       let mark = px;
       let reduced = false;
-      if (pos.status === "filled" && !beLocked && credsTp && entry > 0 && stop > 0) {
-        const fifteenNow = await getWeexKlines(pos.weex_symbol, "15m", 48).catch(() => []);
-        const hourlyNow = await getWeexKlines(pos.weex_symbol, "1h", 48).catch(() => []);
-        const struct = rules.structureStop(side, entry, 0, fifteenNow, hourlyNow);
-        const glued = side === "long" ? stop >= (mark || px) * 0.996 : stop <= (mark || px) * 1.004;
-        const stillValid =
-          side === "long" ? struct < (mark || px) && struct < entry : struct > (mark || px) && struct > entry;
-        if (glued && stillValid && struct > 0) {
-          pos.stop = struct;
-          stop = struct;
-          await ensureTakes(pos, notes, credsTp, struct);
-          await sql`
-            update auto_signals
-            set stop = ${struct}, updated_at = now()
-            where id = ${pos.id} and user_id = ${userId}
-          `;
-          notes.push(
-            `${pos.weex_symbol} SL → 1h structure ${struct.toFixed(4)} (was glued to last)`,
-          );
-        }
-      }
       if (pos.status === "filled" && !beLocked) {
         const credsForPos = await credsFrom(settings);
         if (credsForPos) {
