@@ -916,8 +916,24 @@ async function ensureTakes(
   const setAt = Number((/tps:(?:lock|set)@(\d+)/.exec(pos.weex_resp ?? "") ?? [])[1] ?? 0);
   const justSet = setAt > 0 && Date.now() - setAt < 2 * 60_000;
   // 1–4 working algos stay. Flicker was wipe+replace every tick when WEEX types didn't match.
-  if (!beMove && listed.length >= 1 && listed.length <= 4) {
+  const { slRows } = (await import("@/lib/takes")).classifyAlgoRows(listed, sideLc, mark);
+  if (!beMove && listed.length >= 1 && listed.length <= 4 && slRows.length >= 1) {
     notes.push(`${pos.weex_symbol} TP/SL stay (${listed.length} on WEEX)`);
+    return;
+  }
+  if (!beMove && listed.length >= 1 && listed.length <= 4 && slRows.length === 0 && stopPx > 0) {
+    notes.push(`${pos.weex_symbol} SL missing — put BE/SL back, leave TPs`);
+    const oidFix = `velasl${pos.id}${Date.now().toString(36)}`.slice(0, 36);
+    const qtyFix = formatWeexQty(liveQty, spec.quantityPrecision);
+    const slSent = await moveWeexStop(creds, {
+      symbol: pos.weex_symbol,
+      positionSide: side,
+      stop: formatWeexPx(stopPx, spec.pricePrecision),
+      quantity: qtyFix,
+      clientOid: oidFix,
+    });
+    if (!slSent.ok) notes.push(`${pos.weex_symbol} SL replace failed: ${slSent.error.slice(0, 80)}`);
+    else notes.push(`${pos.weex_symbol} SL back @ ${stopPx.toFixed(4)}`);
     return;
   }
   if (!beMove && listed.length === 0 && justSet) {
@@ -2001,33 +2017,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           notes.push(`${pos.weex_symbol} TP1 · SL → WEEX BE ${be.toFixed(4)}`);
         }
       } else if (pos.be_moved) {
-        if (reduced && !pos.tp1_hit) {
-          await sql`update auto_signals set tp1_hit = true, updated_at = now() where id = ${pos.id} and user_id = ${userId}`;
-        }
-        const credsSweep = await credsFrom(settings);
-        if (credsSweep) {
-          const { cancelWeexStops } = await import("@/lib/weex.server");
-          await cancelWeexStops(credsSweep, pos.weex_symbol, {
-            side,
-            mark: mark || px,
-            keepPx: n(pos.stop),
-          });
-        }
-        const hourly = await getWeexKlines(pos.weex_symbol, "1h", 40).catch(() => []);
-        const fifteenTrail = await getWeexKlines(pos.weex_symbol, "15m", 48).catch(() => []);
-        const next = rules.trailStop({ side, entry, stop, hourly, fifteen: fifteenTrail });
-        if (next != null) {
-          const creds = await credsFrom(settings);
-          if (creds) {
-            pos.stop = next;
-            await ensureTakes(pos, notes, creds, next);
-          }
-          await sql`
-            update auto_signals set stop = ${next}, updated_at = now()
-            where id = ${pos.id} and user_id = ${userId}
-          `;
-          notes.push(`${pos.weex_symbol} trail SL ${next.toFixed(4)}`);
-        }
+        // Leave the BE stop + runner TP on WEEX. Sweeping/trailing every tick deleted PEPE's SL.
       }
 
       const since = pos.filled_at ?? pos.created_at;
