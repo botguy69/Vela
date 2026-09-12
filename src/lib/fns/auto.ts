@@ -583,6 +583,14 @@ function coalesceWeexHit(
   return ranked[0] ?? null;
 }
 
+function weexSymKeys(sym: string): string[] {
+  const k = String(sym || "").replace(/_/g, "").toUpperCase();
+  const keys = new Set<string>([k]);
+  if (k.startsWith("1000") && k.endsWith("USDT")) keys.add(k.slice(4));
+  else if (k.endsWith("USDT") && !k.startsWith("1000")) keys.add(`1000${k}`);
+  return [...keys];
+}
+
 function matchWeexClose(
   row: {
     weex_symbol: string;
@@ -606,7 +614,8 @@ function matchWeexClose(
   const entry = n(row.fill_px) || n(row.entry);
   const orig = origQty(row);
   const cands = closes.filter((c) => {
-    if (c.symbol.replace(/_/g, "").toUpperCase() !== key) return false;
+    const ck = c.symbol.replace(/_/g, "").toUpperCase();
+    if (!weexSymKeys(key).includes(ck) && !weexSymKeys(ck).includes(key)) return false;
     if (c.side && c.side !== side) return false;
     const id = `${c.symbol}|${c.side ?? "?"}|${c.entry ?? 0}|${c.ts}|${c.pnl}`;
     if (used?.has(id)) return false;
@@ -1097,8 +1106,22 @@ async function closeFlatOnWeex(
     if (!hit) hit = matchWeexClose(pos, await listWeexClosedPnl(creds).catch(() => []));
     // No WEEX close print + no list row: leave DB live; do not guess-close (METIS fate).
     if (!hit) {
-      notes.push(`${pos.weex_symbol} qty 0 but no close print — kept live`);
-      continue;
+      const ageMs = Date.now() - new Date(pos.updated_at ?? pos.filled_at ?? pos.created_at).getTime();
+      if (ageMs < 8 * 60_000) {
+        notes.push(`${pos.weex_symbol} qty 0 but no close print — kept live`);
+        continue;
+      }
+      const lastPx = await getWeexLast(pos.weex_symbol).catch(() => n(pos.fill_px ?? pos.entry));
+      const e = n(pos.fill_px) || n(pos.entry);
+      const q = origQty(pos);
+      const est =
+        e > 0 && lastPx > 0 && q > 0
+          ? pos.side === "short"
+            ? (e - lastPx) * q
+            : (lastPx - e) * q
+          : 0;
+      hit = { pnl: est, closePx: lastPx, qty: q, ts: Date.now() };
+      notes.push(`${pos.weex_symbol} booked flat from last (no history row)`);
     }
     const last = await getWeexLast(pos.weex_symbol).catch(() => n(pos.fill_px ?? pos.entry));
     const book = applyWeexHit(hit, pos);
