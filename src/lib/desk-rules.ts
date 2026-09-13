@@ -993,56 +993,6 @@ export function mtfAllows(
     void e9;
     void knife;
   }
-  if (fourHour.length >= 16) {
-    const closed4 = closedCandles(fourHour, FOUR_H_MS);
-    const bars = closed4.length >= 16 ? closed4 : fourHour;
-    const c4 = bars.map((c) => c.close);
-    const rsi4 = rsiAt(c4, c4.length - 1);
-    const liveClose = fourHour[fourHour.length - 1]?.close ?? c4[c4.length - 1];
-    const midSrc =
-      liveClose != null && (bars.length === 0 || bars[bars.length - 1]!.close !== liveClose)
-        ? [...c4, liveClose]
-        : c4;
-    const mid = sma(midSrc, 21);
-    const last4 = liveClose;
-    const bar = bars[bars.length - 1]!;
-    const range = bar.high - bar.low;
-    if (side === "short") {
-      if (rsi4 != null && rsi4 <= 28) return { ok: false, why: "4h washout — no short" };
-      if (mid != null && last4 != null && last4 < mid * 0.96) {
-        return { ok: false, why: "4h extended — no chase short" };
-      }
-      if (range > 0 && bar.close > bar.open && (bar.close - bar.low) / range > 0.62) {
-        return { ok: false, why: "4h bounce bar — no short" };
-      }
-    } else {
-      if (rsi4 != null && rsi4 >= 72) return { ok: false, why: "4h blow-off — no long" };
-      if (mid != null && last4 != null && last4 > mid * 1.04) {
-        return { ok: false, why: "4h extended — no chase long" };
-      }
-      if (range > 0 && bar.close < bar.open && (bar.high - bar.close) / range > 0.62) {
-        return { ok: false, why: "4h rejection bar — no long" };
-      }
-    }
-  }
-  const late = /Failed bounce|lower high|failed range|double (top|bottom)/i.test(thesis);
-  if (late && hourly.length >= 16 && !fadeHigh && !fadeLow) {
-    const rsi1 = rsiAt(hourly.map((c) => c.close), hourly.length - 1);
-    const a = hourly[hourly.length - 1]!;
-    const b = hourly[hourly.length - 2];
-    const c = hourly[hourly.length - 3];
-    if (side === "short") {
-      if (rsi1 != null && rsi1 < 42) return { ok: false, why: "failed bounce late" };
-      if (b && c && a.high >= b.high && a.high >= c.high) {
-        return { ok: false, why: "no 1h lower high" };
-      }
-    } else {
-      if (rsi1 != null && rsi1 > 58) return { ok: false, why: "bounce late" };
-      if (b && c && a.low <= b.low && a.low <= c.low) {
-        return { ok: false, why: "no 1h higher low" };
-      }
-    }
-  }
   return { ok: true, why: "" };
 }
 
