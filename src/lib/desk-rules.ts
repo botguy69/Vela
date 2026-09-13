@@ -458,6 +458,8 @@ export const SAME_SIDE_EXTRA_MS = 50 * 60_000;
 
 /** 1st–2nd same-side: 20m. 3rd–4th same-side: 50m (was 4h — seats sat empty). */
 export function burstLocked(lastPlaceMs: number, now = Date.now(), liveBeta = 0): { ok: boolean; why: string } {
+  // Seat 2 same-side is allowed immediately. Burst only for 3rd+ same-side.
+  if (liveBeta < 2) return { ok: true, why: "" };
   if (!(lastPlaceMs > 0) || !Number.isFinite(lastPlaceMs)) return { ok: true, why: "" };
   const need = liveBeta >= BETA_WITH_BTC ? SAME_SIDE_EXTRA_MS : BURST_LOCK_MS;
   const left = need - (now - lastPlaceMs);
