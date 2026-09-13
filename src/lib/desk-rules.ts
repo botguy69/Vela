@@ -456,20 +456,15 @@ export const BETA_WITH_BTC = 2;
 export const BURST_LOCK_MS = 20 * 60_000;
 export const SAME_SIDE_EXTRA_MS = 50 * 60_000;
 
-/** 1st–2nd same-side: 20m. 3rd–4th same-side: 50m (was 4h — seats sat empty). */
+/** 1–2 same-side ok. Hard cap 2 (3rd same-side stacked losers 2026-09-13). */
 export function burstLocked(lastPlaceMs: number, now = Date.now(), liveBeta = 0): { ok: boolean; why: string } {
-  // Seat 2 same-side is allowed immediately. Burst only for 3rd+ same-side.
-  if (liveBeta < 2) return { ok: true, why: "" };
+  if (liveBeta >= 2) return { ok: false, why: "2 same-side cap" };
+  if (liveBeta < 1) return { ok: true, why: "" };
   if (!(lastPlaceMs > 0) || !Number.isFinite(lastPlaceMs)) return { ok: true, why: "" };
-  const need = liveBeta >= BETA_WITH_BTC ? SAME_SIDE_EXTRA_MS : BURST_LOCK_MS;
-  const left = need - (now - lastPlaceMs);
+  const left = BURST_LOCK_MS - (now - lastPlaceMs);
   if (left <= 0) return { ok: true, why: "" };
-  if (liveBeta >= BETA_WITH_BTC) {
-    const m = Math.max(1, Math.ceil(left / 60_000));
-    return { ok: false, why: `3rd/4th same-side wait ${m}m` };
-  }
   const m = Math.max(1, Math.ceil(left / 60_000));
-  return { ok: false, why: `burst lock ${m}m` };
+  return { ok: false, why: `2nd same-side wait ${m}m` };
 }
 
 /** Same side as the BTC 1h book = beta clone. */
@@ -499,12 +494,14 @@ export function betaCapAllows(
 }
 
 export function mixAllows(
-  _pickSide: Side,
+  pickSide: Side,
   _thesis: string,
   _conf: number,
   _heat: "long" | "short" | "chop",
-  _live: { side: string }[],
+  live: { side: string }[],
 ): { ok: boolean; why: string } {
+  const same = live.filter((p) => (p.side === "short" ? "short" : "long") === pickSide).length;
+  if (same >= 2) return { ok: false, why: "2 same-side cap" };
   return { ok: true, why: "coin 4h box" };
 }
 
