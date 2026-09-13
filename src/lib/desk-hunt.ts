@@ -51,12 +51,19 @@ export function composePass(
     .split("\n")
     .map((ln) => ln.trim())
     .filter((ln) =>
-      /^(Eying |Took |Skip |BTC |Book |One |A\+\+|Closed |Rebuild |Thinking |Scanned )/i.test(ln),
+      /^(Eying |Took |Skip |BTC |Book |One |A\+\+|Closed |Rebuild |Thinking |Scanned |Live |Closest |watch |MARKET |LIMIT )/i.test(ln),
     )
     .filter((ln) => !/^Hunting /i.test(ln))
     .filter((ln) => !/^Scanned \d+\/\d+\.?$/i.test(ln))
     .filter((ln) => !/trend cooling|80%\+|21h-mean|No dip-buy vs a dump/i.test(ln));
   const uniq = [...new Set([...liveLines.filter(Boolean), ...fromTick])];
+  if (!uniq.length) {
+    const raw = (note ?? "").trim();
+    if (raw && !/^Hunting /i.test(raw.split("\n")[0] ?? "") || raw.includes("\n")) {
+      const rest = raw.split("\n").map((ln) => ln.trim()).filter((ln) => ln && !/^Hunting /i.test(ln));
+      if (rest.length) return [head, ...rest].filter(Boolean).join("\n");
+    }
+  }
   return [head, ...uniq].filter(Boolean).join("\n");
 }
 
