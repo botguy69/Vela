@@ -3311,11 +3311,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const thinkLine = thinkBits.length
             ? `Thinking  ${thinkBits.join(" · ")}. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}.`
             : elite.length
-              ? `Thinking  no clean shot this bar. Closest: ${whyUniq.slice(0, 2).join(" · ") || "—"}. ${elite.length} A++ died on 4h/1h/15m. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}.`
-              : `Thinking  nothing at 85%+ structure this pass. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}.`;
+              ? `Thinking  no name in the 4h 38% box with 1h on the 21 this bar. Closest ${whyUniq.slice(0, 2).join(" · ") || "—"}. Scanned ${scannedN}/${TOP25_WEEX.length}.`
+              : `Thinking  nothing at 85%+ this pass. Scanned ${scannedN}/${TOP25_WEEX.length}.`;
           const skipBit = whyUniq.length
-            ? `Skip ${whyUniq.slice(0, 3).join(" · ")}${whyUniq.length > 3 ? ` · +${whyUniq.length - 3} more` : ""}`
-            : "Skip none";
+            ? `Closest miss ${whyUniq.slice(0, 2).join(" · ")}`
+            : "";
           const tookClean = tookLine && !/^Skip /i.test(tookLine) && tookLine !== veto ? tookLine : "";
           huntTape = [huntNow, eyeLine, thinkLine, skipBit, tookClean, compass.note].filter(Boolean).join("\n");
         }
