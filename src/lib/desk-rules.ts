@@ -453,7 +453,7 @@ export function boxLoc(fourHour: Candle[]): number {
 }
 
 export const BETA_WITH_BTC = 2;
-export const BURST_LOCK_MS = 20 * 60_000;
+export const BURST_LOCK_MS = 5 * 60_000;
 export const SAME_SIDE_EXTRA_MS = 50 * 60_000;
 
 /** 1–2 same-side ok. Hard cap 2 (3rd same-side stacked losers 2026-09-13). */
