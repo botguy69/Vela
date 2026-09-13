@@ -525,11 +525,13 @@ export function shouldLockBreakeven(opts: {
   already: boolean;
   reduced?: boolean;
   mfeR?: number;
+  tp1Hit?: boolean;
 }): boolean {
   if (opts.already || opts.entry <= 0 || !(opts.stop > 0)) return false;
   if (!(opts.last > 0)) return false;
   const tp1 = opts.targets[0];
   if (tp1 > 0 && (opts.side === "long" ? opts.last >= tp1 * 0.999 : opts.last <= tp1 * 1.001)) return true;
-  // Qty drop alone is not TP1 — WEEX size flicker was locking BE with no take on the book.
+  if (opts.tp1Hit) return true;
+  if (opts.reduced && (opts.mfeR ?? 0) >= 0.8) return true;
   return false;
 }

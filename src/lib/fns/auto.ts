@@ -2022,22 +2022,27 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           already: beLocked,
           reduced: reduced || hitTp1Now,
           mfeR: n(pos.mfe_r),
+          tp1Hit: Boolean(pos.tp1_hit) || hitTp1Now,
         })
       ) {
         const creds = await credsFrom(settings);
         const rawBe = await weexFeeBe(creds, pos.weex_symbol, side, entry);
         const be = feeBePx(side, entry, mark || px, rawBe);
-        if (be > 0 && creds) {
+        if (be > 0) {
           pos.stop = be;
           pos.be_moved = true;
           pos.tp1_hit = true;
-          await ensureTakes(pos, notes, creds, be);
+          if (creds) await ensureTakes(pos, notes, creds, be);
           await sql`
             update auto_signals
             set stop = ${be}, be_moved = true, tp1_hit = true, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
-          notes.push(`${pos.weex_symbol} TP1 · SL → WEEX BE ${be.toFixed(4)}`);
+          notes.push(
+            creds
+              ? `${pos.weex_symbol} TP1 · SL → WEEX BE ${be.toFixed(4)}`
+              : `${pos.weex_symbol} TP1 · BE ${be.toFixed(4)} saved — WEEX SL next tick`,
+          );
         }
       } else if (pos.be_moved) {
         // Leave the BE stop + runner TP on WEEX. Sweeping/trailing every tick deleted PEPE's SL.
@@ -2862,7 +2867,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               : `Closest (not through 4h+1h): ${closest || "—"}. ${elite.length} 1h A++ this pass, 0 cleared the box. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}. Seat ${atRiskN}/${AT_RISK} open.`;
           const aPlusLine = rebuild
             ? `REBUILD → $${REBUILD_EQUITY_USD}: 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd ${REBUILD_MARGIN_PCT}% after TP1→BE. A++ only.`
-            : "Closed 15m only. Longs bottom 38%. Shorts top 38% (top 45% if 2+ longs at-risk). Mid-box skip. 15m reject can short. 3rd same-side 50m.";
+            : "Closed 15m only. Longs bottom 38%. Shorts top 38% (top 45% if 2+ longs at-risk). Mid-box skip. 15m reject can short. Max 2 same-side. TP1 always BE.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -3024,6 +3029,18 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             `;
             if (pairClosed) {
               whyNot.push(`${tag} same pair just closed — 3h pause`);
+              continue;
+            }
+            const [sideStops] = await sql<{ n: number }>`
+              select count(*)::int as n from auto_signals
+              where user_id = ${userId}
+                and side = ${pick.side}
+                and status = ${"stopped"}
+                and coalesce(pnl, 0) < 0
+                and updated_at > now() - interval '3 hours'
+            `;
+            if ((sideStops?.n ?? 0) >= 2) {
+              whyNot.push(`${tag} ${pick.side} stopped twice in 3h — pause that side`);
               continue;
             }
             if (parked && parked.weex_symbol === pick.weexSymbol && parked.side === pick.side) {
