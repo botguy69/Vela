@@ -230,7 +230,7 @@ export function ltfTrigger(
   const vols = fifteen.slice(-20).map((c) => c.volume).filter((v) => v > 0).sort((x, y) => x - y);
   const medVol = vols[Math.floor(vols.length / 2)] ?? 0;
   const volR = medVol > 0 ? lastBar.volume / medVol : 1;
-  if (volR < 0.5) return { ok: false, wait: false, reason: "15m dry-up", pullback: null };
+  if (volR < 0.5 && !atExtreme) return { ok: false, wait: false, reason: "15m dry-up", pullback: null };
   const chaseVol =
     volR >= 2.2 &&
     ((side === "long" && lastBar.close > lastBar.open && last > e21 + 0.35 * a) ||
