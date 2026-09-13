@@ -3311,7 +3311,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           const thinkLine = thinkBits.length
             ? `Thinking  ${thinkBits.join(" · ")}. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}.`
             : elite.length
-              ? `Thinking  no name in the 4h 38% box with 1h on the 21 this bar. Closest ${whyUniq.slice(0, 2).join(" · ") || "—"}. Scanned ${scannedN}/${TOP25_WEEX.length}.`
+              ? `Thinking  no name in the 4h 38% box this bar. Closest ${whyUniq.slice(0, 2).join(" · ") || "—"}. Scanned ${scannedN}/${TOP25_WEEX.length}.`
               : `Thinking  nothing at 85%+ this pass. Scanned ${scannedN}/${TOP25_WEEX.length}.`;
           const skipBit = whyUniq.length
             ? `Closest miss ${whyUniq.slice(0, 2).join(" · ")}`

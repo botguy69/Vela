@@ -977,22 +977,10 @@ export function mtfAllows(
   box?: { longMax?: number; shortMin?: number },
 ): { ok: boolean; why: string } {
   if (!htfAllows(side, fourHour, heat, fade, thesis, box)) return { ok: false, why: "4h reject" };
-  const knife = /washout|Oversold|Overbought/i.test(thesis);
-  const fadeHigh = false;
-  const fadeLow = false;
+  void hourly;
+  void thesis;
+  void heat;
   void fade;
-  if (hourly.length >= 24) {
-    const closes = hourly.map((c) => c.close);
-    const e9 = ema(closes, 9);
-    const e21 = ema(closes, 21);
-    const last = closes[closes.length - 1];
-    if (e21 != null && last != null && !fadeHigh && !fadeLow) {
-      if (side === "long" && last < e21 * 0.997) return { ok: false, why: "1h reject" };
-      if (side === "short" && last > e21 * 1.003) return { ok: false, why: "1h reject" };
-    }
-    void e9;
-    void knife;
-  }
   return { ok: true, why: "" };
 }
 
