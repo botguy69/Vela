@@ -461,8 +461,16 @@ export const SAME_SIDE_EXTRA_MS = 50 * 60_000;
 
 /** 1st–2nd same-side: 20m. 3rd–4th same-side: 50m (was 4h — seats sat empty). */
 export function burstLocked(lastPlaceMs: number, now = Date.now(), liveBeta = 0): { ok: boolean; why: string } {
-  void lastPlaceMs; void now; void liveBeta;
-  return { ok: true, why: "" };
+  if (!(lastPlaceMs > 0) || !Number.isFinite(lastPlaceMs)) return { ok: true, why: "" };
+  const need = liveBeta >= BETA_WITH_BTC ? SAME_SIDE_EXTRA_MS : BURST_LOCK_MS;
+  const left = need - (now - lastPlaceMs);
+  if (left <= 0) return { ok: true, why: "" };
+  if (liveBeta >= BETA_WITH_BTC) {
+    const m = Math.max(1, Math.ceil(left / 60_000));
+    return { ok: false, why: `3rd/4th same-side wait ${m}m` };
+  }
+  const m = Math.max(1, Math.ceil(left / 60_000));
+  return { ok: false, why: `burst lock ${m}m` };
 }
 
 /** Same side as the BTC 1h book = beta clone. */
