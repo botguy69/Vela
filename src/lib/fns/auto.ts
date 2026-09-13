@@ -3284,7 +3284,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
           const at2 = riskL + riskS;
           const be2 = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3, scanned: scannedN, universe: TOP25_WEEX.length, missed: missedN });
+          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3 });
           const whyUniq: string[] = [];
           const seenWhy = new Set<string>();
           for (const w of whyNot) {
