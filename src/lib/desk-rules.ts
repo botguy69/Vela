@@ -990,16 +990,8 @@ export function mtfAllows(
       if (side === "long" && last < e21 * 0.997) return { ok: false, why: "1h reject" };
       if (side === "short" && last > e21 * 1.003) return { ok: false, why: "1h reject" };
     }
-    if (!knife && e9 != null && e21 != null && !fadeHigh && !fadeLow) {
-      if (side === "long" && e9 < e21 * 0.997) return { ok: false, why: "1h momentum down" };
-      if (side === "short" && e9 > e21 * 1.003) return { ok: false, why: "1h momentum up" };
-    }
-    const rsi1 = rsiAt(closes, closes.length - 1);
-    const rsiAgo = rsiAt(closes, Math.max(15, closes.length - 4));
-    if (!knife && rsi1 != null && rsiAgo != null && !fadeHigh && !fadeLow) {
-      if (side === "long" && rsi1 < rsiAgo - 6 && rsi1 < 48) return { ok: false, why: "1h selling impulse" };
-      if (side === "short" && rsi1 > rsiAgo + 6 && rsi1 > 52) return { ok: false, why: "1h buying impulse" };
-    }
+    void e9;
+    void knife;
   }
   if (fourHour.length >= 16) {
     const closed4 = closedCandles(fourHour, FOUR_H_MS);
