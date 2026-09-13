@@ -2921,10 +2921,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             if (batch.some((b) => b.sized.weexSymbol === pick.weexSymbol)) continue;
             const coin15raw = await getWeexKlines(pick.weexSymbol, "15m", 210).catch(() => []);
-            const coin15 = rules.closedCandles(coin15raw, 15 * 60 * 1000);
-            const closed15 = rules.fifteenEntryReady(coin15);
-            if (!closed15.ok) {
-              whyNot.push(`${tag} ${closed15.why}`);
+            const coin15 = coin15raw.length >= 24 ? coin15raw : rules.closedCandles(coin15raw, 15 * 60 * 1000);
+            if (coin15.length < 24) {
+              whyNot.push(`${tag} thin 15m`);
               continue;
             }
             const h4 = await getWeexFourHour(pick.weexSymbol).catch(() => []);
@@ -3115,7 +3114,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               if (h4.length < 24) continue;
               const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
               const coin15raw = await getWeexKlines(pick.weexSymbol, "15m", 210).catch(() => []);
-              const coin15 = rules.closedCandles(coin15raw, 15 * 60 * 1000);
+              const coin15 = coin15raw.length >= 24 ? coin15raw : rules.closedCandles(coin15raw, 15 * 60 * 1000);
               const timed0 = rules.withLtfEntry(pick, undefined);
               const stopped = {
                 ...timed0,
