@@ -2801,7 +2801,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const hour = rules.closedCandles(books[s.weexSymbol] ?? [], 60 * 60 * 1000);
-            const boxS = { longMax: 0.38, shortMin: riskL >= 2 ? 0.55 : 0.62 };
+            const boxS = { longMax: 0.45, shortMin: 0.55 };
             const mtf = rules.mtfAllows(s.side, h4, hour, s.thesis ?? "", tape.side, null, boxS);
             if (!mtf.ok) {
               whyNot.push(`${tag} ${mtf.why}`);
@@ -2921,7 +2921,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const hourPick = rules.closedCandles(books[pick.weexSymbol] ?? [], 60 * 60 * 1000);
-            const boxP = { longMax: 0.38, shortMin: riskL >= 2 ? 0.55 : 0.62 };
+            const boxP = { longMax: 0.45, shortMin: 0.55 };
             const mtfPick = rules.mtfAllows(pick.side, h4, hourPick, pick.thesis ?? "", tape.side, null, boxP);
             if (!mtfPick.ok) {
               veto = `${pick.weexSymbol} ${pick.side} ${mtfPick.why}`;

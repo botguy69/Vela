@@ -89,8 +89,8 @@ export function htfAllows(
   const span = sh - sl;
   if (span > 0) {
     const loc = (px - sl) / span;
-    const longMax = box?.longMax ?? 0.38;
-    const shortMin = box?.shortMin ?? 0.62;
+    const longMax = box?.longMax ?? 0.45;
+    const shortMin = box?.shortMin ?? 0.55;
     if (side === "long" && fade !== "low" && loc > longMax) return false;
     if (side === "short" && fade !== "high" && loc < shortMin) return false;
   }
@@ -461,16 +461,8 @@ export const SAME_SIDE_EXTRA_MS = 50 * 60_000;
 
 /** 1st–2nd same-side: 20m. 3rd–4th same-side: 50m (was 4h — seats sat empty). */
 export function burstLocked(lastPlaceMs: number, now = Date.now(), liveBeta = 0): { ok: boolean; why: string } {
-  if (!(lastPlaceMs > 0) || !Number.isFinite(lastPlaceMs)) return { ok: true, why: "" };
-  const need = liveBeta >= BETA_WITH_BTC ? SAME_SIDE_EXTRA_MS : BURST_LOCK_MS;
-  const left = need - (now - lastPlaceMs);
-  if (left <= 0) return { ok: true, why: "" };
-  if (liveBeta >= BETA_WITH_BTC) {
-    const m = Math.max(1, Math.ceil(left / 60_000));
-    return { ok: false, why: `3rd/4th same-side wait ${m}m` };
-  }
-  const m = Math.max(1, Math.ceil(left / 60_000));
-  return { ok: false, why: `burst lock ${m}m` };
+  void lastPlaceMs; void now; void liveBeta;
+  return { ok: true, why: "" };
 }
 
 /** Same side as the BTC 1h book = beta clone. */
