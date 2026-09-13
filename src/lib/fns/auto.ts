@@ -2783,7 +2783,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             where user_id = ${userId}
               and status in ('stopped','skipped')
               and coalesce(pnl, 0) < 0
-              and updated_at > now() - interval '6 hours'
+              and updated_at > now() - interval '30 minutes'
           `;
           const dark = new Set(recentLoss.map((r) => r.weex_symbol));
           const whyNot: string[] = [];
@@ -2867,7 +2867,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               : `Closest (not through 4h+1h): ${closest || "—"}. ${elite.length} 1h A++ this pass, 0 cleared the box. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}. Seat ${atRiskN}/${AT_RISK} open.`;
           const aPlusLine = rebuild
             ? `REBUILD → $${REBUILD_EQUITY_USD}: 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd ${REBUILD_MARGIN_PCT}% after TP1→BE. A++ only.`
-            : "Closed 15m only. Longs bottom 38%. Shorts top 38% (top 45% if 2+ longs at-risk). Mid-box skip. 15m reject can short. 2 at-risk same-side max. BE frees a seat. No whole-side pause. TP1 always BE.";
+            : "Closed 15m only. Longs bottom 38%. Shorts top 38% (top 45% if 2+ longs at-risk). Mid-box skip. 15m reject can short. 2 at-risk same-side. Rotate: 30m after loss, 15m after close, 5m 2nd-seat breath. TP1 always BE.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -3010,7 +3010,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                 and weex_symbol = ${pick.weexSymbol}
                 and status in ('stopped','skipped')
                 and coalesce(pnl, 0) < 0
-                and updated_at > now() - interval '6 hours'
+                and updated_at > now() - interval '30 minutes'
               limit 1
             `;
             if (pairLoss) {
@@ -3024,7 +3024,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                 and status in ('stopped','targeted','skipped')
                 and filled_at is not null
                 and abs(coalesce(pnl, 0)) > 0.05
-                and updated_at > now() - interval '3 hours'
+                and updated_at > now() - interval '15 minutes'
               limit 1
             `;
             if (pairClosed) {
