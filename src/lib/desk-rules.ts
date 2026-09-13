@@ -89,8 +89,8 @@ export function htfAllows(
   const span = sh - sl;
   if (span > 0) {
     const loc = (px - sl) / span;
-    const longMax = box?.longMax ?? 0.45;
-    const shortMin = box?.shortMin ?? 0.55;
+    const longMax = box?.longMax ?? 0.38;
+    const shortMin = box?.shortMin ?? 0.62;
     if (side === "long" && fade !== "low" && loc > longMax) return false;
     if (side === "short" && fade !== "high" && loc < shortMin) return false;
   }
