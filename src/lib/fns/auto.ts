@@ -2535,11 +2535,20 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const beNLive =
       liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length ||
       stillOpen.filter((s) => Boolean(s.be_moved) && Boolean(s.tp1_hit)).length;
-    if (riskL + riskS === 0 && seatN > 0) {
-      riskL = stillOpen.filter((s) => s.side !== "short" && !(s.be_moved && s.tp1_hit)).length;
-      riskS = stillOpen.filter((s) => s.side === "short" && !(s.be_moved && s.tp1_hit)).length;
+    // At-risk = WEEX live not-BE + working limits not already on the book.
+    // Ghosts / proposed / old DB rows must not fill the 4 and block ticket 2.
+    const liveAtRisk = liveN.filter((p) => !beFree.has(keyOf(p.symbol))).length;
+    const workingExtra = stillOpen.filter((s) => {
+      if (s.status !== "working") return false;
+      if (flattened.has(s.weex_symbol)) return false;
+      const k = keyOf(s.weex_symbol);
+      return !liveN.some((p) => keyOf(p.symbol) === k);
+    }).length;
+    if (liveN.length === 0 && workingExtra > 0) {
+      riskL = stillOpen.filter((s) => s.status === "working" && s.side !== "short").length;
+      riskS = stillOpen.filter((s) => s.status === "working" && s.side === "short").length;
     }
-    let atRiskN = Math.max(riskL + riskS, seatN - beNLive);
+    let atRiskN = liveAtRisk + workingExtra;
     // Soft+empty WEEX: ignore only phantom working/proposed DB seats — filled DB tickets still count as at-risk.
     if (rebuild && !bookReliable && liveN.length === 0) {
       const filledDb = stillOpenRaw.filter((s) => s.status === "filled" && !flattened.has(s.weex_symbol));
@@ -2560,6 +2569,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     // Force path OFF for solo/offline desk — filters only, never clock/challenge fills.
     const challengeForce = false;
     const roomN = blocked ? 0 : 1;
+    if (!blocked && liveAtRisk >= 1 && atRiskN < AT_RISK) {
+      notes.push(`Seat open for ticket 2+ (${atRiskN}/${AT_RISK} at-risk). TAO-style live does not freeze the hunt.`);
+    }
     if (rebuild) notes.push(`Rebuild — 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd after TP1→BE; until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
