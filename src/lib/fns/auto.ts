@@ -324,7 +324,7 @@ async function closedStats(
     if (!(unit > 0.05)) return null;
     return n(r.pnl) / unit;
   };
-  const window = uniq.filter((r) => fillAt(r) >= tFrom - 2000).slice(-20);
+  const window = uniq.filter((r) => fillAt(r) >= tFrom - 2000);
   const closed = window.length;
   const isFullWin = (r: (typeof window)[number]) => {
     const rr = rOf(r);
