@@ -2883,6 +2883,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               const key = p.symbol.replace(/_/g, "").toUpperCase();
               return s === side && !beFree.has(key);
             }).length;
+          const liveBeta = tape.side === "chop" ? 0 : liveSame(tape.side);
           for (let pick of pool) {
             const tag = `${pick.weexSymbol.replace("USDT", "")} ${pick.side} ${Math.round(pick.confidence ?? pick.score)}%`;
             const pickSide = pick.side === "short" ? "short" : "long";
