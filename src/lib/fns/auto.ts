@@ -2867,7 +2867,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               : `Closest (not through 4h+1h): ${closest || "—"}. ${elite.length} 1h A++ this pass, 0 cleared the box. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}. Seat ${atRiskN}/${AT_RISK} open.`;
           const aPlusLine = rebuild
             ? `REBUILD → $${REBUILD_EQUITY_USD}: 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd ${REBUILD_MARGIN_PCT}% after TP1→BE. A++ only.`
-            : "Closed 15m only. Longs bottom 38%. Shorts top 38% (top 45% if 2+ longs at-risk). Mid-box skip. 15m reject can short. 2 at-risk same-side max. BE frees a seat. TP1 always BE.";
+            : "Closed 15m only. Longs bottom 38%. Shorts top 38% (top 45% if 2+ longs at-risk). Mid-box skip. 15m reject can short. 2 at-risk same-side max. BE frees a seat. No whole-side pause. TP1 always BE.";
           let veto = whyNot[0] ?? "No A++ this pass. Slots stay empty.";
           const ready: {
             sized: NonNullable<ReturnType<typeof sizeSetup>>;
@@ -3029,18 +3029,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             `;
             if (pairClosed) {
               whyNot.push(`${tag} same pair just closed — 3h pause`);
-              continue;
-            }
-            const [sideStops] = await sql<{ n: number }>`
-              select count(*)::int as n from auto_signals
-              where user_id = ${userId}
-                and side = ${pick.side}
-                and status = ${"stopped"}
-                and coalesce(pnl, 0) < 0
-                and updated_at > now() - interval '3 hours'
-            `;
-            if ((sideStops?.n ?? 0) >= 2) {
-              whyNot.push(`${tag} ${pick.side} stopped twice in 3h — pause that side`);
               continue;
             }
             if (parked && parked.weex_symbol === pick.weexSymbol && parked.side === pick.side) {
