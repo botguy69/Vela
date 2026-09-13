@@ -225,6 +225,19 @@ export function ltfTrigger(
   if (side === "short" && closePos > 0.58) {
     return { ok: false, wait: false, reason: "15m wick not confirmed", pullback: null };
   }
+  const swing = fifteen.slice(-8);
+  const swingHi = Math.max(...swing.map((c) => c.high));
+  const swingLo = Math.min(...swing.map((c) => c.low));
+  const swingRng = swingHi - swingLo;
+  if (swingRng > 0) {
+    const swingPos = (lastBar.close - swingLo) / swingRng;
+    if (side === "long" && swingPos > 0.42) {
+      return { ok: false, wait: false, reason: "15m mid-swing — no long", pullback: null };
+    }
+    if (side === "short" && swingPos < 0.58) {
+      return { ok: false, wait: false, reason: "15m mid-swing — no short", pullback: null };
+    }
+  }
   const trs: number[] = [];
   for (let i = Math.max(1, fifteen.length - 50); i < fifteen.length; i += 1) {
     const c = fifteen[i]!;
