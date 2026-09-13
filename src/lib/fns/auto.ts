@@ -3304,8 +3304,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             .filter((s) => !readySym.has(s.weexSymbol))
             .slice(0, 3)
             .map((s) => {
-              const kind = rules.aPlusKind(s.thesis ?? "") ?? "";
-              return `watch ${s.side} ${s.weexSymbol.replace("USDT", "")} ${Math.round(s.confidence ?? s.score)}%${kind ? ` ${kind}` : ""} — next 15m close`;
+              const tag = `${s.weexSymbol.replace("USDT", "")} ${s.side}`;
+              const hit = whyUniq.find((w) => w.toLowerCase().includes(tag.toLowerCase())) ?? "15m / book / size";
+              return `watch ${s.side} ${s.weexSymbol.replace("USDT", "")} ${Math.round(s.confidence ?? s.score)}% — ${hit}`;
             });
           const thinkBits = [...readyThink, ...watchThink].slice(0, 4);
           const thinkLine = thinkBits.length

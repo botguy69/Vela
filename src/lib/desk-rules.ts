@@ -236,6 +236,11 @@ export function ltfTrigger(
     ((side === "long" && lastBar.close > lastBar.open && last > e21 + 0.35 * a) ||
       (side === "short" && lastBar.close < lastBar.open && last < e21 - 0.35 * a));
   if (chaseVol) return { ok: false, wait: false, reason: "15m climax chase", pullback: null };
+  // 4h box already passed. Do not let 15m VWAP / "ripping" veto a name at the extreme.
+  if (atExtreme) {
+    const meanX = e9 != null && e21 != null ? (e9 + e21) / 2 : last;
+    return { ok: true, wait: false, reason: "4h extreme — 15m live", pullback: meanX };
+  }
   let fails = 0;
   for (const c of fifteen.slice(-8)) {
     const tagged = Math.abs(c.close - e21) <= 0.2 * a;
