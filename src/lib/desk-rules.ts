@@ -458,7 +458,7 @@ export const SAME_SIDE_EXTRA_MS = 50 * 60_000;
 
 /** 1–2 same-side ok. Hard cap 2 (3rd same-side stacked losers 2026-09-13). */
 export function burstLocked(lastPlaceMs: number, now = Date.now(), liveBeta = 0): { ok: boolean; why: string } {
-  if (liveBeta >= 1) return { ok: false, why: "no same-side stack" };
+  if (liveBeta >= 2) return { ok: false, why: "2 at-risk same-side cap" };
   if (liveBeta < 1) return { ok: true, why: "" };
   if (!(lastPlaceMs > 0) || !Number.isFinite(lastPlaceMs)) return { ok: true, why: "" };
   const left = BURST_LOCK_MS - (now - lastPlaceMs);
@@ -501,7 +501,7 @@ export function mixAllows(
   live: { side: string }[],
 ): { ok: boolean; why: string } {
   const same = live.filter((p) => (p.side === "short" ? "short" : "long") === pickSide).length;
-  if (same >= 1) return { ok: false, why: "no same-side stack" };
+  if (same >= 2) return { ok: false, why: "2 same-side cap" };
   return { ok: true, why: "coin 4h box" };
 }
 
