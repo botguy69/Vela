@@ -217,6 +217,14 @@ export function ltfTrigger(
     return { ok: false, wait: false, reason: "thin 15m", pullback: null };
   }
   const lastBar = fifteen[fifteen.length - 1]!;
+  const rngBar = lastBar.high - lastBar.low || 1;
+  const closePos = (lastBar.close - lastBar.low) / rngBar;
+  if (side === "long" && closePos < 0.42) {
+    return { ok: false, wait: false, reason: "15m wick not confirmed", pullback: null };
+  }
+  if (side === "short" && closePos > 0.58) {
+    return { ok: false, wait: false, reason: "15m wick not confirmed", pullback: null };
+  }
   const trs: number[] = [];
   for (let i = Math.max(1, fifteen.length - 50); i < fifteen.length; i += 1) {
     const c = fifteen[i]!;
@@ -965,6 +973,71 @@ export function setupTag(thesis: string): string {
  * 4h trend + S/R. 1h EMA 9/21 + RSI momentum. No chase / blow-off.
  * 15m + VWAP is ltfTrigger.
  */
+
+/** 1h permission: structure + reclaim, not a 0.3% EMA wall. */
+export function hourAllows(
+  side: Side,
+  hourly: Candle[],
+  knife = false,
+): { ok: boolean; why: string } {
+  if (hourly.length < 24) return { ok: true, why: "" };
+  const bars = hourly;
+  const closes = bars.map((c) => c.close);
+  const e9 = ema(closes, 9);
+  const e21 = ema(closes, 21);
+  const last = closes[closes.length - 1];
+  const lastBar = bars[bars.length - 1]!;
+  const prev = bars[bars.length - 2];
+  const prev2 = bars[bars.length - 3];
+  if (e9 == null || e21 == null || last == null) return { ok: true, why: "" };
+  const a = atr(bars, 14) ?? Math.max(1e-9, last * 0.008);
+  const throughDown =
+    lastBar.close < lastBar.open &&
+    lastBar.open >= e21 &&
+    lastBar.close < e21 - 0.15 * a;
+  const throughUp =
+    lastBar.close > lastBar.open &&
+    lastBar.open <= e21 &&
+    lastBar.close > e21 + 0.15 * a;
+  const reclaimLong =
+    lastBar.close >= e21 - 0.05 * a &&
+    lastBar.low <= e21 + 0.15 * a &&
+    lastBar.close >= lastBar.open;
+  const reclaimShort =
+    lastBar.close <= e21 + 0.05 * a &&
+    lastBar.high >= e21 - 0.15 * a &&
+    lastBar.close <= lastBar.open;
+  const hl =
+    prev != null &&
+    prev2 != null &&
+    lastBar.low >= Math.min(prev.low, prev2.low) * 0.999;
+  const lh =
+    prev != null &&
+    prev2 != null &&
+    lastBar.high <= Math.max(prev.high, prev2.high) * 1.001;
+  const slopeUp = e9 >= e21 * 0.999;
+  const slopeDn = e9 <= e21 * 1.001;
+  const rsi1 = rsiAt(closes, closes.length - 1);
+  const rsiAgo = rsiAt(closes, Math.max(15, closes.length - 4));
+
+  if (side === "long") {
+    if (throughDown && !reclaimLong) return { ok: false, why: "1h lost the 21" };
+    if (last < e21 - 1.15 * a && !reclaimLong && !knife) return { ok: false, why: "1h still under" };
+    if (slopeDn && !hl && last < e21 && !reclaimLong && !knife) return { ok: false, why: "1h structure down" };
+    if (!knife && rsi1 != null && rsiAgo != null && rsi1 < rsiAgo - 6 && rsi1 < 48 && last < e21 && !reclaimLong) {
+      return { ok: false, why: "1h selling impulse" };
+    }
+    return { ok: true, why: reclaimLong ? "1h reclaim" : "1h held" };
+  }
+  if (throughUp && !reclaimShort) return { ok: false, why: "1h took the 21" };
+  if (last > e21 + 1.15 * a && !reclaimShort && !knife) return { ok: false, why: "1h still over" };
+  if (slopeUp && !lh && last > e21 && !reclaimShort && !knife) return { ok: false, why: "1h structure up" };
+  if (!knife && rsi1 != null && rsiAgo != null && rsi1 > rsiAgo + 6 && rsi1 > 52 && last > e21 && !reclaimShort) {
+    return { ok: false, why: "1h buying impulse" };
+  }
+  return { ok: true, why: reclaimShort ? "1h reject held" : "1h held" };
+}
+
 export function mtfAllows(
   side: Side,
   fourHour: Candle[],
@@ -980,24 +1053,8 @@ export function mtfAllows(
   const fadeLow = false;
   void fade;
   if (hourly.length >= 24) {
-    const closes = hourly.map((c) => c.close);
-    const e9 = ema(closes, 9);
-    const e21 = ema(closes, 21);
-    const last = closes[closes.length - 1];
-    if (e21 != null && last != null && !fadeHigh && !fadeLow) {
-      if (side === "long" && last < e21 * 0.997) return { ok: false, why: "1h reject" };
-      if (side === "short" && last > e21 * 1.003) return { ok: false, why: "1h reject" };
-    }
-    if (!knife && e9 != null && e21 != null && !fadeHigh && !fadeLow) {
-      if (side === "long" && e9 < e21 * 0.997) return { ok: false, why: "1h momentum down" };
-      if (side === "short" && e9 > e21 * 1.003) return { ok: false, why: "1h momentum up" };
-    }
-    const rsi1 = rsiAt(closes, closes.length - 1);
-    const rsiAgo = rsiAt(closes, Math.max(15, closes.length - 4));
-    if (!knife && rsi1 != null && rsiAgo != null && !fadeHigh && !fadeLow) {
-      if (side === "long" && rsi1 < rsiAgo - 6 && rsi1 < 48) return { ok: false, why: "1h selling impulse" };
-      if (side === "short" && rsi1 > rsiAgo + 6 && rsi1 > 52) return { ok: false, why: "1h buying impulse" };
-    }
+    const hour = hourAllows(side, hourly, knife);
+    if (!hour.ok) return hour;
   }
   if (fourHour.length >= 16) {
     const closed4 = closedCandles(fourHour, FOUR_H_MS);
