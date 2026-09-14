@@ -204,8 +204,9 @@ export function planTakes(input: {
         : entryPx * 0.008;
   const t1Guess = entryPx > 0 && r1 > 0 ? (side === "short" ? entryPx - r1 : entryPx + r1) : planned[0] ?? 0;
   const throughTp1 = mark > 0 && t1Guess > 0 && taggedTake(side, mark, t1Guess);
+  // Discretionary BE (0.5R) is not TP1. Don't drop the near take just because SL moved.
   const afterTp1 =
-    Boolean(tp1Hit) || Boolean(beMoved) || throughTp1 || (input.origQty > 0 && liveQty < input.origQty * 0.85);
+    Boolean(tp1Hit) || throughTp1 || (input.origQty > 0 && liveQty < input.origQty * 0.85);
 
   const tick = 10 ** -Math.max(0, pricePrecision);
   const tps: number[] = [];
