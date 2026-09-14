@@ -1778,7 +1778,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       getApiTradingSymbols,
     } = await import("@/lib/weex-market.server");
     const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, taggedTake } = await import("@/lib/ta");
-    const { sizeSetup, marginForConviction, deskMarginPct, inRebuildMode, REBUILD_EQUITY_USD, REBUILD_MARGIN_PCT } = await import("@/lib/risk");
+    const { sizeSetup, marginForConviction, deskMarginPct, concentrateMargin, seatUnits, inRebuildMode, REBUILD_EQUITY_USD, REBUILD_MARGIN_PCT } = await import("@/lib/risk");
     const { coinByWeex, SKIP_WEEX, TOP25_WEEX } = await import("@/lib/universe");
     const rules = await import("@/lib/desk-rules");
     const sql = await getSql();
@@ -2520,7 +2520,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const rebuild = inRebuildMode(equity);
     // Rebuild: 1 at-risk 15% seat; after TP1→BE that seat frees at-risk → second 15% A++ allowed (LIVE_CAP 2).
     const LIVE_CAP = rebuild ? 2 : 6;
-    const AT_RISK = rebuild ? 1 : 3;
+    const AT_RISK = rebuild ? 1 : 4;
     // TODO(desk-place): extract placeTicket into src/lib/desk-place.ts when clean.
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 85, note: "A++ · engulf/double/pin/climax. Failed-bounce + continuation off." };
@@ -2606,15 +2606,29 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         atRiskN = Math.max(atRiskN, riskL + riskS, filledDb.length);
       }
     }
+    const unitOf = (s: { risk_usd?: number | null; qty?: number | null; entry?: number | null; fill_px?: number | null; leverage?: number | null }) => {
+      const riskUsd = n(s.risk_usd);
+      if (equity > 0 && riskUsd > 0) return seatUnits((riskUsd / equity) * 100);
+      const e = n(s.fill_px) || n(s.entry);
+      const lev = Math.max(1, n(s.leverage) || 1);
+      const q = n(s.qty);
+      if (equity > 0 && e > 0 && q > 0) return seatUnits(((e * q) / lev / equity) * 100);
+      return 1;
+    };
+    const usedUnits = Math.min(
+      AT_RISK,
+      atRisk.reduce((sum, s) => sum + unitOf(s), 0) || atRiskN,
+    );
+    const freeUnits = Math.max(0, AT_RISK - usedUnits);
     const blocked =
       bookUnread ||
       liveN.length >= LIVE_CAP ||
-      atRiskN >= AT_RISK;
+      usedUnits >= AT_RISK;
     // Force path OFF for solo/offline desk — filters only, never clock/challenge fills.
     const challengeForce = false;
     const roomN = blocked ? 0 : 1;
     if (!blocked && liveAtRisk >= 1 && atRiskN < AT_RISK) {
-      notes.push(`Seat open for ticket 2+ (${atRiskN}/${AT_RISK} at-risk). TAO-style live does not freeze the hunt.`);
+      notes.push(`Seat open (${usedUnits}/${AT_RISK} units · ${freeUnits} free). Concentrate 6/9/12% when A++.`);
     }
     if (rebuild) notes.push(`Rebuild — 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd after TP1→BE; until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed
@@ -3108,12 +3122,15 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             const timed = trig.wait ? { ...timed1, entryType: "limit" as const } : timed1;
             // Rebuild (<$500): 15% one-at-a-time. Else conviction 1/2/3.
-            const sz = sizeSetup(
-              timed,
-              equity,
-              deskMarginPct(timed.confidence ?? conf, equity, corrected.marginPct),
-              spec.maxLeverage,
-            );
+            const wantPct =
+              freeUnits >= 2
+                ? concentrateMargin(timed.confidence ?? conf, freeUnits)
+                : deskMarginPct(timed.confidence ?? conf, equity, corrected.marginPct);
+            if (!(wantPct > 0) || seatUnits(wantPct) > freeUnits) {
+              whyNot.unshift(`${tag} no seat units left`);
+              continue;
+            }
+            const sz = sizeSetup(timed, equity, wantPct, spec.maxLeverage);
             if (!sz) {
               whyNot.unshift(`${tag} size rejected (min notional / stop too wide / max lev < 75)`);
               continue;
@@ -3185,12 +3202,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                   ? { ...stopped, target: planned.target, targets: planned.targets, rr: planned.rr }
                   : stopped;
               const spec = await specFor(coinByWeex(pick.weexSymbol));
-              const sz = sizeSetup(
-                timed1,
-                equity,
-                deskMarginPct(conf, equity, corrected.marginPct),
-                spec.maxLeverage,
-              );
+              const wantPct =
+                freeUnits >= 2
+                  ? concentrateMargin(conf, freeUnits)
+                  : deskMarginPct(conf, equity, corrected.marginPct);
+              if (!(wantPct > 0) || seatUnits(wantPct) > freeUnits) continue;
+              const sz = sizeSetup(timed1, equity, wantPct, spec.maxLeverage);
               if (!sz) {
                 whyNot.push(`${tag} force size rejected`);
                 continue;

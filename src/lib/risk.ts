@@ -10,10 +10,10 @@ export type SizedSetup = RawSetup & {
   stopAccountPct: number;
 };
 
-/** Solo desk: hard-cap margin at 3% (rebuild 15% window ended). */
+/** Solo desk: 3% seat unit. Concentrated A++ may take 6/9/12% (2/3/4 seats). */
 export function clampRiskPct(raw: number): number {
   if (!Number.isFinite(raw)) return 3;
-  return Math.min(3, Math.max(1, raw));
+  return Math.min(12, Math.max(1, raw));
 }
 
 /** Snap to discretionary 1 / 2 / 3% of book. Cap 3%. */
@@ -33,6 +33,23 @@ export function marginForConviction(confidence: number, baseMarginPct = 3): 1 | 
   return (want <= base ? want : base) as 1 | 2 | 3;
 }
 
+/** Seat units burned by a margin %. 3→1, 6→2, 9→3, 12→4. */
+export function seatUnits(marginPct: number): number {
+  if (!Number.isFinite(marginPct) || marginPct <= 0) return 1;
+  return Math.max(1, Math.round(marginPct / 3));
+}
+
+/** Concentrate into fewer seats when the book has room. */
+export function concentrateMargin(conf: number, freeUnits: number): number {
+  const c = Number.isFinite(conf) ? conf : 0;
+  if (freeUnits <= 0) return 0;
+  if (freeUnits >= 4 && c >= 92) return 12;
+  if (freeUnits >= 3 && c >= 91) return 9;
+  if (freeUnits >= 2 && c >= 90) return 6;
+  return marginForConviction(c, 3);
+}
+
+
 /** Rebuild 15% ended early 2026-09-09 per user — back to 1/2/3% max. Keep helpers for history. */
 export const REBUILD_EQUITY_USD = 500;
 export const REBUILD_MARGIN_PCT = 15;
@@ -44,9 +61,9 @@ export function inRebuildMode(accountUsd: number): boolean {
   return Number.isFinite(accountUsd) && accountUsd > 0 && accountUsd < REBUILD_EQUITY_USD;
 }
 
-/** Conviction 1/2/3 only — rebuild 15% ended. */
+/** Default 1/2/3. Prefer concentrateMargin when free seat units are known. */
 export function deskMarginPct(confidence: number, accountUsd: number, baseMarginPct = 3): number {
-  void accountUsd; // rebuild window closed
+  void accountUsd;
   return marginForConviction(confidence, baseMarginPct);
 }
 
@@ -76,7 +93,7 @@ export function sizeSetup(
   // 3% margin stays. Skip PYTH-class wide structure stops instead of sizing down.
   if (stopPct >= 0.018) return null;
   const stopAccountPct = stopDist > 0 ? (notional * (stopDist / setup.entry) / accountUsd) * 100 : 0;
-  const stopCap = alloc >= 10 ? 80 : 12;
+  const stopCap = alloc >= 10 ? 80 : Math.max(12, alloc * 3);
   if (stopAccountPct > stopCap) return null;
 
   return {
