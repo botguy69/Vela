@@ -2104,7 +2104,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           !rules.stopOnWrongSide(side, entry, stop) &&
           (side === "short" ? lastPx >= stop * 0.997 : lastPx <= stop * 1.003);
         const rKill = 1.0; // solo desk: never give more than ~1R on a live ticket
-        if ((unit > 0.05 && openPnl <= -rKill * unit) || pastStop) {
+        const fatStop =
+          unit > 0.05 &&
+          equity > 0 &&
+          unit > equity * 0.12 &&
+          n(pos.mfe_r) < 0.3;
+        if ((unit > 0.05 && openPnl <= -rKill * unit) || pastStop || fatStop) {
           const spec = await specFor(coinByWeex(pos.weex_symbol));
           const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
           await cancelWeexProtective(credsNow, pos.weex_symbol).catch(() => null);
@@ -2117,7 +2122,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           });
           if (sent.ok) {
             notes.push(
-              `${pos.weex_symbol} flattened — ${pastStop ? "stop missed on WEEX" : `past ${rKill}R`}`,
+              `${pos.weex_symbol} flattened — ${pastStop ? "stop missed on WEEX" : fatStop ? "1R too fat vs book" : `past ${rKill}R`}`,
             );
             left = 0;
           }
