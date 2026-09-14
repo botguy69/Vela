@@ -1444,12 +1444,21 @@ export const getAutoDesk = createServerFn({ method: "GET" })
         liveTotal,
       }, pulled.keyProbe),
       signals: mapped,
-      universe: (await import("@/lib/universe")).TOP25.map((c) => ({
-        id: c.id,
-        weex: c.weex,
-        name: c.name,
-        maxLeverage: c.fallbackMax,
-      })),
+      universe: await (async () => {
+        const { coinByWeex, TOP25 } = await import("@/lib/universe");
+        const { huntUniverseSymbols, getWeexSpecs } = await import("@/lib/weex-market.server");
+        const syms = await huntUniverseSymbols().catch(() => TOP25.map((c) => c.weex));
+        const specs = await getWeexSpecs().catch(() => new Map());
+        return syms.map((weex) => {
+          const c = coinByWeex(weex);
+          return {
+            id: c.id,
+            weex: c.weex,
+            name: c.name,
+            maxLeverage: specs.get(c.weex)?.maxLeverage ?? c.fallbackMax,
+          };
+        });
+      })(),
     };
   });
 
@@ -1776,10 +1785,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       getWeexFourHour,
       getWeexKlines,
       getApiTradingSymbols,
+      huntUniverseSymbols,
     } = await import("@/lib/weex-market.server");
     const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, taggedTake } = await import("@/lib/ta");
     const { sizeSetup, marginForConviction, deskMarginPct, concentrateMargin, seatUnits, inRebuildMode, REBUILD_EQUITY_USD, REBUILD_MARGIN_PCT } = await import("@/lib/risk");
-    const { coinByWeex, SKIP_WEEX, TOP25_WEEX } = await import("@/lib/universe");
+    const { coinByWeex, SKIP_WEEX } = await import("@/lib/universe");
+    const huntWeexList = await huntUniverseSymbols();
+    const huntSet = new Set(huntWeexList);
+    const huntN = huntWeexList.length;
     const rules = await import("@/lib/desk-rules");
     const sql = await getSql();
     await ensureSettings(sql, userId);
@@ -2643,7 +2656,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       ? "Disarmed. Not hunting."
       : bookUnread
         ? "No WEEX keys on file — not hunting."
-        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN), { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3, universe: TOP25_WEEX.length });
+        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN), { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3, universe: huntN });
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -2678,14 +2691,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const extras = stillOpenRaw.filter((s) => {
         if (s.status !== "working" && s.status !== "proposed") return false;
         const sym = s.weex_symbol.replace(/_/g, "").toUpperCase();
-        if (SKIP_WEEX.has(sym) || !TOP25_WEEX.includes(sym)) return true;
+        if (SKIP_WEEX.has(sym) || !huntSet.has(sym)) return true;
         if (filledSym.has(sym)) return true;
         return false;
       });
       const { cancelWeexOrder, cancelWeexProtective, flattenWeex } = await import("@/lib/weex.server");
       for (const row of extras) {
         const sym = row.weex_symbol.replace(/_/g, "").toUpperCase();
-        const ban = SKIP_WEEX.has(sym) || !TOP25_WEEX.includes(sym);
+        const ban = SKIP_WEEX.has(sym) || !huntSet.has(sym);
         const why = ban ? "Cancelled — off the book (no history)" : "Cancelled — duplicate or at-risk full";
         if (row.client_oid) {
           await cancelWeexOrder(credsGate2, { symbol: row.weex_symbol, clientOid: row.client_oid }).catch(() => null);
@@ -2805,12 +2818,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           );
           const apiOk = await getApiTradingSymbols();
           const raw = rawAll.filter((s) => {
-            if (!TOP25_WEEX.includes(s.weexSymbol) || SKIP_WEEX.has(s.weexSymbol)) return false;
+            if (!huntSet.has(s.weexSymbol) || SKIP_WEEX.has(s.weexSymbol)) return false;
             if (apiOk && !apiOk.has(s.weexSymbol)) return false;
             return true;
           });
           const scannedN = Object.keys(books).length;
-          const missedN = Math.max(0, TOP25_WEEX.length - scannedN);
+          const missedN = Math.max(0, huntN - scannedN);
           const busy = new Set(
             stillOpen.filter((s) => s.status === "filled").map((s) => s.weex_symbol),
           );
@@ -2860,7 +2873,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             const conf = s.confidence ?? scoreToConf(s.score);
             if (!rules.eliteScalp(s.thesis ?? "", conf, bar.minConf, compass.bias)) continue;
             if (held.has(s.weexSymbol) || dark.has(s.weexSymbol)) continue;
-            if (SKIP_WEEX.has(s.weexSymbol) || !TOP25_WEEX.includes(s.weexSymbol)) continue;
+            if (SKIP_WEEX.has(s.weexSymbol) || !huntSet.has(s.weexSymbol)) continue;
             const key = `${s.weexSymbol}:${s.side}`;
             if (seen.has(key)) continue;
             seen.add(key);
@@ -2927,10 +2940,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           });
           const closest = whyNot.slice(0, 3).join(" · ");
           const eyeLine = eyeing.length
-            ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}`
+            ? `Eying  ${eyeing.join(" · ")} · Scanned ${scannedN}/${huntN}${missedN ? ` · ${missedN} no 1h book` : ""}`
             : elite.length === 0
-              ? `Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}. No A++ this pass. 1h book. Slots stay empty.`
-              : `Closest (not through 4h+1h): ${closest || "—"}. ${elite.length} 1h A++ this pass, 0 cleared the box. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}. Seat ${atRiskN}/${AT_RISK} open.`;
+              ? `Scanned ${scannedN}/${huntN}${missedN ? ` · ${missedN} no 1h book` : ""}. No A++ this pass. 1h book. Slots stay empty.`
+              : `Closest (not through 4h+1h): ${closest || "—"}. ${elite.length} 1h A++ this pass, 0 cleared the box. Scanned ${scannedN}/${huntN}${missedN ? ` · ${missedN} no 1h book` : ""}. Seat ${atRiskN}/${AT_RISK} open.`;
           const aPlusLine = rebuild
             ? `REBUILD → $${REBUILD_EQUITY_USD}: 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd ${REBUILD_MARGIN_PCT}% after TP1→BE. A++ only.`
             : "Closed 15m only. Longs bottom 38%. Shorts top 38% (top 45% if 2+ longs at-risk). Mid-box skip. 15m reject can short. 2 at-risk same-side. Rotate: 30m after loss, 15m after close, 5m 2nd-seat breath. TP1 always BE.";
@@ -2969,7 +2982,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not an A++ scalp — slot stays empty`);
               continue;
             }
-            if (SKIP_WEEX.has(pick.weexSymbol) || !TOP25_WEEX.includes(pick.weexSymbol)) continue;
+            if (SKIP_WEEX.has(pick.weexSymbol) || !huntSet.has(pick.weexSymbol)) continue;
             if (flattened.has(pick.weexSymbol)) {
               whyNot.push(`${tag} just flattened — pause this pair`);
               continue;
@@ -3193,7 +3206,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               if (!rules.eliteScalp(pick.thesis ?? "", conf, bar.minConf, compass.bias)) continue;
               if (rules.setupQuality(pick.thesis ?? "") < 2) continue;
               if (conf < bar.minConf) continue;
-              if (SKIP_WEEX.has(pick.weexSymbol) || !TOP25_WEEX.includes(pick.weexSymbol)) continue;
+              if (SKIP_WEEX.has(pick.weexSymbol) || !huntSet.has(pick.weexSymbol)) continue;
               if (apiOk && !apiOk.has(pick.weexSymbol)) continue;
               if (busy.has(pick.weexSymbol) || flattened.has(pick.weexSymbol)) continue;
               if (stillOpen.some((s) => s.weex_symbol === pick.weexSymbol)) continue;
@@ -3404,10 +3417,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             });
           const thinkBits = [...readyThink, ...watchThink].slice(0, 4);
           const thinkLine = thinkBits.length
-            ? `Thinking  ${thinkBits.join(" · ")}. Scanned ${scannedN}/${TOP25_WEEX.length}${missedN ? ` · ${missedN} no 1h book` : ""}.`
+            ? `Thinking  ${thinkBits.join(" · ")}. Scanned ${scannedN}/${huntN}${missedN ? ` · ${missedN} no 1h book` : ""}.`
             : elite.length
-              ? `Thinking  no name in the 4h 38% box this bar. Closest ${whyUniq.slice(0, 2).join(" · ") || "—"}. Scanned ${scannedN}/${TOP25_WEEX.length}.`
-              : `Thinking  nothing at 85%+ this pass. Scanned ${scannedN}/${TOP25_WEEX.length}.`;
+              ? `Thinking  no name in the 4h 38% box this bar. Closest ${whyUniq.slice(0, 2).join(" · ") || "—"}. Scanned ${scannedN}/${huntN}.`
+              : `Thinking  nothing at 85%+ this pass. Scanned ${scannedN}/${huntN}.`;
           const skipBit = whyUniq.length
             ? `Closest miss ${whyUniq.slice(0, 2).join(" · ")}`
             : "";
