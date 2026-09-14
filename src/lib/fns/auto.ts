@@ -2632,7 +2632,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const challengeForce = false;
     const roomN = blocked ? 0 : 1;
     if (!blocked && liveAtRisk >= 1 && atRiskN < AT_RISK) {
-      notes.push(`Seat open (${usedUnits}/${AT_RISK} units · ${ticketN}/${MAX_TICKETS} tickets · ${freeUnits} free). Fat seats only.`);
+      notes.push(`Seat open (${usedUnits}/${AT_RISK}u · ${ticketN}/${MAX_TICKETS} tickets · ${freeUnits} free). 1×12% or 2×6%, one side only.`);
     }
     if (rebuild) notes.push(`Rebuild — 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd after TP1→BE; until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed

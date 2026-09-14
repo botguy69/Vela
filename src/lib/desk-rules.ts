@@ -500,7 +500,12 @@ export function mixAllows(
   heat: "long" | "short" | "chop",
   live: { side: string }[],
 ): { ok: boolean; why: string } {
-  const same = live.filter((p) => (p.side === "short" ? "short" : "long") === pickSide).length;
+  const longs = live.filter((p) => (p.side === "short" ? "short" : "long") === "long").length;
+  const shorts = live.filter((p) => (p.side === "short" ? "short" : "long") === "short").length;
+  // One side only — never hedge long+short (user 2026-09-14).
+  if (pickSide === "long" && shorts > 0) return { ok: false, why: "shorts live — no hedge long" };
+  if (pickSide === "short" && longs > 0) return { ok: false, why: "longs live — no hedge short" };
+  const same = pickSide === "short" ? shorts : longs;
   if (same >= 2) return { ok: false, why: "2 same-side cap" };
   const against = heat !== "chop" && pickSide !== heat;
   if (against) {
