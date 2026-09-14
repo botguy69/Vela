@@ -39,11 +39,39 @@ export function seatUnits(marginPct: number): number {
   return Math.max(1, Math.round(marginPct / 3));
 }
 
-/** One trade at a time. 6% normal; 12% only on a ≥92 banger. Never a second seat. */
-export function concentrateMargin(conf: number, freeUnits: number): number {
+/** 12% until an SL, then 6% until a win, then 12% again. One seat. */
+export type SizeCycle = "fat12" | "recover6";
+
+export function sizeCycleFromCloses(
+  rows: { status?: string | null; pnl?: number | null; close_reason?: string | null }[],
+): SizeCycle {
+  for (const r of rows) {
+    const why = String(r.close_reason ?? "");
+    if (/replaced by|cancelled|ghost|limit never|stale claim|duplicate|off the book/i.test(why)) continue;
+    const pnl = Number(r.pnl);
+    const stopped =
+      r.status === "stopped" || /hit stop|^stop\b|stopped out/i.test(why);
+    if (stopped && !(pnl > 0.15)) return "recover6";
+    if (r.status === "targeted" || pnl > 0.15 || /hit tp|targeted|closed in green/i.test(why)) {
+      return "fat12";
+    }
+    // User flatten / scratch — not an SL, not a win. Keep looking.
+  }
+  return "fat12"; // off the hop
+}
+
+export function concentrateMargin(
+  conf: number,
+  freeUnits: number,
+  cycle: SizeCycle = "fat12",
+): number {
   const c = Number.isFinite(conf) ? conf : 0;
   if (c < 90) return 0;
-  if (c >= 92 && freeUnits >= 4) return 12;
+  if (cycle === "recover6") {
+    if (freeUnits >= 2) return 6;
+    return 0;
+  }
+  if (freeUnits >= 4) return 12;
   if (freeUnits >= 2) return 6;
   return 0;
 }
