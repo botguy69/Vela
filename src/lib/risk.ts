@@ -39,13 +39,17 @@ export function seatUnits(marginPct: number): number {
   return Math.max(1, Math.round(marginPct / 3));
 }
 
-/** Concentrate into fewer seats when the book has room. */
+/** Prefer 1 fat seat (9–12%) or 2 fat seats (6% each). Avoid stacking 3% toys. */
 export function concentrateMargin(conf: number, freeUnits: number): number {
   const c = Number.isFinite(conf) ? conf : 0;
   if (freeUnits <= 0) return 0;
-  if (freeUnits >= 4 && c >= 92) return 12;
-  if (freeUnits >= 3 && c >= 91) return 9;
-  if (freeUnits >= 2 && c >= 90) return 6;
+  // Empty book / full budget: one large A++.
+  if (freeUnits >= 4 && c >= 90) return 12;
+  if (freeUnits >= 3 && c >= 88) return 9;
+  // Second seat only if it can be fat (≥6%).
+  if (freeUnits >= 2 && c >= 88) return 6;
+  // Leftover 1 unit: skip rather than open a tiny 3% third.
+  if (freeUnits === 1) return 0;
   return marginForConviction(c, 3);
 }
 

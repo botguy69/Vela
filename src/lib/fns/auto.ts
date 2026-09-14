@@ -2520,7 +2520,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const rebuild = inRebuildMode(equity);
     // Rebuild: 1 at-risk 15% seat; after TP1→BE that seat frees at-risk → second 15% A++ allowed (LIVE_CAP 2).
     const LIVE_CAP = rebuild ? 2 : 6;
+    // 4 seat-units, but max 2 at-risk tickets — 1×12% or 2×6%/9%.
     const AT_RISK = rebuild ? 1 : 4;
+    const MAX_TICKETS = rebuild ? 1 : 2;
     // TODO(desk-place): extract placeTicket into src/lib/desk-place.ts when clean.
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 85, note: "A++ · engulf/double/pin/climax. Failed-bounce + continuation off." };
@@ -2620,15 +2622,17 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       atRisk.reduce((sum, s) => sum + unitOf(s), 0) || atRiskN,
     );
     const freeUnits = Math.max(0, AT_RISK - usedUnits);
+    const ticketN = atRisk.length;
     const blocked =
       bookUnread ||
       liveN.length >= LIVE_CAP ||
-      usedUnits >= AT_RISK;
+      usedUnits >= AT_RISK ||
+      ticketN >= MAX_TICKETS;
     // Force path OFF for solo/offline desk — filters only, never clock/challenge fills.
     const challengeForce = false;
     const roomN = blocked ? 0 : 1;
     if (!blocked && liveAtRisk >= 1 && atRiskN < AT_RISK) {
-      notes.push(`Seat open (${usedUnits}/${AT_RISK} units · ${freeUnits} free). Concentrate 6/9/12% when A++.`);
+      notes.push(`Seat open (${usedUnits}/${AT_RISK} units · ${ticketN}/${MAX_TICKETS} tickets · ${freeUnits} free). Fat seats only.`);
     }
     if (rebuild) notes.push(`Rebuild — 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd after TP1→BE; until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed
@@ -3122,12 +3126,9 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             const timed = trig.wait ? { ...timed1, entryType: "limit" as const } : timed1;
             // Rebuild (<$500): 15% one-at-a-time. Else conviction 1/2/3.
-            const wantPct =
-              freeUnits >= 2
-                ? concentrateMargin(timed.confidence ?? conf, freeUnits)
-                : deskMarginPct(timed.confidence ?? conf, equity, corrected.marginPct);
+            const wantPct = concentrateMargin(timed.confidence ?? conf, freeUnits);
             if (!(wantPct > 0) || seatUnits(wantPct) > freeUnits) {
-              whyNot.unshift(`${tag} no seat units left`);
+              whyNot.unshift(`${tag} need fat seat (${freeUnits}u free) — skip thin 3%`);
               continue;
             }
             const sz = sizeSetup(timed, equity, wantPct, spec.maxLeverage);
@@ -3202,10 +3203,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                   ? { ...stopped, target: planned.target, targets: planned.targets, rr: planned.rr }
                   : stopped;
               const spec = await specFor(coinByWeex(pick.weexSymbol));
-              const wantPct =
-                freeUnits >= 2
-                  ? concentrateMargin(conf, freeUnits)
-                  : deskMarginPct(conf, equity, corrected.marginPct);
+              const wantPct = concentrateMargin(conf, freeUnits);
               if (!(wantPct > 0) || seatUnits(wantPct) > freeUnits) continue;
               const sz = sizeSetup(timed1, equity, wantPct, spec.maxLeverage);
               if (!sz) {
