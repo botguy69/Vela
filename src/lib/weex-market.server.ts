@@ -1,5 +1,5 @@
 import type { Candle } from "./engine";
-import { TOP25, type AutoCoin } from "./universe";
+import { TOP25, TOP25_WEEX, filterHuntWeex, type AutoCoin } from "./universe";
 
 export type WeexSpec = {
   symbol: string;
@@ -148,14 +148,17 @@ export async function getWeexLast(symbol: string): Promise<number> {
   return px;
 }
 
+/** Load 1h books for full hunt universe (API crypto, not TradFi/ghost/SKIP). Falls back to TOP25. */
 export async function loadTop25Hours(): Promise<Record<string, Candle[]>> {
+  const api = await getApiTradingSymbols();
+  const symbols = api && api.size >= 50 ? filterHuntWeex(api) : [...TOP25_WEEX];
   const out: Record<string, Candle[]> = {};
   const chunk = 12;
-  for (let i = 0; i < TOP25.length; i += chunk) {
+  for (let i = 0; i < symbols.length; i += chunk) {
     await Promise.all(
-      TOP25.slice(i, i + chunk).map(async (c) => {
+      symbols.slice(i, i + chunk).map(async (sym) => {
         try {
-          out[c.weex] = await getWeexKlines(c.weex, "1h", 96);
+          out[sym] = await getWeexKlines(sym, "1h", 96);
         } catch {
           /* skip thin */
         }
@@ -163,6 +166,12 @@ export async function loadTop25Hours(): Promise<Record<string, Candle[]>> {
     );
   }
   return out;
+}
+
+export async function huntUniverseSymbols(): Promise<string[]> {
+  const api = await getApiTradingSymbols();
+  if (api && api.size >= 50) return filterHuntWeex(api);
+  return [...TOP25_WEEX];
 }
 
 export async function universeCard() {

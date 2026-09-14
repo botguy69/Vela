@@ -186,10 +186,53 @@ export const TOP25_WEEX = TOP25.map((c) => c.weex);
 /** Price-discovery / no history — never hunt, cancel working. */
 export const SKIP_WEEX = new Set(["HYPEUSDT", "TONUSDT", "GRAMUSDT", "TRXUSDT", "BEAMXUSDT", "CKBUSDT", "KSMUSDT", "MNTUSDT", "ROSEUSDT", "HOTUSDT", "RIFUSDT"]);
 
+/** WEEX TradFi / commodity / ETF perps — API-tradable but not crypto hunt. */
+export const TRADFI_WEEX = new Set([
+  "AAOIUSDT", "AAPLUSDT", "AMATUSDT", "AMDUSDT", "AMZNUSDT", "AVGOUSDT", "AXTIUSDT",
+  "BABAUSDT", "BRKBUSDT", "BZUSDT", "CBRSUSDT", "CLUSDT", "COINUSDT", "COPPERUSDT",
+  "CRCLUSDT", "CRMUSDT", "CRWVUSDT", "DELLUSDT", "FUTUUSDT", "FWDIUSDT", "GOOGLUSDT",
+  "HIMSUSDT", "HOODUSDT", "IBMUSDT", "INTCUSDT", "KORUUSDT", "KSTRUSDT", "LITEUSDT",
+  "METAUSDT", "MINIMAXUSDT", "MRVLUSDT", "MSFTUSDT", "MSTRUSDT", "MSUSDT", "MUUSDT",
+  "MVLLUSDT", "NATGASUSDT", "NBISUSDT", "NOKUSDT", "NVDAUSDT", "PAXGUSDT", "PLTRUSDT",
+  "QNTXUSDT", "QQQUSDT", "RIVNUSDT", "RKLBUSDT", "SAMSUNGUSDT", "SKHYNIXUSDT", "SKHYUSDT",
+  "SNDKUSDT", "SNXXUSDT", "SOXLUSDT", "SOXSUSDT", "SPCXUSDT", "SPYUSDT", "SQQQUSDT",
+  "TSLAUSDT", "TTWOUSDT", "UBERUSDT", "UNITREEUSDT", "URNMUSDT", "WDCUSDT",
+  "XAGUSDT", "XAUTSUSDT", "XAUTUSDT", "XAUUSDT",
+]);
+
 /** Until $10k: only the tight books. */
 export const CORE_WEEX = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT"] as const;
 export const CORE_SET = new Set<string>(CORE_WEEX);
 
+/** Ghost share perps: FOOSUSDT when FOOUSDT is also API-tradable. */
+export function isGhostWeex(sym: string, api: Set<string>): boolean {
+  const s = sym.replace(/_/g, "").toUpperCase();
+  if (!s.endsWith("USDT")) return false;
+  const base = s.slice(0, -4);
+  if (base.length > 1 && base.endsWith("S")) {
+    return api.has(base.slice(0, -1) + "USDT");
+  }
+  return false;
+}
+
+/** Crypto API-tradable hunt list: API ∩ ¬SKIP ∩ ¬TradFi ∩ ¬ghost *S. */
+export function filterHuntWeex(api: Iterable<string>): string[] {
+  const set = new Set([...api].map((s) => String(s).replace(/_/g, "").toUpperCase()));
+  const out: string[] = [];
+  for (const sym of set) {
+    if (!sym.endsWith("USDT")) continue;
+    if (SKIP_WEEX.has(sym)) continue;
+    if (TRADFI_WEEX.has(sym)) continue;
+    if (isGhostWeex(sym, set)) continue;
+    out.push(sym);
+  }
+  return out.sort();
+}
+
 export function coinByWeex(symbol: string): AutoCoin {
-  return TOP25.find((c) => c.weex === symbol) ?? TOP25[0]!;
+  const sym = symbol.replace(/_/g, "").toUpperCase();
+  const hit = TOP25.find((c) => c.weex === sym);
+  if (hit) return hit;
+  const id = sym.replace(/USDT$/i, "").replace(/^1000/, "") || "UNK";
+  return { id, weex: sym, name: id, fallbackMax: 50 };
 }
