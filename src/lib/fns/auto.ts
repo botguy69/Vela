@@ -1953,7 +1953,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               where id = ${pos.id} and user_id = ${userId}
             `.catch(() => null);
           }
-          // 0.5R locks BE. Do not stamp tp1_hit — that yanks the near TP (DASH).
+          // MFE tracked only. BE waits for real TP1 (qty cut or last tagged planned take).
         }
       }
 
@@ -2042,11 +2042,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         if (be > 0) {
           pos.stop = be;
           pos.be_moved = true;
-          pos.tp1_hit = true;
+          const realTp1 = Boolean(pos.tp1_hit) || reduced || hitTp1Now;
+          if (realTp1) pos.tp1_hit = true;
           if (creds) await ensureTakes(pos, notes, creds, be);
           await sql`
             update auto_signals
-            set stop = ${be}, be_moved = true, tp1_hit = true, updated_at = now()
+            set stop = ${be}, be_moved = true, tp1_hit = ${Boolean(pos.tp1_hit)}, updated_at = now()
             where id = ${pos.id} and user_id = ${userId}
           `;
           notes.push(
