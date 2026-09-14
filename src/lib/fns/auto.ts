@@ -2623,16 +2623,20 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     );
     const freeUnits = Math.max(0, AT_RISK - usedUnits);
     const ticketN = atRisk.length;
+    const fatSolo = atRisk.some((s) => unitOf(s) >= 4);
+    // 12% seat = whole book. Never add a second ticket beside it.
+    const maxTickets = fatSolo ? 1 : MAX_TICKETS;
     const blocked =
       bookUnread ||
       liveN.length >= LIVE_CAP ||
       usedUnits >= AT_RISK ||
-      ticketN >= MAX_TICKETS;
+      fatSolo ||
+      ticketN >= maxTickets;
     // Force path OFF for solo/offline desk — filters only, never clock/challenge fills.
     const challengeForce = false;
     const roomN = blocked ? 0 : 1;
     if (!blocked && liveAtRisk >= 1 && atRiskN < AT_RISK) {
-      notes.push(`Seat open (${usedUnits}/${AT_RISK}u · ${ticketN}/${MAX_TICKETS} tickets · ${freeUnits} free). 1×12% or 2×6%, one side only.`);
+      notes.push(`Seat open (${usedUnits}/${AT_RISK}u · ${ticketN}/${maxTickets} tickets · ${freeUnits} free). 1×12% alone or 2×6% same side.`);
     }
     if (rebuild) notes.push(`Rebuild — 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd after TP1→BE; until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed
