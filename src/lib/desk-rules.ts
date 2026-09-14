@@ -495,17 +495,22 @@ export function betaCapAllows(
 
 export function mixAllows(
   pickSide: Side,
-  _thesis: string,
-  _conf: number,
-  _heat: "long" | "short" | "chop",
+  thesis: string,
+  conf: number,
+  heat: "long" | "short" | "chop",
   live: { side: string }[],
 ): { ok: boolean; why: string } {
   const same = live.filter((p) => (p.side === "short" ? "short" : "long") === pickSide).length;
   if (same >= 2) return { ok: false, why: "2 same-side cap" };
-  return { ok: true, why: "coin 4h box" };
+  const against = heat !== "chop" && pickSide !== heat;
+  if (against) {
+    if (same >= 1) return { ok: false, why: "no stacked fades vs BTC 1h" };
+    if (conf < 90) return { ok: false, why: "fade vs BTC needs >=90" };
+    if (!fadeAtExtreme(thesis, pickSide)) return { ok: false, why: "not a real fade vs BTC 1h" };
+  }
+  return { ok: true, why: against ? "one fade vs BTC 1h" : "coin 4h box" };
 }
 
-/** New entries after a 15m close. Bar.time is the open — age from close, not open. */
 export function fifteenEntryReady(closed15: Candle[], intervalMs = 15 * 60_000): { ok: boolean; why: string } {
   if (closed15.length < 8) return { ok: false, why: "15m thin" };
   const last = closed15[closed15.length - 1]!;
