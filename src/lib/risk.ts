@@ -88,12 +88,13 @@ export function sizeSetup(
   const qty = notional / setup.entry;
   const stopDist = Math.abs(setup.entry - setup.stop);
   const stopPct = setup.entry > 0 && stopDist > 0 ? stopDist / setup.entry : 0;
-  // Fat 12% seats: stop 0.5–2% of price + ≥2R. No liq-lottery / hope stops.
+  // Fat 12% seats: stop 1–2% of price + ≥2R. No liq-lottery / hope / hairline stops.
+  // 6% seats: allow stop up to 2% (was 1.8%) so A++ with slightly wide structure still sizes.
   if (alloc >= 10) {
-    if (stopPct < 0.005 || stopPct > 0.02) return null;
+    if (stopPct < 0.01 || stopPct > 0.02) return null;
     const rr = stopDist > 0 ? Math.abs(setup.target - setup.entry) / stopDist : 0;
     if (!(rr >= 2)) return null;
-  } else if (stopPct >= 0.018) {
+  } else if (stopPct > 0.02) {
     return null;
   }
   const stopAccountPct = stopDist > 0 ? (notional * (stopDist / setup.entry) / accountUsd) * 100 : 0;
