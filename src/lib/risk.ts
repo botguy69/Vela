@@ -64,6 +64,8 @@ export function sizeSetup(
   if (setup.entry <= 0 || accountUsd < 1) return null;
 
   const leverage = Math.max(1, Math.round(coinMaxLev));
+  // 20x toys print ~$4 at 3% margin. Overnight needs punch — skip weak max-lev names.
+  if (leverage < 75) return null;
   const marginUsd = accountUsd * (alloc / 100) * Math.min(1, Math.max(0.25, sizeMult));
   const notional = marginUsd * leverage;
   if (notional < 5) return null;
