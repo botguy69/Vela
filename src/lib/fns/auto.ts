@@ -1952,13 +1952,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               where id = ${pos.id} and user_id = ${userId}
             `.catch(() => null);
           }
-          if (mfe >= 0.5 && !pos.tp1_hit) {
-            pos.tp1_hit = true;
-            await sql`
-              update auto_signals set tp1_hit = true, updated_at = now()
-              where id = ${pos.id} and user_id = ${userId}
-            `.catch(() => null);
-          }
+          // 0.5R locks BE. Do not stamp tp1_hit — that yanks the near TP (DASH).
         }
       }
 
