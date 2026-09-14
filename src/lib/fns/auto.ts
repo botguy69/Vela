@@ -3103,7 +3103,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               spec.maxLeverage,
             );
             if (!sz) {
-              whyNot.unshift(`${tag} size rejected (min notional / stop too wide)`);
+              whyNot.unshift(`${tag} size rejected (min notional / stop too wide / max lev < 75)`);
               continue;
             }
             const depth = await getBookDepth(pick.weexSymbol);
