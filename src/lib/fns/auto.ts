@@ -2509,7 +2509,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const rebuild = inRebuildMode(equity);
     // Rebuild: 1 at-risk 15% seat; after TP1→BE that seat frees at-risk → second 15% A++ allowed (LIVE_CAP 2).
     const LIVE_CAP = rebuild ? 2 : 6;
-    const AT_RISK = rebuild ? 1 : 4;
+    const AT_RISK = rebuild ? 1 : 3;
     // TODO(desk-place): extract placeTicket into src/lib/desk-place.ts when clean.
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = { minConf: 85, note: "A++ · engulf/double/pin/climax. Failed-bounce + continuation off." };
