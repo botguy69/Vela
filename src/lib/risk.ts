@@ -43,21 +43,33 @@ export function seatUnits(marginPct: number): number {
 export type SizeCycle = "fat12" | "recover6";
 
 export function sizeCycleFromCloses(
-  rows: { status?: string | null; pnl?: number | null; close_reason?: string | null }[],
+  rows: {
+    status?: string | null;
+    pnl?: number | null;
+    close_reason?: string | null;
+    weex_symbol?: string | null;
+  }[],
 ): SizeCycle {
   for (const r of rows) {
     const why = String(r.close_reason ?? "");
     if (/replaced by|cancelled|ghost|limit never|stale claim|duplicate|off the book/i.test(why)) continue;
     const pnl = Number(r.pnl);
+    const sym = String(r.weex_symbol ?? "").toUpperCase();
     const stopped =
       r.status === "stopped" || /hit stop|^stop\b|stopped out/i.test(why);
+    // After ASTER closes (win/SL/flatten), next seat is 12% until a later non-ASTER SL.
+    if (sym.includes("ASTER")) return "fat12";
     if (stopped && !(pnl > 0.15)) return "recover6";
     if (r.status === "targeted" || pnl > 0.15 || /hit tp|targeted|closed in green/i.test(why)) {
       return "fat12";
     }
-    // User flatten / scratch — not an SL, not a win. Keep looking.
   }
   return "fat12"; // off the hop
+}
+
+/** Recover mode: 91%+. Fat 12%: 90%+. */
+export function cycleMinConf(cycle: SizeCycle): number {
+  return cycle === "recover6" ? 91 : 90;
 }
 
 export function concentrateMargin(
@@ -66,7 +78,8 @@ export function concentrateMargin(
   cycle: SizeCycle = "fat12",
 ): number {
   const c = Number.isFinite(conf) ? conf : 0;
-  if (c < 90) return 0;
+  const floor = cycleMinConf(cycle);
+  if (c < floor) return 0;
   if (cycle === "recover6") {
     if (freeUnits >= 2) return 6;
     return 0;
