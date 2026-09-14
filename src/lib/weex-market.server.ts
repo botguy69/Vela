@@ -149,9 +149,19 @@ export async function getWeexLast(symbol: string): Promise<number> {
 }
 
 /** Load 1h books for full hunt universe (API crypto, not TradFi/ghost/SKIP). Falls back to TOP25. */
-export async function loadTop25Hours(): Promise<Record<string, Candle[]>> {
+async function huntSymbolsMaxLev(): Promise<string[]> {
   const api = await getApiTradingSymbols();
-  const symbols = api && api.size >= 50 ? filterHuntWeex(api) : [...TOP25_WEEX];
+  const base = api && api.size >= 50 ? filterHuntWeex(api) : [...TOP25_WEEX];
+  const specs = await getWeexSpecs().catch(() => new Map<string, WeexSpec>());
+  return base.filter((sym) => {
+    const live = specs.get(sym)?.maxLeverage;
+    const fb = TOP25.find((c) => c.weex === sym)?.fallbackMax ?? 0;
+    return (live ?? fb) >= 75;
+  });
+}
+
+export async function loadTop25Hours(): Promise<Record<string, Candle[]>> {
+  const symbols = await huntSymbolsMaxLev();
   const out: Record<string, Candle[]> = {};
   const chunk = 12;
   for (let i = 0; i < symbols.length; i += chunk) {
@@ -169,9 +179,7 @@ export async function loadTop25Hours(): Promise<Record<string, Candle[]>> {
 }
 
 export async function huntUniverseSymbols(): Promise<string[]> {
-  const api = await getApiTradingSymbols();
-  if (api && api.size >= 50) return filterHuntWeex(api);
-  return [...TOP25_WEEX];
+  return huntSymbolsMaxLev();
 }
 
 export async function universeCard() {
