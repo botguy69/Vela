@@ -2521,7 +2521,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     // Rebuild: 1 at-risk 15% seat; after TP1→BE that seat frees at-risk → second 15% A++ allowed (LIVE_CAP 2).
     const LIVE_CAP = rebuild ? 2 : 6;
     // One 6% seat (2 units). Never a second ticket.
-    const AT_RISK = rebuild ? 1 : 2;
+    const AT_RISK = rebuild ? 1 : 4;
     const MAX_TICKETS = 1;
     // TODO(desk-place): extract placeTicket into src/lib/desk-place.ts when clean.
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
@@ -2636,7 +2636,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const challengeForce = false;
     const roomN = blocked ? 0 : 1;
     if (!blocked && liveAtRisk >= 1 && atRiskN < AT_RISK) {
-      notes.push(`Seat open (${usedUnits}/${AT_RISK}u · ${ticketN}/${maxTickets} tickets). One 6% A++ at a time.`);
+      notes.push(`Seat open (${usedUnits}/${AT_RISK}u · ${ticketN}/${maxTickets} tickets). One seat: 6% or 12% banger.`);
     }
     if (rebuild) notes.push(`Rebuild — 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd after TP1→BE; until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed

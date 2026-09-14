@@ -39,11 +39,13 @@ export function seatUnits(marginPct: number): number {
   return Math.max(1, Math.round(marginPct / 3));
 }
 
-/** One trade at a time at 6%. Nothing stacked. */
+/** One trade at a time. 6% normal; 12% only on a ≥92 banger. Never a second seat. */
 export function concentrateMargin(conf: number, freeUnits: number): number {
   const c = Number.isFinite(conf) ? conf : 0;
-  if (freeUnits < 2 || c < 90) return 0;
-  return 6;
+  if (c < 90) return 0;
+  if (c >= 92 && freeUnits >= 4) return 12;
+  if (freeUnits >= 2) return 6;
+  return 0;
 }
 
 
