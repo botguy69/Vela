@@ -3068,6 +3068,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               continue;
             }
             const spec = await specFor(coinByWeex(pick.weexSymbol));
+            if (spec.maxLeverage < 75) {
+              whyNot.unshift(`${tag} max lev ${spec.maxLeverage}x < 75`);
+              continue;
+            }
             const conf = pick.confidence ?? scoreToConf(pick.score);
             if (conf < bar.minConf) {
               veto = `${pick.weexSymbol} ${pick.side} conf ${conf}% below ${bar.minConf}% bar`;
@@ -3237,6 +3241,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                   ? { ...stopped, target: planned.target, targets: planned.targets, rr: planned.rr }
                   : stopped;
               const spec = await specFor(coinByWeex(pick.weexSymbol));
+              if (spec.maxLeverage < 75) continue;
               const wantPct = concentrateMargin(conf, freeUnits);
               if (!(wantPct > 0) || seatUnits(wantPct) > freeUnits) continue;
               const sz = sizeSetup(timed1, equity, wantPct, spec.maxLeverage);

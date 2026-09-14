@@ -80,7 +80,8 @@ export function sizeSetup(
   if (setup.entry <= 0 || accountUsd < 1) return null;
 
   const leverage = Math.max(1, Math.round(coinMaxLev));
-  // Always pair max lev — size via margin %, never skip for low max-lev.
+  // Punch floor: skip toys under 75x. Still always pair max lev when we take it.
+  if (leverage < 75) return null;
   const marginUsd = accountUsd * (alloc / 100) * Math.min(1, Math.max(0.25, sizeMult));
   const notional = marginUsd * leverage;
   if (notional < 5) return null;
