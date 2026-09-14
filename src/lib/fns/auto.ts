@@ -2441,14 +2441,17 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       if (refreshed.error) notes.push(refreshed.error);
     }
     const afterStats = { closed: stats.closed + closed, wins: stats.wins };
-    const recentCloses = await sql<{ pnl: number | null; close_reason: string | null }>`
-      select pnl, close_reason from auto_signals
+    const recentCloses = await sql<{ status: string | null; pnl: number | null; close_reason: string | null }>`
+      select status, pnl, close_reason from auto_signals
       where user_id = ${userId}
         and status in ('stopped','targeted','skipped')
         and updated_at >= ${TAPE_FROM}::timestamptz
       order by updated_at desc
-      limit 12
+      limit 30
     `;
+    const sizeCycle = sizeCycleFromCloses(
+      recentCloses.map((r) => ({ status: r.status, pnl: Number(r.pnl), close_reason: r.close_reason })),
+    );
     const lastCounted = recentCloses.find((r) => {
       const p = n(r.pnl);
       if (Math.abs(p) < 0.4) return false;
@@ -2635,18 +2638,6 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       atRisk.reduce((sum, s) => sum + unitOf(s), 0) || atRiskN,
     );
     const freeUnits = Math.max(0, AT_RISK - usedUnits);
-    const recentCloses = await sql<{ status: string | null; pnl: string | number | null; close_reason: string | null }>`
-      select status, pnl, close_reason
-      from auto_signals
-      where user_id = ${userId}
-        and filled_at is not null
-        and status in ('stopped','targeted','skipped')
-      order by coalesce(updated_at, filled_at) desc
-      limit 30
-    `;
-    const sizeCycle = sizeCycleFromCloses(
-      recentCloses.map((r) => ({ status: r.status, pnl: Number(r.pnl), close_reason: r.close_reason })),
-    );
     const ticketN = atRisk.length;
     const fatSolo = atRisk.some((s) => unitOf(s) >= 4);
     // 12% seat = whole book. Never add a second ticket beside it.
