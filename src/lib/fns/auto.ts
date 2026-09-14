@@ -1788,7 +1788,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       huntUniverseSymbols,
     } = await import("@/lib/weex-market.server");
     const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, taggedTake } = await import("@/lib/ta");
-    const { sizeSetup, marginForConviction, deskMarginPct, concentrateMargin, seatUnits, inRebuildMode, REBUILD_EQUITY_USD, REBUILD_MARGIN_PCT } = await import("@/lib/risk");
+    const { sizeSetup, marginForConviction, deskMarginPct, concentrateMargin, seatUnits, sizeCycleFromCloses, inRebuildMode, REBUILD_EQUITY_USD, REBUILD_MARGIN_PCT } = await import("@/lib/risk");
     const { coinByWeex, SKIP_WEEX } = await import("@/lib/universe");
     const huntWeexList = await huntUniverseSymbols();
     const huntSet = new Set(huntWeexList);
@@ -2635,6 +2635,18 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       atRisk.reduce((sum, s) => sum + unitOf(s), 0) || atRiskN,
     );
     const freeUnits = Math.max(0, AT_RISK - usedUnits);
+    const recentCloses = await sql<{ status: string | null; pnl: string | number | null; close_reason: string | null }>`
+      select status, pnl, close_reason
+      from auto_signals
+      where user_id = ${userId}
+        and filled_at is not null
+        and status in ('stopped','targeted','skipped')
+      order by coalesce(updated_at, filled_at) desc
+      limit 30
+    `;
+    const sizeCycle = sizeCycleFromCloses(
+      recentCloses.map((r) => ({ status: r.status, pnl: Number(r.pnl), close_reason: r.close_reason })),
+    );
     const ticketN = atRisk.length;
     const fatSolo = atRisk.some((s) => unitOf(s) >= 4);
     // 12% seat = whole book. Never add a second ticket beside it.
@@ -2649,14 +2661,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const challengeForce = false;
     const roomN = blocked ? 0 : 1;
     if (!blocked && liveAtRisk >= 1 && atRiskN < AT_RISK) {
-      notes.push(`Seat open (${usedUnits}/${AT_RISK}u · ${ticketN}/${maxTickets} tickets). One seat: 6% or 12% banger.`);
+      notes.push(`Seat open (${usedUnits}/${AT_RISK}u). Cycle: ${sizeCycle === "recover6" ? "6% until a win" : "12% until SL"}.`);
     }
     if (rebuild) notes.push(`Rebuild — 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd after TP1→BE; until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
       : bookUnread
         ? "No WEEX keys on file — not hunting."
-        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN), { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3, universe: huntN });
+        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN), { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : sizeCycle === "recover6" ? 6 : 12, universe: huntN });
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -3147,7 +3159,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             const timed = trig.wait ? { ...timed1, entryType: "limit" as const } : timed1;
             // Rebuild (<$500): 15% one-at-a-time. Else conviction 1/2/3.
-            const wantPct = concentrateMargin(timed.confidence ?? conf, freeUnits);
+            const wantPct = concentrateMargin(timed.confidence ?? conf, freeUnits, sizeCycle);
             if (!(wantPct > 0) || seatUnits(wantPct) > freeUnits) {
               whyNot.unshift(`${tag} need fat seat (${freeUnits}u free) — skip thin 3%`);
               continue;
@@ -3242,7 +3254,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                   : stopped;
               const spec = await specFor(coinByWeex(pick.weexSymbol));
               if (spec.maxLeverage < 75) continue;
-              const wantPct = concentrateMargin(conf, freeUnits);
+              const wantPct = concentrateMargin(conf, freeUnits, sizeCycle);
               if (!(wantPct > 0) || seatUnits(wantPct) > freeUnits) continue;
               const sz = sizeSetup(timed1, equity, wantPct, spec.maxLeverage);
               if (!sz) {
@@ -3396,7 +3408,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
           const at2 = riskL + riskS;
           const be2 = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3 });
+          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : sizeCycle === "recover6" ? 6 : 12 });
           const whyUniq: string[] = [];
           const seenWhy = new Set<string>();
           for (const w of whyNot) {
