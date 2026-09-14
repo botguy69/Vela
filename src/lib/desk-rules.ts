@@ -735,8 +735,13 @@ export function chopAction(opts: {
   const r = risk > 0 ? favor / risk : 0;
   // Rebuild/tight: cut dead thesis earlier — 45m+ and still ≤−0.35R.
   if (opts.tight && age >= 45 * 60_000 && r <= -0.35) return "flatten";
-  // Trader: 2h+ and still red is a hope hold. Green seats ride.
-  if (age >= 2 * 3600_000 && r <= 0) return "flatten";
+  // No real mark (last≈entry) — never time-flatten. XRP −$5 scratch 2026-09-14.
+  const noMark =
+    !(opts.last > 0) ||
+    (opts.entry > 0 && Math.abs(opts.last - opts.entry) / opts.entry < 0.0008);
+  if (noMark) return "hold";
+  // 2h+ only cuts a real loser (≥0.5R), not a −$5 scratch.
+  if (age >= 2 * 3600_000 && r <= -0.5) return "flatten";
   if (age < fillMaxAgeMs(opts.rr ?? 1, opts.conf ?? 85, Boolean(opts.tight))) return "hold";
   if (r >= 0.4) return "hold";
   return "flatten";
