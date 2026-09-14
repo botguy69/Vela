@@ -1048,20 +1048,28 @@ export async function placeWeexTake(
     clientOid: string;
   },
 ) {
+  const bodyBase = {
+    symbol: order.symbol,
+    clientAlgoId: order.clientOid.slice(0, 36),
+    planType: "TAKE_PROFIT",
+    triggerPrice: order.tp,
+    quantity: order.quantity,
+    positionSide: order.positionSide,
+    reduceOnly: true,
+  };
+  // Prefer last so a wick through TP pays (JASMY). Fall back to mark if WEEX rejects last.
+  const v3Last = await weexRequest({
+    creds,
+    method: "POST",
+    path: "/capi/v3/placeTpSlOrder",
+    body: { ...bodyBase, triggerPriceType: "LAST_PRICE" },
+  });
+  if (v3Last.ok) return v3Last;
   const v3 = await weexRequest({
     creds,
     method: "POST",
     path: "/capi/v3/placeTpSlOrder",
-    body: {
-      symbol: order.symbol,
-      clientAlgoId: order.clientOid.slice(0, 36),
-      planType: "TAKE_PROFIT",
-      triggerPrice: order.tp,
-      quantity: order.quantity,
-      positionSide: order.positionSide,
-      triggerPriceType: "LAST_PRICE",
-      reduceOnly: true,
-    },
+    body: { ...bodyBase, triggerPriceType: "MARK_PRICE" },
   });
   if (v3.ok) return v3;
   return weexRequest({
