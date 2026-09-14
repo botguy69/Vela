@@ -293,7 +293,7 @@ export const TOP25: AutoCoin[] = [
 export const TOP25_WEEX = TOP25.map((c) => c.weex);
 
 /** Price-discovery / no history — never hunt, cancel working. */
-export const SKIP_WEEX = new Set(["HYPEUSDT", "TONUSDT", "GRAMUSDT", "TRXUSDT", "BEAMXUSDT"]);
+export const SKIP_WEEX = new Set(["HYPEUSDT", "TONUSDT", "GRAMUSDT", "TRXUSDT", "BEAMXUSDT", "CKBUSDT", "KSMUSDT", "MNTUSDT"]);
 
 /** Until $10k: only the tight books. */
 export const CORE_WEEX = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "SOLUSDT"] as const;
