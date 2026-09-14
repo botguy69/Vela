@@ -89,8 +89,14 @@ export function sizeSetup(
   const qty = notional / setup.entry;
   const stopDist = Math.abs(setup.entry - setup.stop);
   const stopPct = setup.entry > 0 && stopDist > 0 ? stopDist / setup.entry : 0;
-  // 3% margin stays. Skip PYTH-class wide structure stops instead of sizing down.
-  if (stopPct >= 0.018) return null;
+  // Fat 12% seats: stop 0.5–2% of price + ≥2R. No liq-lottery / hope stops.
+  if (alloc >= 10) {
+    if (stopPct < 0.005 || stopPct > 0.02) return null;
+    const rr = stopDist > 0 ? Math.abs(setup.target - setup.entry) / stopDist : 0;
+    if (!(rr >= 2)) return null;
+  } else if (stopPct >= 0.018) {
+    return null;
+  }
   const stopAccountPct = stopDist > 0 ? (notional * (stopDist / setup.entry) / accountUsd) * 100 : 0;
   const stopCap = alloc >= 10 ? 80 : Math.max(12, alloc * 3);
   if (stopAccountPct > stopCap) return null;

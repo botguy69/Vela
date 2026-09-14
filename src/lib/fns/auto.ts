@@ -3135,9 +3135,26 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.unshift(`${tag} need fat seat (${freeUnits}u free) — skip thin 3%`);
               continue;
             }
+            if (wantPct >= 12) {
+              const q = rules.setupQuality(timed.thesis ?? "");
+              const stopPct = timed.entry > 0 ? Math.abs(timed.entry - timed.stop) / timed.entry : 1;
+              const rr = Math.abs(timed.entry - timed.stop) > 0 ? Math.abs(timed.target - timed.entry) / Math.abs(timed.entry - timed.stop) : 0;
+              if (q < 2) {
+                whyNot.unshift(`${tag} 12% needs proper structure`);
+                continue;
+              }
+              if (stopPct > 0.02 || stopPct < 0.005) {
+                whyNot.unshift(`${tag} 12% needs 0.5–2% stop (got ${(stopPct * 100).toFixed(2)}%)`);
+                continue;
+              }
+              if (rr < 2) {
+                whyNot.unshift(`${tag} 12% needs ≥2R (got ${rr.toFixed(1)}R)`);
+                continue;
+              }
+            }
             const sz = sizeSetup(timed, equity, wantPct, spec.maxLeverage);
             if (!sz) {
-              whyNot.unshift(`${tag} size rejected (min notional / stop too wide / max lev < 75)`);
+              whyNot.unshift(`${tag} size rejected (stop/RR/lev)`);
               continue;
             }
             const depth = await getBookDepth(pick.weexSymbol);
