@@ -925,13 +925,21 @@ async function ensureTakes(
   const setAt = Number((/tps:(?:lock|set)@(\d+)/.exec(pos.weex_resp ?? "") ?? [])[1] ?? 0);
   const justSet = setAt > 0 && Date.now() - setAt < 2 * 60_000;
   // 1–4 working algos stay. Flicker was wipe+replace every tick when WEEX types didn't match.
-  const { slRows } = (await import("@/lib/takes")).classifyAlgoRows(listed, sideLc, mark);
-  if (!beMove && listed.length >= 1 && listed.length <= 4 && slRows.length >= 1) {
+  const { slRows, tpRows } = (await import("@/lib/takes")).classifyAlgoRows(listed, sideLc, mark);
+  const wantTpHere = plan.wantTp;
+  if (
+    !beMove &&
+    listed.length >= 1 &&
+    listed.length <= 4 &&
+    slRows.length >= 1 &&
+    tpRows.length >= wantTpHere &&
+    !plan.collapsed
+  ) {
     notes.push(`${pos.weex_symbol} TP/SL stay (${listed.length} on WEEX)`);
     return;
   }
   if (!beMove && listed.length >= 1 && listed.length <= 4 && slRows.length === 0 && stopPx > 0) {
-    notes.push(`${pos.weex_symbol} SL missing — put BE/SL back, leave TPs`);
+    notes.push(`${pos.weex_symbol} SL missing — put SL back`);
     const oidFix = `velasl${pos.id}${Date.now().toString(36)}`.slice(0, 36);
     const qtyFix = formatWeexQty(liveQty, spec.quantityPrecision);
     const slSent = await moveWeexStop(creds, {
@@ -943,7 +951,10 @@ async function ensureTakes(
     });
     if (!slSent.ok) notes.push(`${pos.weex_symbol} SL replace failed: ${slSent.error.slice(0, 80)}`);
     else notes.push(`${pos.weex_symbol} SL back @ ${stopPx.toFixed(4)}`);
-    return;
+    if (tpRows.length >= wantTpHere && !plan.collapsed) return;
+  }
+  if (!beMove && slRows.length >= 1 && (tpRows.length < wantTpHere || plan.collapsed)) {
+    notes.push(`${pos.weex_symbol} SL on · takes missing — place TP`);
   }
   if (!beMove && listed.length === 0 && justSet) {
     notes.push(`${pos.weex_symbol} TP/SL just set — wait for WEEX list`);
