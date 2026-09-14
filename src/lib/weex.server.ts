@@ -1059,7 +1059,7 @@ export async function placeWeexTake(
       triggerPrice: order.tp,
       quantity: order.quantity,
       positionSide: order.positionSide,
-      triggerPriceType: "MARK_PRICE",
+      triggerPriceType: "LAST_PRICE",
       reduceOnly: true,
     },
   });
