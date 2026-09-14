@@ -744,7 +744,9 @@ export function leftoverChop(opts: {
   fifteen: Candle[];
 }): boolean {
   if (!(opts.tp1 > 0) || !(opts.entry > 0) || !(opts.last > 0)) return false;
-  const through = opts.side === "long" ? opts.last >= opts.tp1 * 0.999 : opts.last <= opts.tp1 * 1.001;
+  // Still at the TP1 print (CYBER 2026-09-13 bounced 0.2919 → 0.2938) — hold the runner.
+  const through =
+    opts.side === "long" ? opts.last >= opts.tp1 * 0.992 : opts.last <= opts.tp1 * 1.008;
   if (through) return false;
   const inPocket =
     opts.side === "long"

@@ -40,7 +40,7 @@ export function takeQtys(
   const count = Math.max(1, nTakes);
   const min = Number(fmt(10 ** -Math.max(0, precision), precision));
   if (count < 2 || !(total > min * 2)) return [fmt(total, precision)];
-  let first = Number(fmt(total * 0.8, precision));
+  let first = Number(fmt(total * 0.5, precision));
   if (!(first > 0) || first >= total - min * 0.5) first = Number(fmt(total - min, precision));
   if (!(first > 0) || first >= total) first = Number(fmt(total / 2, precision));
   const rest = Number(fmt(Math.max(0, total - first), precision));
