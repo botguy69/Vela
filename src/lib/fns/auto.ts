@@ -1926,7 +1926,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       const stopSideOk =
         entry > 0 && stop > 0 && !rules.stopOnWrongSide(side, entry, stop);
       const hitStop = Boolean(stopSideOk) && (side === "long" ? px <= stop : px >= stop);
-      const hitTp1Px = tp1Px > 0 && (side === "long" ? px >= tp1Px : px <= tp1Px);
+      const markLive = weexLive?.mark && weexLive.mark > 0 ? weexLive.mark : 0;
+      const hitTp1Px =
+        tp1Px > 0 &&
+        (side === "long"
+          ? px >= tp1Px || markLive >= tp1Px
+          : px <= tp1Px || (markLive > 0 && markLive <= tp1Px));
       // TP1 is a partial. Never treat it as the full exit — leftover runs to TP2.
       const hitFinalTp =
         tp2Px > 0 && (side === "long" ? px >= tp2Px : px <= tp2Px);
@@ -1944,6 +1949,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             await sql`
               update auto_signals
               set mae_r = ${mae}, mfe_r = ${mfe}, updated_at = now()
+              where id = ${pos.id} and user_id = ${userId}
+            `.catch(() => null);
+          }
+          if (mfe >= 0.8 && !pos.tp1_hit) {
+            pos.tp1_hit = true;
+            await sql`
+              update auto_signals set tp1_hit = true, updated_at = now()
               where id = ${pos.id} and user_id = ${userId}
             `.catch(() => null);
           }
@@ -2004,13 +2016,17 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       let mark = px;
       let reduced = false;
       if (pos.status === "filled" && !beLocked) {
-        const credsForPos = await credsFrom(settings);
-        if (credsForPos) {
-          const { getWeexPositionQty } = await import("@/lib/weex.server");
-          const left = await getWeexPositionQty(credsForPos, pos.weex_symbol);
-          const orig = origQty(pos);
-          if (left != null && orig > 0 && left < orig * 0.85) reduced = true;
+        const orig = origQty(pos);
+        if (weexLive && orig > 0 && weexLive.qty < orig * 0.85) reduced = true;
+        if (!reduced) {
+          const credsForPos = await credsFrom(settings);
+          if (credsForPos) {
+            const { getWeexPositionQty } = await import("@/lib/weex.server");
+            const left = await getWeexPositionQty(credsForPos, pos.weex_symbol);
+            if (left != null && orig > 0 && left < orig * 0.85) reduced = true;
+          }
         }
+        if (reduced && !pos.tp1_hit) pos.tp1_hit = true;
       }
       if (
         shouldLockBreakeven({
