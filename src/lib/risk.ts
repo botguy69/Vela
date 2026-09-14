@@ -64,16 +64,19 @@ export function sizeSetup(
   if (setup.entry <= 0 || accountUsd < 1) return null;
 
   const leverage = Math.max(1, Math.round(coinMaxLev));
-  const marginUsd = accountUsd * (alloc / 100) * Math.min(1, Math.max(0.25, sizeMult));
+  const stopDist0 = Math.abs(setup.entry - setup.stop);
+  const stopPct = setup.entry > 0 && stopDist0 > 0 ? stopDist0 / setup.entry : 0;
+  // Wide structure stop + 3% + max lev = PYTH-class $60 1R on a $320 book. Size down.
+  let used = alloc;
+  if (stopPct >= 0.018 && used > 1) used = 1;
+  const marginUsd = accountUsd * (used / 100) * Math.min(1, Math.max(0.25, sizeMult));
   const notional = marginUsd * leverage;
   if (notional < 5) return null;
 
   const qty = notional / setup.entry;
-  const stopDist = Math.abs(setup.entry - setup.stop);
+  const stopDist = stopDist0;
   const stopAccountPct = stopDist > 0 ? (notional * (stopDist / setup.entry) / accountUsd) * 100 : 0;
-  // Rebuild 15% + max lev can print a wide stopAccountPct on alts — allow up to 80% of wallet at stop (cross; unused backs it).
-  const stopCap = alloc >= 10 ? 80 : 40;
-  if (stopAccountPct > stopCap) return null;
+  if (stopAccountPct > 12) return null;
 
   return {
     ...setup,
