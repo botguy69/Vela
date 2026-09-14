@@ -1788,7 +1788,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       huntUniverseSymbols,
     } = await import("@/lib/weex-market.server");
     const { scanUniverse, shouldLockBreakeven, breakevenPrice, scoreToConf, taggedTake } = await import("@/lib/ta");
-    const { sizeSetup, marginForConviction, deskMarginPct, concentrateMargin, seatUnits, sizeCycleFromCloses, inRebuildMode, REBUILD_EQUITY_USD, REBUILD_MARGIN_PCT } = await import("@/lib/risk");
+    const { sizeSetup, marginForConviction, deskMarginPct, concentrateMargin, seatUnits, sizeCycleFromCloses, cycleMinConf, inRebuildMode, REBUILD_EQUITY_USD, REBUILD_MARGIN_PCT } = await import("@/lib/risk");
     const { coinByWeex, SKIP_WEEX } = await import("@/lib/universe");
     const huntWeexList = await huntUniverseSymbols();
     const huntSet = new Set(huntWeexList);
@@ -2441,8 +2441,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       if (refreshed.error) notes.push(refreshed.error);
     }
     const afterStats = { closed: stats.closed + closed, wins: stats.wins };
-    const recentCloses = await sql<{ status: string | null; pnl: number | null; close_reason: string | null }>`
-      select status, pnl, close_reason from auto_signals
+    const recentCloses = await sql<{
+      status: string | null;
+      pnl: number | null;
+      close_reason: string | null;
+      weex_symbol: string | null;
+    }>`
+      select status, pnl, close_reason, weex_symbol from auto_signals
       where user_id = ${userId}
         and status in ('stopped','targeted','skipped')
         and updated_at >= ${TAPE_FROM}::timestamptz
@@ -2450,7 +2455,12 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       limit 30
     `;
     const sizeCycle = sizeCycleFromCloses(
-      recentCloses.map((r) => ({ status: r.status, pnl: Number(r.pnl), close_reason: r.close_reason })),
+      recentCloses.map((r) => ({
+        status: r.status,
+        pnl: Number(r.pnl),
+        close_reason: r.close_reason,
+        weex_symbol: r.weex_symbol,
+      })),
     );
     const lastCounted = recentCloses.find((r) => {
       const p = n(r.pnl);
@@ -2541,7 +2551,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const MAX_TICKETS = 1;
     // TODO(desk-place): extract placeTicket into src/lib/desk-place.ts when clean.
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
-    const bar = { minConf: 85, note: "A++ · engulf/double/pin/climax. Failed-bounce + continuation off." };
+    const bar = {
+      minConf: Math.max(85, cycleMinConf(sizeCycle)),
+      note:
+        sizeCycle === "recover6"
+          ? "Recover 6%: 91%+ · skip plain failed-range until a win."
+          : "12% until SL · A++ structure · no fades into BTC 1h book.",
+    };
 
     // Unread only if no key blobs at all. Enc present + soft book [] still hunts.
     const bookUnread =
@@ -2910,6 +2926,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.push(`${tag} not location structure`);
               continue;
             }
+            if (sizeCycle === "recover6" && rules.aPlusKind(s.thesis ?? "") === "failed range") {
+              whyNot.push(`${tag} recover — skip plain failed-range`);
+              continue;
+            }
             pool.push(s);
           }
           const liveL = liveN.filter((p) => (p.side === "short" ? "short" : "long") === "long").length;
@@ -3029,6 +3049,10 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             if (rules.setupQuality(pick.thesis ?? "") < 2) {
               whyNot.push(`${tag} not location structure`);
+              continue;
+            }
+            if (sizeCycle === "recover6" && rules.aPlusKind(pick.thesis ?? "") === "failed range") {
+              whyNot.push(`${tag} recover — skip plain failed-range`);
               continue;
             }
             const locPx = rules.boxLoc(h4);
