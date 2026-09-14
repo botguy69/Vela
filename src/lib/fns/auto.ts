@@ -2065,6 +2065,22 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const { getWeexPositionQty } = await import("@/lib/weex.server");
         left = await getWeexPositionQty(credsNow, pos.weex_symbol);
       }
+      if (pos.status === "filled" && credsNow && left != null && left > 0 && beLocked && hitTp1Px) {
+        const spec = await specFor(coinByWeex(pos.weex_symbol));
+        const { flattenWeex, cancelWeexProtective } = await import("@/lib/weex.server");
+        await cancelWeexProtective(credsNow, pos.weex_symbol).catch(() => null);
+        const sent = await flattenWeex(credsNow, {
+          symbol: pos.weex_symbol,
+          side: side === "short" ? "BUY" : "SELL",
+          positionSide: side === "short" ? "SHORT" : "LONG",
+          quantity: formatWeexQty(left, spec.quantityPrecision),
+          clientOid: `velabank${pos.id}${Date.now().toString(36)}`.slice(0, 36),
+        });
+        if (sent.ok) {
+          notes.push(`${pos.weex_symbol} banked — through TP1, WEEX take never sat`);
+          left = 0;
+        }
+      }
       if (pos.status === "filled" && credsNow && left != null && left > 0 && !beLocked) {
         const unit = oneRUsd(pos);
         const lastPx = mark || px;
