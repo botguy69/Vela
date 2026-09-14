@@ -39,14 +39,14 @@ export function seatUnits(marginPct: number): number {
   return Math.max(1, Math.round(marginPct / 3));
 }
 
-/** Hard book: 1×12% or 2×6%. Nothing else. */
+/** Hard book: 1×12% (banger only) or 2×6%. Nothing else. */
 export function concentrateMargin(conf: number, freeUnits: number): number {
   const c = Number.isFinite(conf) ? conf : 0;
-  if (freeUnits <= 0 || c < 88) return 0;
-  // Empty / full 4 units → one 12% seat.
-  if (freeUnits >= 4) return 12;
-  // Second ticket only as 6% (needs 2 free units).
-  if (freeUnits >= 2) return 6;
+  if (freeUnits <= 0) return 0;
+  // Empty book → 12% only on a real banger (≥92). Else wait or take 6% path later.
+  if (freeUnits >= 4) return c >= 92 ? 12 : c >= 90 ? 6 : 0;
+  // Second ticket only as 6% same side.
+  if (freeUnits >= 2) return c >= 90 ? 6 : 0;
   return 0;
 }
 
