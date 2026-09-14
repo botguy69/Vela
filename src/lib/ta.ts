@@ -531,7 +531,7 @@ export function shouldLockBreakeven(opts: {
   // Memory first — last may have already left the TP1 print (CYBER 2026-09-13).
   if (opts.tp1Hit) return true;
   if (opts.reduced) return true;
-  if ((opts.mfeR ?? 0) >= 0.8) return true;
+  if ((opts.mfeR ?? 0) >= 0.5) return true;
   if (!(opts.last > 0)) return false;
   const tp1 = opts.targets[0];
   if (tp1 > 0 && (opts.side === "long" ? opts.last >= tp1 * 0.999 : opts.last <= tp1 * 1.001)) return true;
