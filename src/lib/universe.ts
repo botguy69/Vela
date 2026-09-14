@@ -5,7 +5,7 @@ export type AutoCoin = {
   fallbackMax: number;
 };
 
-/** WEEX API-tradable USDT-M perps only (market/apiTradingSymbols). UI-only names scraped. */
+/** WEEX API-tradable crypto perps (market/apiTradingSymbols). No UI-only, no TradFi stocks. */
 export const TOP25: AutoCoin[] = [
   { id: "BTC", weex: "BTCUSDT", name: "Bitcoin", fallbackMax: 400 },
   { id: "ETH", weex: "ETHUSDT", name: "Ether", fallbackMax: 400 },
@@ -136,7 +136,49 @@ export const TOP25: AutoCoin[] = [
   { id: "HMSTR", weex: "HMSTRUSDT", name: "Hamster", fallbackMax: 100 },
   { id: "PAXG", weex: "PAXGUSDT", name: "PAX Gold", fallbackMax: 50 },
   { id: "H", weex: "HUSDT", name: "Humanity", fallbackMax: 75 },
-
+  { id: "APR", weex: "APRUSDT", name: "APR", fallbackMax: 50 },
+  { id: "ASTER", weex: "ASTERUSDT", name: "ASTER", fallbackMax: 100 },
+  { id: "BABY", weex: "BABYUSDT", name: "BABY", fallbackMax: 50 },
+  { id: "BANK", weex: "BANKUSDT", name: "BANK", fallbackMax: 50 },
+  { id: "BIRB", weex: "BIRBUSDT", name: "BIRB", fallbackMax: 50 },
+  { id: "BLESS", weex: "BLESSUSDT", name: "BLESS", fallbackMax: 100 },
+  { id: "BTR", weex: "BTRUSDT", name: "BTR", fallbackMax: 50 },
+  { id: "BTW", weex: "BTWUSDT", name: "BTW", fallbackMax: 50 },
+  { id: "COW", weex: "COWUSDT", name: "COW", fallbackMax: 50 },
+  { id: "CYS", weex: "CYSUSDT", name: "CYS", fallbackMax: 50 },
+  { id: "DOLO", weex: "DOLOUSDT", name: "DOLO", fallbackMax: 50 },
+  { id: "DSYNC", weex: "DSYNCUSDT", name: "DSYNC", fallbackMax: 50 },
+  { id: "DYM", weex: "DYMUSDT", name: "DYM", fallbackMax: 50 },
+  { id: "EVAA", weex: "EVAAUSDT", name: "EVAA", fallbackMax: 50 },
+  { id: "FOLKS", weex: "FOLKSUSDT", name: "FOLKS", fallbackMax: 100 },
+  { id: "HEI", weex: "HEIUSDT", name: "HEI", fallbackMax: 50 },
+  { id: "HOME", weex: "HOMEUSDT", name: "HOME", fallbackMax: 50 },
+  { id: "IN", weex: "INUSDT", name: "IN", fallbackMax: 50 },
+  { id: "IQ", weex: "IQUSDT", name: "IQ", fallbackMax: 100 },
+  { id: "JELLYJELLY", weex: "JELLYJELLYUSDT", name: "JELLYJELLY", fallbackMax: 50 },
+  { id: "KAT", weex: "KATUSDT", name: "KAT", fallbackMax: 50 },
+  { id: "KITE", weex: "KITEUSDT", name: "KITE", fallbackMax: 50 },
+  { id: "LAB", weex: "LABUSDT", name: "LAB", fallbackMax: 50 },
+  { id: "LMWR", weex: "LMWRUSDT", name: "LMWR", fallbackMax: 50 },
+  { id: "LYN", weex: "LYNUSDT", name: "LYN", fallbackMax: 50 },
+  { id: "MEGA", weex: "MEGAUSDT", name: "MEGA", fallbackMax: 50 },
+  { id: "ON", weex: "ONUSDT", name: "ON", fallbackMax: 50 },
+  { id: "PARTI", weex: "PARTIUSDT", name: "PARTI", fallbackMax: 75 },
+  { id: "PIEVERSE", weex: "PIEVERSEUSDT", name: "PIEVERSE", fallbackMax: 50 },
+  { id: "PIPPIN", weex: "PIPPINUSDT", name: "PIPPIN", fallbackMax: 50 },
+  { id: "RAVE", weex: "RAVEUSDT", name: "RAVE", fallbackMax: 50 },
+  { id: "RIVER", weex: "RIVERUSDT", name: "RIVER", fallbackMax: 50 },
+  { id: "SAHARA", weex: "SAHARAUSDT", name: "SAHARA", fallbackMax: 75 },
+  { id: "TAC", weex: "TACUSDT", name: "TAC", fallbackMax: 50 },
+  { id: "TFUEL", weex: "TFUELUSDT", name: "TFUEL", fallbackMax: 50 },
+  { id: "TUT", weex: "TUTUSDT", name: "TUT", fallbackMax: 50 },
+  { id: "UAI", weex: "UAIUSDT", name: "UAI", fallbackMax: 50 },
+  { id: "WLFI", weex: "WLFIUSDT", name: "WLFI", fallbackMax: 100 },
+  { id: "XPIN", weex: "XPINUSDT", name: "XPIN", fallbackMax: 50 },
+  { id: "XPL", weex: "XPLUSDT", name: "XPL", fallbackMax: 100 },
+  { id: "ZAMA", weex: "ZAMAUSDT", name: "ZAMA", fallbackMax: 50 },
+  { id: "ZBT", weex: "ZBTUSDT", name: "ZBT", fallbackMax: 100 },
+  { id: "ZIG", weex: "ZIGUSDT", name: "ZIG", fallbackMax: 50 },
 ];
 
 export const TOP25_WEEX = TOP25.map((c) => c.weex);
