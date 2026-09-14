@@ -12,6 +12,7 @@ export type WeexSpec = {
 type CacheEntry<T> = { at: number; value: T };
 
 let specCache: CacheEntry<Map<string, WeexSpec>> | null = null;
+let apiSymCache: CacheEntry<Set<string>> | null = null;
 const klineCache = new Map<string, CacheEntry<Candle[]>>();
 const pxCache = new Map<string, CacheEntry<number>>();
 
@@ -47,6 +48,25 @@ export async function getWeexSpecs(): Promise<Map<string, WeexSpec>> {
   }
   specCache = { at: now, value: map };
   return map;
+}
+
+
+/** WEEX UI lists ~1k perps; API orders only work on this subset (-1058 otherwise). */
+export async function getApiTradingSymbols(): Promise<Set<string> | null> {
+  const now = Date.now();
+  if (apiSymCache && now - apiSymCache.at < 10 * 60_000) return apiSymCache.value;
+  try {
+    const raw = await fetchJson<unknown>("https://api-contract.weex.com/capi/v3/market/apiTradingSymbols");
+    const list = Array.isArray(raw) ? raw : [];
+    const set = new Set(
+      list.filter((s): s is string => typeof s === "string").map((s) => s.replace(/_/g, "").toUpperCase()),
+    );
+    if (set.size < 50) return apiSymCache?.value ?? null;
+    apiSymCache = { at: now, value: set };
+    return set;
+  } catch {
+    return apiSymCache?.value ?? null;
+  }
 }
 
 export async function specFor(coin: AutoCoin): Promise<WeexSpec> {
