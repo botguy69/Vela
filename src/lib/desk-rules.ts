@@ -1014,7 +1014,7 @@ export function mtfAllows(
   return { ok: true, why: "" };
 }
 
-/** Single take stretch 1.5–2R when 4h has room (user 2026-09-14). */
+/** Structure-aware take in the 1.1–2R band when 4h has room. */
 export function stretchTp(
   side: Side,
   entry: number,
@@ -1026,13 +1026,15 @@ export function stretchTp(
   const stopPct = risk / entry;
   if (stopPct < 0.003 || stopPct > 0.06) return { tp: 0, why: "" };
   const want10 = side === "long" ? entry * 1.1 : entry * 0.9;
-  const min15 = side === "long" ? entry + 1.5 * risk : entry - 1.5 * risk;
-  const min2 = side === "long" ? entry + 2 * risk : entry - 2 * risk;
+  const min11 = side === "long" ? entry + 1.1 * risk : entry - 1.1 * risk;
+  const max2 = side === "long" ? entry + 2 * risk : entry - 2 * risk;
   const closed = closedCandles(fourHour, FOUR_H_MS);
   const bars = closed.length >= 8 ? closed : fourHour;
   if (bars.length < 8) {
     const rr = Math.abs(want10 - entry) / risk;
-    return rr >= 1.5 ? { tp: want10, why: `${rr.toFixed(1)}R stretch` } : { tp: 0, why: "" };
+    if (rr < 1.1) return { tp: 0, why: "" };
+    const tp = side === "long" ? Math.min(want10, max2) : Math.max(want10, max2);
+    return { tp, why: `${(Math.abs(tp - entry) / risk).toFixed(1)}R stretch` };
   }
   const win = bars.slice(-21);
   const sh = Math.max(...win.map((c) => c.high));
@@ -1041,27 +1043,23 @@ export function stretchTp(
   let tp = 0;
   if (side === "long") {
     const cap = sh - 0.15 * a;
-    if (cap - entry < Math.max(1.5 * risk, entry * 0.04)) return { tp: 0, why: "" };
+    if (cap - entry < Math.max(1.1 * risk, entry * 0.03)) return { tp: 0, why: "" };
     tp = Math.min(want10, cap);
-    if (tp < min15 && cap >= min15) tp = min15;
-    if (tp > min2) tp = min2;
+    if (tp < min11) tp = min11;
+    if (tp > max2) tp = max2;
   } else {
     const cap = sl + 0.15 * a;
-    if (entry - cap < Math.max(1.5 * risk, entry * 0.04)) return { tp: 0, why: "" };
+    if (entry - cap < Math.max(1.1 * risk, entry * 0.03)) return { tp: 0, why: "" };
     tp = Math.max(want10, cap);
-    if (tp > min15) tp = min15;
-    if (tp < min2) tp = min2;
+    if (tp > min11) tp = min11;
+    if (tp < max2) tp = max2;
   }
-  let rr = Math.abs(tp - entry) / risk;
-  if (rr < 1.5) return { tp: 0, why: "" };
-  if (rr > 2) {
-    tp = min2;
-    rr = 2;
-  }
+  const rr = Math.abs(tp - entry) / risk;
+  if (rr < 1.1) return { tp: 0, why: "" };
   return { tp, why: `${rr.toFixed(1)}R stretch` };
 }
 
-/** One full-size TP at 1.5–2R. SL→BE after 1R, then wait for the take (user 2026-09-14). */
+/** One full-size TP anywhere 1.1–2R — Vela picks from structure (user 2026-09-14). SL→BE after 1R if take >1R. */
 export function planDeskTargets(
   side: Side,
   entry: number,
@@ -1071,18 +1069,18 @@ export function planDeskTargets(
 ): { target: number; targets: number[]; rr: number; stretchWhy: string } {
   const dist = Math.abs(entry - stop);
   if (!(dist > 0) || !(entry > 0)) {
-    return { target: _orig?.target ?? 0, targets: _orig?.targets ?? [], rr: 1.75, stretchWhy: "" };
+    return { target: _orig?.target ?? 0, targets: _orig?.targets ?? [], rr: 1.5, stretchWhy: "" };
   }
   const stretch = stretchTp(side, entry, stop, fourHour);
+  const r11 = side === "long" ? entry + 1.1 * dist : entry - 1.1 * dist;
   const r15 = side === "long" ? entry + 1.5 * dist : entry - 1.5 * dist;
-  const r175 = side === "long" ? entry + 1.75 * dist : entry - 1.75 * dist;
   const r2 = side === "long" ? entry + 2 * dist : entry - 2 * dist;
-  let tp = stretch.tp > 0 ? stretch.tp : r175;
+  let tp = stretch.tp > 0 ? stretch.tp : r15;
   if (side === "long") {
-    if (tp < r15) tp = r15;
+    if (tp < r11) tp = r11;
     if (tp > r2) tp = r2;
   } else {
-    if (tp > r15) tp = r15;
+    if (tp > r11) tp = r11;
     if (tp < r2) tp = r2;
   }
   const rr = Math.abs(tp - entry) / dist;
