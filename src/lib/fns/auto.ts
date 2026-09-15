@@ -906,16 +906,7 @@ async function ensureTakes(
   const tps = plan.tps;
   const stampSet = async () => {
     const stamp = `${(pos.weex_resp ?? "").replace(/tps:(lock|ok|swept|v3wipe|set|be|miss|clean)@?\d*/g, "").trim()} tps:lock@${Date.now()}`.slice(0, 500);
-    const kept =
-      plan.afterTp1 && planned.length >= 2
-        ? [planned[0]!, tps[0] ?? planned[1]!]
-        : tps.length >= 2
-          ? tps
-          : planned.length >= 2
-            ? planned
-            : planned.length
-              ? [...planned, ...tps]
-              : tps;
+    const kept = tps.length ? tps.slice(0, 1) : planned.slice(0, 1);
     await sql`update auto_signals set weex_resp = ${stamp}, stop = ${stopPx}, targets = ${JSON.stringify(kept)}, updated_at = now() where id = ${pos.id}`;
     pos.weex_resp = stamp;
     pos.stop = stopPx;
