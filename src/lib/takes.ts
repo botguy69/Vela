@@ -250,11 +250,14 @@ export function planTakes(input: {
   const extras = listed.length > 4 || tpRows.length > 1;
   const setAt = Number((/tps:(?:lock|set)@(\d+)/.exec(input.weexResp ?? "") ?? [])[1] ?? 0);
   const recentSet = setAt > 0 && (input.now ?? Date.now()) - setAt < 30 * 60_000;
-  const quiet = recentSet && slRows.length === 1 && tpRows.length >= 1 && !extras;
+  // Quiet only when the SL already matches wanted stop. DOT #2331: recentSet+old SL
+  // below entry kept quiet=true so BE never replaced the real stop.
+  const quiet = recentSet && slOk && tpOk && !extras;
   const noop = quiet || (slOk && tpOk && !extras);
   const wipe = !quiet && (extras || listed.length > 3);
   const beMove = input.stopOverride != null && input.stopOverride > 0 && !slOk;
-  const placeSl = !quiet && stopPx > 0 && (extras || slRows.length !== 1 || !slOk);
+  // Never skip SL replace when stop is wrong — quiet must not block BE moves.
+  const placeSl = stopPx > 0 && (extras || slRows.length !== 1 || !slOk);
   const placeTp = !quiet && (extras || !tpOk);
   const slices = takeQtys(liveQty, 1, quantityPrecision, formatQty);
 

@@ -963,7 +963,11 @@ async function ensureTakes(
   }
   const oid = (tag: string) => `vela${tag}${pos.id}${Date.now().toString(36)}`.slice(0, 36);
   const qtyStr = formatWeexQty(liveQty, spec.quantityPrecision);
-  if (plan.placeSl) {
+  // BE / stopOverride: wipe old protective first so the real SL can't stay below entry.
+  if (beMove || (plan.beMove && stopPx > 0)) {
+    await cancelWeexProtective(creds, pos.weex_symbol, sideLc).catch(() => null);
+  }
+  if (plan.placeSl || beMove) {
     const slSent = await moveWeexStop(creds, {
       symbol: pos.weex_symbol,
       positionSide: side,
@@ -972,6 +976,7 @@ async function ensureTakes(
       clientOid: oid("sl"),
     });
     if (!slSent.ok) notes.push(`${pos.weex_symbol} SL failed: ${slSent.error.slice(0, 80)}`);
+    else if (beMove) notes.push(`${pos.weex_symbol} BE SL sent @ ${stopPx.toFixed(4)}`);
   }
   let ok = plan.wipe ? 0 : listed.filter((r) => /TAKE|PROFIT|^TP$/i.test(r.type)).length;
   if (plan.placeTp) {
