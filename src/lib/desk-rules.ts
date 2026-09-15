@@ -654,7 +654,8 @@ export function depthTooThin(
   asks: [number, number][],
 ): boolean {
   if (!(entry > 0) || !(notional > 0)) return false;
-  const band = entry * 0.002;
+  // 0.5% band — 0.2% was false-thinning liquid alts (ETHFI 2026-09-14).
+  const band = entry * 0.005;
   const levels = side === "long" ? asks : bids;
   let usd = 0;
   for (const [px, qty] of levels) {
@@ -662,7 +663,7 @@ export function depthTooThin(
     if (side === "short" && px < entry - band) continue;
     usd += px * qty;
   }
-  return usd < notional * 2;
+  return usd < notional * 1.25;
 }
 
 export function limitMaxAgeMs(style: Style): number {

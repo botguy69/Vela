@@ -3194,8 +3194,17 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
             }
             const depth = await getBookDepth(pick.weexSymbol);
             if (depth && rules.depthTooThin(sz.side, sz.entry, sz.notional, depth.bids, depth.asks)) {
-              whyNot.push(`${tag} thin book — 1R would walk`);
-              continue;
+              const bt2 = await getBookTicker(pick.weexSymbol);
+              const spreadOk =
+                bt2 != null &&
+                bt2.bid > 0 &&
+                bt2.ask > 0 &&
+                (bt2.ask - bt2.bid) / ((bt2.bid + bt2.ask) / 2) < 0.003;
+              if (!spreadOk) {
+                whyNot.push(`${tag} thin book — 1R would walk`);
+                continue;
+              }
+              // Tight top-of-book — depth band false-thin; allow (ETHFI 2026-09-14).
             }
             ready.push({
               sized: sz,
