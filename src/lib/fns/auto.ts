@@ -3163,13 +3163,19 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.unshift(`${tag} entry into 4h S/R`);
               continue;
             }
-            const timed = trig.wait ? { ...timed1, entryType: "limit" as const } : timed1;
-            // Rebuild (<$500): 15% one-at-a-time. Else conviction 1/2/3.
-            const wantPct = concentrateMargin(timed.confidence ?? conf, freeUnits, sizeCycle);
+            // Size first so A++ / 12% can force market (limits miss rips — ETHFI 2026-09-14).
+            const wantPct = concentrateMargin(timed1.confidence ?? conf, freeUnits, sizeCycle);
             if (!(wantPct > 0) || seatUnits(wantPct) > freeUnits) {
               whyNot.unshift(`${tag} need fat seat (${freeUnits}u free) — skip thin 3%`);
               continue;
             }
+            // A++ / 12%: market only — pullback limits miss the rip (ETHFI cancel).
+            const forceMkt = (timed1.confidence ?? conf) >= 90 || wantPct >= 12;
+            const timed = forceMkt
+              ? { ...timed1, entryType: "market" as const }
+              : trig.wait
+                ? { ...timed1, entryType: "limit" as const }
+                : timed1;
             if (wantPct >= 12) {
               const q = rules.setupQuality(timed.thesis ?? "");
               const stopPct = timed.entry > 0 ? Math.abs(timed.entry - timed.stop) / timed.entry : 1;
