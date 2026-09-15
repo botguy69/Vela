@@ -2055,24 +2055,53 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
         const rawBe = await weexFeeBe(creds, pos.weex_symbol, side, entry);
         const be = feeBePx(side, entry, mark || px, rawBe);
         if (be > 0) {
-          pos.stop = be;
-          pos.be_moved = true;
           const realTp1 = Boolean(pos.tp1_hit) || reduced || hitTp1Now;
           if (realTp1) pos.tp1_hit = true;
-          if (creds) await ensureTakes(pos, notes, creds, be);
-          await sql`
-            update auto_signals
-            set stop = ${be}, be_moved = true, tp1_hit = ${Boolean(pos.tp1_hit)}, updated_at = now()
-            where id = ${pos.id} and user_id = ${userId}
-          `;
-          notes.push(
-            creds
-              ? `${pos.weex_symbol} TP1 · SL → WEEX BE ${be.toFixed(4)}`
-              : `${pos.weex_symbol} TP1 · BE ${be.toFixed(4)} saved — WEEX SL next tick`,
-          );
+          let sat = false;
+          if (creds) {
+            await ensureTakes(pos, notes, creds, be);
+            const { listWeexAlgoRows } = await import("@/lib/weex.server");
+            const rows = await listWeexAlgoRows(creds, pos.weex_symbol).catch(() => []);
+            const { classifyAlgoRows } = await import("@/lib/takes");
+            const { slRows } = classifyAlgoRows(rows, side, mark || px);
+            sat = slRows.some((r) => {
+              const trig = Number(r.trigger ?? 0);
+              if (!(trig > 0)) return false;
+              return side === "long" ? trig >= entry * 0.9995 : trig <= entry * 1.0005;
+            });
+          }
+          if (sat) {
+            pos.stop = be;
+            pos.be_moved = true;
+            await sql`
+              update auto_signals
+              set stop = ${be}, be_moved = true, tp1_hit = ${Boolean(pos.tp1_hit)}, updated_at = now()
+              where id = ${pos.id} and user_id = ${userId}
+            `;
+            notes.push(`${pos.weex_symbol} TP1 · SL sat WEEX BE ${be.toFixed(4)}`);
+          } else {
+            notes.push(`${pos.weex_symbol} BE ${be.toFixed(4)} not on WEEX yet — retry next tick (no fake lock)`);
+          }
         }
       } else if (pos.be_moved) {
-        // Leave the BE stop + runner TP on WEEX. Sweeping/trailing every tick deleted PEPE's SL.
+        // DB said BE — confirm WEEX SL actually sits there. DOT #2331 was fake BE.
+        const credsBe = await credsFrom(settings);
+        if (credsBe) {
+          const { listWeexAlgoRows } = await import("@/lib/weex.server");
+          const rows = await listWeexAlgoRows(credsBe, pos.weex_symbol).catch(() => []);
+          const { classifyAlgoRows } = await import("@/lib/takes");
+          const { slRows } = classifyAlgoRows(rows, side, mark || px);
+          const sat = slRows.some((r) => {
+            const trig = Number(r.trigger ?? 0);
+            if (!(trig > 0)) return false;
+            return side === "long" ? trig >= entry * 0.9995 : trig <= entry * 1.0005;
+          });
+          if (!sat) {
+            notes.push(`${pos.weex_symbol} fake BE — restack SL to BE on WEEX`);
+            const wantBe = n(pos.stop) > entry * 0.999 ? n(pos.stop) : entry;
+            await ensureTakes(pos, notes, credsBe, wantBe);
+          }
+        }
       }
 
       const since = pos.filled_at ?? pos.created_at;
