@@ -2544,10 +2544,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = {
       minConf: Math.max(85, cycleMinConf(sizeCycle)),
-      note:
-        sizeCycle === "recover6"
-          ? "Recover 6%: 91%+ · skip plain failed-range until a win."
-          : "12% until SL · A++ structure · no fades into BTC 1h book.",
+      note: "6% one-at-a-time · 91%+ · skip plain failed-range · win-rate test.",
     };
 
     // Unread only if no key blobs at all. Enc present + soft book [] still hunts.
@@ -2644,11 +2641,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       AT_RISK,
       atRisk.reduce((sum, s) => sum + unitOf(s), 0) || atRiskN,
     );
-    let freeUnits = Math.max(0, AT_RISK - usedUnits);
-    // Fat12 + no live fill: don't let a working limit steal units and force a 6% seat (APT #2330).
-    if (sizeCycle === "fat12" && liveAtRisk === 0 && freeUnits < 4) {
-      freeUnits = AT_RISK;
-    }
+    const freeUnits = Math.max(0, AT_RISK - usedUnits);
     const ticketN = atRisk.length;
     const fatSolo = atRisk.some((s) => unitOf(s) >= 4);
     // 12% seat = whole book. Never add a second ticket beside it.
@@ -2663,14 +2656,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const challengeForce = false;
     const roomN = blocked ? 0 : 1;
     if (!blocked && liveAtRisk >= 1 && atRiskN < AT_RISK) {
-      notes.push(`Seat open (${usedUnits}/${AT_RISK}u). Cycle: ${sizeCycle === "recover6" ? "6% until a win" : "12% until SL"}.`);
+      notes.push(`Seat open (${usedUnits}/${AT_RISK}u). Cycle: 6% one-at-a-time.`);
     }
     if (rebuild) notes.push(`Rebuild — 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd after TP1→BE; until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
       : bookUnread
         ? "No WEEX keys on file — not hunting."
-        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN), { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : sizeCycle === "recover6" ? 6 : 12, universe: huntN });
+        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN), { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 6, universe: huntN });
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -3167,14 +3160,13 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
               whyNot.unshift(`${tag} entry into 4h S/R`);
               continue;
             }
-            // Size first so A++ / 12% can force market (limits miss rips — ETHFI 2026-09-14).
             const wantPct = concentrateMargin(timed1.confidence ?? conf, freeUnits, sizeCycle);
             if (!(wantPct > 0) || seatUnits(wantPct) > freeUnits) {
               whyNot.unshift(`${tag} need fat seat (${freeUnits}u free) — skip thin 3%`);
               continue;
             }
-            // A++ / 12%: market only — pullback limits miss the rip (ETHFI cancel).
-            const forceMkt = (timed1.confidence ?? conf) >= 90 || wantPct >= 12;
+            // A++: market only — pullback limits miss the rip (ETHFI cancel).
+            const forceMkt = (timed1.confidence ?? conf) >= 90;
             const timed = forceMkt
               ? { ...timed1, entryType: "market" as const }
               : trig.wait
@@ -3433,7 +3425,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
           const at2 = riskL + riskS;
           const be2 = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : sizeCycle === "recover6" ? 6 : 12 });
+          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 6 });
           const whyUniq: string[] = [];
           const seenWhy = new Set<string>();
           for (const w of whyNot) {

@@ -10,7 +10,7 @@ export type SizedSetup = RawSetup & {
   stopAccountPct: number;
 };
 
-/** Solo desk: 3% seat unit. Concentrated A++ may take 6/9/12% (2/3/4 seats). */
+/** Solo desk: 3% seat unit. 2026-09-15: 6% one-at-a-time only (win-rate test); no 12%. */
 export function clampRiskPct(raw: number): number {
   if (!Number.isFinite(raw)) return 3;
   return Math.min(12, Math.max(1, raw));
@@ -39,56 +39,39 @@ export function seatUnits(marginPct: number): number {
   return Math.max(1, Math.round(marginPct / 3));
 }
 
-/** 12% until an SL, then 6% until a win, then 12% again. One seat. */
+/** Always 6% one seat (win-rate test from 2026-09-15). fat12 kept only for type compat. */
 export type SizeCycle = "fat12" | "recover6";
 
 export function sizeCycleFromCloses(
-  rows: {
+  _rows: {
     status?: string | null;
     pnl?: number | null;
     close_reason?: string | null;
     weex_symbol?: string | null;
   }[],
 ): SizeCycle {
-  for (const r of rows) {
-    const why = String(r.close_reason ?? "");
-    if (/replaced by|cancelled|ghost|limit never|stale claim|duplicate|off the book/i.test(why)) continue;
-    const pnl = Number(r.pnl);
-    const sym = String(r.weex_symbol ?? "").toUpperCase();
-    const stopped =
-      r.status === "stopped" || /hit stop|^stop\b|stopped out/i.test(why);
-    // After ASTER closes (win/SL/flatten), next seat is 12% until a later non-ASTER SL.
-    if (sym.includes("ASTER")) return "fat12";
-    if (stopped && !(pnl > 0.15)) return "recover6";
-    if (r.status === "targeted" || pnl > 0.15 || /hit tp|targeted|closed in green/i.test(why)) {
-      return "fat12";
-    }
-  }
-  return "fat12"; // off the hop
+  void _rows;
+  return "recover6"; // scrap 12% — 6% only
 }
 
-/** Recover mode: 91%+. Fat 12%: 90%+. */
+/** 6% test: 91%+. */
 export function cycleMinConf(cycle: SizeCycle): number {
-  return cycle === "recover6" ? 91 : 90;
+  void cycle;
+  return 91;
 }
 
 export function concentrateMargin(
   conf: number,
   freeUnits: number,
-  cycle: SizeCycle = "fat12",
+  cycle: SizeCycle = "recover6",
 ): number {
+  void cycle;
   const c = Number.isFinite(conf) ? conf : 0;
-  const floor = cycleMinConf(cycle);
-  if (c < floor) return 0;
-  if (cycle === "recover6") {
-    if (freeUnits >= 2) return 6;
-    return 0;
-  }
-  // Fat cycle = full 12% seat. Never silently fall to 6% when freeUnits is 2
-  // (ghost working limits / partial units) — APT #2330 landed ~6% on a 12% mandate.
-  if (freeUnits >= 2) return 12;
+  if (c < 91) return 0;
+  if (freeUnits >= 2) return 6;
   return 0;
 }
+
 
 
 /** Rebuild 15% ended early 2026-09-09 per user — back to 1/2/3% max. Keep helpers for history. */
