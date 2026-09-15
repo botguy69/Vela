@@ -2578,7 +2578,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const ledger = await ticketLedger(sql, userId, settings.stats_from);
     const bar = {
       minConf: Math.max(85, cycleMinConf(sizeCycle)),
-      note: "6% one-at-a-time · 91%+ · skip plain failed-range · win-rate test.",
+      note: "3% one-at-a-time · 91%+ · skip plain failed-range.",
     };
 
     // Unread only if no key blobs at all. Enc present + soft book [] still hunts.
@@ -2690,14 +2690,14 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
     const challengeForce = false;
     const roomN = blocked ? 0 : 1;
     if (!blocked && liveAtRisk >= 1 && atRiskN < AT_RISK) {
-      notes.push(`Seat open (${usedUnits}/${AT_RISK}u). Cycle: 6% one-at-a-time.`);
+      notes.push(`Seat open (${usedUnits}/${AT_RISK}u). Cycle: 3% one-at-a-time.`);
     }
     if (rebuild) notes.push(`Rebuild — 1×${REBUILD_MARGIN_PCT}% at-risk; 2nd after TP1→BE; until $${REBUILD_EQUITY_USD}`);
     const huntStatus = !settings.armed
       ? "Disarmed. Not hunting."
       : bookUnread
         ? "No WEEX keys on file — not hunting."
-        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN), { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 6, universe: huntN });
+        : huntHeader(riskL, riskS, beNLive, Math.max(liveN.length, seatN), { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3, universe: huntN });
     notes.push(
       `WEEX ${riskL}L/${riskS}S: ${
         liveN.length
@@ -3459,7 +3459,7 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
           }
           const at2 = riskL + riskS;
           const be2 = liveN.filter((p) => beFree.has(p.symbol.replace(/_/g, "").toUpperCase())).length;
-          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 6 });
+          const huntNow = huntHeader(riskL, riskS, be2, liveN.length + opened, { atRiskCap: AT_RISK, liveCap: LIVE_CAP, rebuild, marginPct: rebuild ? REBUILD_MARGIN_PCT : 3 });
           const whyUniq: string[] = [];
           const seenWhy = new Set<string>();
           for (const w of whyNot) {
