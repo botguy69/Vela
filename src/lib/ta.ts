@@ -528,12 +528,15 @@ export function shouldLockBreakeven(opts: {
   tp1Hit?: boolean;
 }): boolean {
   if (opts.already || opts.entry <= 0 || !(opts.stop > 0)) return false;
-  // Memory first — last may have already left the TP1 print (CYBER 2026-09-13).
-  if (opts.tp1Hit) return true;
-  if (opts.reduced) return true;
-  // Never BE on 0.5R — PYTH 2026-09-13 got SL-to-BE then wicked out before TP1.
+  // Never BE on 0.5R — PYTH 2026-09-13. Lock at 1R, then wait for the 1.5–2R take.
   if (!(opts.last > 0)) return false;
-  const tp1 = opts.targets[0];
-  if (tp1 > 0 && (opts.side === "long" ? opts.last >= tp1 * 0.999 : opts.last <= tp1 * 1.001)) return true;
+  const risk = Math.abs(opts.entry - opts.stop);
+  if (!(risk > 0)) return false;
+  const mfe =
+    opts.mfeR != null && Number.isFinite(opts.mfeR)
+      ? opts.mfeR
+      : (opts.side === "long" ? opts.last - opts.entry : opts.entry - opts.last) / risk;
+  if (mfe >= 0.99) return true;
+  if (opts.tp1Hit) return true;
   return false;
 }
