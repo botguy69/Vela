@@ -2644,7 +2644,11 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
       AT_RISK,
       atRisk.reduce((sum, s) => sum + unitOf(s), 0) || atRiskN,
     );
-    const freeUnits = Math.max(0, AT_RISK - usedUnits);
+    let freeUnits = Math.max(0, AT_RISK - usedUnits);
+    // Fat12 + no live fill: don't let a working limit steal units and force a 6% seat (APT #2330).
+    if (sizeCycle === "fat12" && liveAtRisk === 0 && freeUnits < 4) {
+      freeUnits = AT_RISK;
+    }
     const ticketN = atRisk.length;
     const fatSolo = atRisk.some((s) => unitOf(s) >= 4);
     // 12% seat = whole book. Never add a second ticket beside it.
