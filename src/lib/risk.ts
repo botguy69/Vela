@@ -10,7 +10,7 @@ export type SizedSetup = RawSetup & {
   stopAccountPct: number;
 };
 
-/** Solo desk: 3% seat unit. 2026-09-15: 6% one-at-a-time only (win-rate test); no 12%. */
+/** Solo desk: 3% one-at-a-time (user 2026-09-15). Max lev always. */
 export function clampRiskPct(raw: number): number {
   if (!Number.isFinite(raw)) return 3;
   return Math.min(12, Math.max(1, raw));
@@ -39,7 +39,7 @@ export function seatUnits(marginPct: number): number {
   return Math.max(1, Math.round(marginPct / 3));
 }
 
-/** Always 6% one seat (win-rate test from 2026-09-15). fat12 kept only for type compat. */
+/** Always 3% one seat (user 2026-09-15). fat12/recover6 kept for type compat. */
 export type SizeCycle = "fat12" | "recover6";
 
 export function sizeCycleFromCloses(
@@ -51,10 +51,10 @@ export function sizeCycleFromCloses(
   }[],
 ): SizeCycle {
   void _rows;
-  return "recover6"; // scrap 12% — 6% only
+  return "recover6";
 }
 
-/** 6% test: 91%+. */
+/** 3% one-at-a-time: 91%+. */
 export function cycleMinConf(cycle: SizeCycle): number {
   void cycle;
   return 91;
@@ -68,7 +68,7 @@ export function concentrateMargin(
   void cycle;
   const c = Number.isFinite(conf) ? conf : 0;
   if (c < 91) return 0;
-  if (freeUnits >= 2) return 6;
+  if (freeUnits >= 1) return 3;
   return 0;
 }
 
