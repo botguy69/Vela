@@ -176,7 +176,7 @@ export function planTakes(input: {
     afterTp1: false,
     throughTp1: false,
     tps: [],
-    wantTp: 2,
+    wantTp: 1,
     slOk: false,
     tpOk: false,
     extras: false,
@@ -220,53 +220,28 @@ export function planTakes(input: {
     if (!force && mark > 0 && taggedTake(side, mark, px)) return;
     tps.push(px);
   };
+  // Full bank at 1.1R — no runner (user 2026-09-14).
   if (entryPx > 0 && r1 > 0) {
-    const t1 = side === "short" ? entryPx - r1 : entryPx + r1;
-    const twoR = side === "short" ? entryPx - 2 * r1 : entryPx + 2 * r1;
-    const gapOk = (a: number, b: number) => Math.abs(a - b) >= 0.8 * r1;
-    const plannedFar = planned.find((p) => gapOk(p, t1));
-    let t2 = plannedFar && plannedFar > 0 && gapOk(plannedFar, t1) ? plannedFar : twoR;
-    if (side === "short" ? t2 >= t1 : t2 <= t1) t2 = twoR;
-    if (!gapOk(t2, t1)) t2 = twoR;
-    if (afterTp1) {
-      if (!(mark > 0 && taggedTake(side, mark, t2))) pushTp(t2, true);
-    } else {
-      pushTp(t1, true);
-      pushTp(t2, true);
-    }
+    const t1 = planned[0] > 0 ? planned[0]! : side === "short" ? entryPx - 1.1 * r1 : entryPx + 1.1 * r1;
+    if (!(mark > 0 && taggedTake(side, mark, t1))) pushTp(t1, true);
   }
 
   const { slRows, tpRows } = classifyAlgoRows(listed, side, mark);
   const slOk = slRows.length === 1 && (stopPx <= 0 || slRows.some((r) => near(r.trigger, stopPx)));
-  const wantTp = afterTp1 ? 1 : 2;
-  const runnerPx = afterTp1 ? tps[0] ?? planned[1] ?? 0 : 0;
-  const runnerLive =
-    afterTp1 &&
-    tpRows.some(
-      (r) =>
-        mark > 0 &&
-        (side === "long" ? r.trigger > mark : r.trigger < mark) &&
-        (runnerPx <= 0 || near(r.trigger, runnerPx) || (planned[1] != null && near(r.trigger, planned[1]))),
-    );
-  const distinctTp = tpRows.filter(
-    (r, i) => !tpRows.slice(0, i).some((o) => near(o.trigger, r.trigger)),
-  ).length;
-  const collapsed = !afterTp1 && tpRows.length >= 1 && distinctTp < 2;
-  const tpOk = afterTp1 ? Boolean(runnerLive) : tpRows.length >= 2 && !collapsed;
-  const extras = listed.length > 4;
+  const wantTp = 1;
+  const runnerLive = false;
+  const collapsed = false;
+  const tpOk = tpRows.length >= 1 && tps.every((px) => tpRows.some((r) => near(r.trigger, px)));
+  const extras = listed.length > 4 || tpRows.length > 1;
   const setAt = Number((/tps:(?:lock|set)@(\d+)/.exec(input.weexResp ?? "") ?? [])[1] ?? 0);
   const recentSet = setAt > 0 && (input.now ?? Date.now()) - setAt < 30 * 60_000;
-  const quiet =
-    recentSet &&
-    slRows.length === 1 &&
-    tpRows.length >= (afterTp1 ? 1 : 2) &&
-    !collapsed;
+  const quiet = recentSet && slRows.length === 1 && tpRows.length >= 1 && !extras;
   const noop = quiet || (slOk && tpOk && !extras);
   const wipe = !quiet && (extras || listed.length > 3);
   const beMove = input.stopOverride != null && input.stopOverride > 0 && !slOk;
   const placeSl = !quiet && stopPx > 0 && (extras || slRows.length !== 1 || !slOk);
   const placeTp = !quiet && (extras || !tpOk);
-  const slices = takeQtys(liveQty, afterTp1 ? 1 : 2, quantityPrecision, formatQty);
+  const slices = takeQtys(liveQty, 1, quantityPrecision, formatQty);
 
   return {
     afterTp1,

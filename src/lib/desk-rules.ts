@@ -1054,42 +1054,24 @@ export function stretchTp(
   return { tp, why: `${rr.toFixed(1)}R stretch` };
 }
 
-/** Desk place path: TP1 at >=1R, TP2 stretch (min 2R) or 2R fallback. */
+/** Desk place path: full size at TP1 = 1.1R. No runner (user 2026-09-14). */
 export function planDeskTargets(
   side: Side,
   entry: number,
   stop: number,
-  fourHour: Candle[],
+  _fourHour: Candle[],
   orig?: { target?: number; targets?: number[] },
 ): { target: number; targets: number[]; rr: number; stretchWhy: string } {
   const dist = Math.abs(entry - stop);
   if (!(dist > 0) || !(entry > 0)) {
-    return { target: orig?.target ?? 0, targets: orig?.targets ?? [], rr: 1, stretchWhy: "" };
+    return { target: orig?.target ?? 0, targets: orig?.targets ?? [], rr: 1.1, stretchWhy: "" };
   }
-  const stretch = stretchTp(side, entry, stop, fourHour);
-  const r1 = side === "long" ? entry + dist : entry - dist;
-  const r2 = side === "long" ? entry + 2 * dist : entry - 2 * dist;
-  const origTp1 = (orig?.targets && orig.targets[0]) || orig?.target || 0;
-  const origTp2 = orig?.targets && orig.targets[1];
-  const tp1 =
-    origTp1 > 0
-      ? side === "long"
-        ? Math.max(origTp1, r1)
-        : Math.min(origTp1, r1)
-      : r1;
-  const tp2 =
-    stretch.tp > 0
-      ? stretch.tp
-      : origTp2 && origTp2 > 0
-        ? side === "long"
-          ? Math.max(origTp2, r2)
-          : Math.min(origTp2, r2)
-        : r2;
+  const tp1 = side === "long" ? entry + 1.1 * dist : entry - 1.1 * dist;
   return {
     target: tp1,
-    targets: [tp1, tp2],
-    rr: Math.abs(tp2 - entry) / dist,
-    stretchWhy: stretch.why,
+    targets: [tp1],
+    rr: 1.1,
+    stretchWhy: "full 1.1R",
   };
 }
 
