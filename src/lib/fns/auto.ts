@@ -3182,8 +3182,8 @@ async function executeAutoTickBody(userId: string): Promise<{ opened: number; cl
                 whyNot.unshift(`${tag} 12% needs 1–2% stop (got ${(stopPct * 100).toFixed(2)}%)`);
                 continue;
               }
-              if (rr < 2) {
-                whyNot.unshift(`${tag} 12% needs ≥2R (got ${rr.toFixed(1)}R)`);
+              if (rr < 1.5) {
+                whyNot.unshift(`${tag} 12% needs ≥1.5R (got ${rr.toFixed(1)}R)`);
                 continue;
               }
             }
