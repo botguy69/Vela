@@ -84,8 +84,9 @@ export function concentrateMargin(
     if (freeUnits >= 2) return 6;
     return 0;
   }
-  if (freeUnits >= 4) return 12;
-  if (freeUnits >= 2) return 6;
+  // Fat cycle = full 12% seat. Never silently fall to 6% when freeUnits is 2
+  // (ghost working limits / partial units) — APT #2330 landed ~6% on a 12% mandate.
+  if (freeUnits >= 2) return 12;
   return 0;
 }
 
