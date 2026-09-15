@@ -202,7 +202,7 @@ export function planTakes(input: {
       : planned[0] && entryPx > 0
         ? Math.abs(planned[0] - entryPx)
         : entryPx * 0.008;
-  // 1R progress → BE path. Far take stays on the book (1.5–2R).
+  // 1R progress → BE path. Single take stays on the book (1.1–2R).
   const oneRPx = entryPx > 0 && r1 > 0 ? (side === "short" ? entryPx - r1 : entryPx + r1) : 0;
   const through1R = mark > 0 && oneRPx > 0 && taggedTake(side, mark, oneRPx);
   const throughTp1 = through1R;
@@ -221,21 +221,21 @@ export function planTakes(input: {
     tps.push(px);
   };
   // Full bank at 1.1R — no runner (user 2026-09-14).
-  // One full-size take at 1.5–2R (planned). Not a 1.1R bank.
+  // One full-size take 1.1–2R (planned / structure).
   if (entryPx > 0 && r1 > 0) {
     let tFar =
       planned[0] > 0
         ? planned[0]!
         : side === "short"
-          ? entryPx - 1.75 * r1
-          : entryPx + 1.75 * r1;
-    const min15 = side === "short" ? entryPx - 1.5 * r1 : entryPx + 1.5 * r1;
+          ? entryPx - 1.5 * r1
+          : entryPx + 1.5 * r1;
+    const min11 = side === "short" ? entryPx - 1.1 * r1 : entryPx + 1.1 * r1;
     const max2 = side === "short" ? entryPx - 2 * r1 : entryPx + 2 * r1;
     if (side === "long") {
-      if (tFar < min15) tFar = min15;
+      if (tFar < min11) tFar = min11;
       if (tFar > max2) tFar = max2;
     } else {
-      if (tFar > min15) tFar = min15;
+      if (tFar > min11) tFar = min11;
       if (tFar < max2) tFar = max2;
     }
     if (!(mark > 0 && taggedTake(side, mark, tFar))) pushTp(tFar, true);

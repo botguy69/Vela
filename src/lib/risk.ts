@@ -130,12 +130,12 @@ export function sizeSetup(
   const qty = notional / setup.entry;
   const stopDist = Math.abs(setup.entry - setup.stop);
   const stopPct = setup.entry > 0 && stopDist > 0 ? stopDist / setup.entry : 0;
-  // Fat 12% seats: stop 1–2% of price + ≥1.5R (single take 1.5–2R).
+  // Fat 12% seats: stop 1–2% of price + ≥1.1R (single take 1.1–2R).
   // 6% seats: allow stop up to 2% (was 1.8%) so A++ with slightly wide structure still sizes.
   if (alloc >= 10) {
     if (stopPct < 0.01 || stopPct > 0.02) return null;
     const rr = stopDist > 0 ? Math.abs(setup.target - setup.entry) / stopDist : 0;
-    if (!(rr >= 1.5)) return null;
+    if (!(rr >= 1.1)) return null;
   } else if (stopPct > 0.02) {
     return null;
   }
