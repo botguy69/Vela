@@ -509,15 +509,10 @@ export function mixAllows(
   if (same >= 2) return { ok: false, why: "2 same-side cap" };
   const against = heat !== "chop" && pickSide !== heat;
   if (against) {
-    // 2026-09-14: no fades into a directional BTC 1h book (bid-tape short string bled the book).
-    if (heat === "long" && pickSide === "short") {
-      return { ok: false, why: "no short fades into BTC 1h bid" };
-    }
-    if (heat === "short" && pickSide === "long") {
-      return { ok: false, why: "no long fades into BTC 1h offer" };
-    }
+    // 2026-09-15: hard BTC-1h fade ban was blocking every A++ long while BTC offered.
+    // Allow one against-book seat at 91%+ with real fade-at-extreme structure (no stack).
     if (same >= 1) return { ok: false, why: "no stacked fades vs BTC 1h" };
-    if (conf < 90) return { ok: false, why: "fade vs BTC needs >=90" };
+    if (conf < 91) return { ok: false, why: "fade vs BTC needs >=91" };
     if (!fadeAtExtreme(thesis, pickSide)) return { ok: false, why: "not a real fade vs BTC 1h" };
   }
   return { ok: true, why: against ? "one fade vs BTC 1h" : "coin 4h box" };
